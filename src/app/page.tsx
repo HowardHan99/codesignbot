@@ -1,7 +1,7 @@
 import React from 'react';
 import {Board, StickyNoteItem, FrameItem} from '@mirohq/miro-api';
 import initMiroAPI from '../utils/initMiroAPI';
-import { BoardDisplay } from '../components/BoardDisplay';
+import { MainBoard } from '../components/MainBoard';
 import '../assets/style.css';
 
 const getBoards = async () => {
@@ -90,8 +90,7 @@ export default async function Page() {
   
   return (
     <div>
-      <h3>API usage demo</h3>
-      <p className="p-small">API Calls need to be authenticated</p>
+      <h3>Co-Design Agent</h3>
       <p>
         Apps that use the API usually would run on your own domain. During
         development, test on http://localhost:3000
@@ -101,7 +100,7 @@ export default async function Page() {
           Login
         </a>
       ) : (
-        <BoardDisplay boards={boards} stickyNotes={stickyNotes} />
+        <MainBoard boards={boards} stickyNotes={stickyNotes} />
       )}
     </div>
   );

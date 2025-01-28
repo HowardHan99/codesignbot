@@ -1,7 +1,6 @@
 'use client';
 import React, { useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { SendtoBoard } from './SendtoBoard';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
@@ -17,7 +16,7 @@ interface BoardDisplayProps {
   stickyNotes: string[];
 }
 
-export function BoardDisplay({ boards, stickyNotes }: BoardDisplayProps) {
+export function MainBoard({ boards, stickyNotes }: BoardDisplayProps) {
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [gptResponses, setGptResponses] = useState<string[]>([]);
@@ -56,7 +55,7 @@ export function BoardDisplay({ boards, stickyNotes }: BoardDisplayProps) {
           <li key={stickyNote}>{stickyNote}</li>
         ))}
       </ul>
-      <div style={{ marginBottom: '20px' }}>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
         <button 
           className="button button-primary"
           onClick={handleAnalysisClick}
@@ -66,20 +65,13 @@ export function BoardDisplay({ boards, stickyNotes }: BoardDisplayProps) {
            showAnalysis ? 'Hide Analysis' : 'Analyze Sticky Notes'}
         </button>
       </div>
-      {showAnalysis && stickyNotes && (
-        <div>
-          <AntagoInteract 
-            stickyNotes={stickyNotes} 
-            onComplete={onAnalysisComplete}
-            onResponsesUpdate={handleResponsesUpdate}
-          />
-          {gptResponses && gptResponses.length > 0 && !isAnalyzing && (
-            <div style={{ marginTop: '20px' }}>
-              <SendtoBoard responses={gptResponses} />
-            </div>
-          )}
-        </div>
-      )}
+      {showAnalysis && stickyNotes && 
+        <AntagoInteract 
+          stickyNotes={stickyNotes} 
+          onComplete={onAnalysisComplete}
+          onResponsesUpdate={handleResponsesUpdate}
+        />
+      }
     </>
   );
 } 

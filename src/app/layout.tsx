@@ -25,11 +25,10 @@ export default function RootLayout({children}: PropsWithChildren) {
               <p>You've just created your first Miro app!</p>
             </div> */}
             <div className="cs1 ce12">
-              <SendtoBoard responses={[]} />
             </div>
-            <hr className="cs1 ce12" />
-            <hr className="cs1 ce12" />
-            <div className="cs1 ce12">
+            {/* <hr className="cs1 ce12" />
+            <hr className="cs1 ce12" /> */}
+            {/* <div className="cs1 ce12">
               <p>
                 To explore more and build your own app, see the Miro Developer
                 Platform documentation.
@@ -41,7 +40,7 @@ export default function RootLayout({children}: PropsWithChildren) {
               >
                 Read the documentation
               </a>
-            </div>
+            </div> */}
           </div>
         </div>
       </body>

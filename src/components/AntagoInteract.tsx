@@ -1,5 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
+import { SendtoBoard } from './SendtoBoard';
 
 interface AntagoInteractProps {
   stickyNotes: string[];
@@ -42,7 +43,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             },
             body: JSON.stringify({
               userPrompt: note,
-              systemPrompt: "The user is making some design decision, please provide a antagnoistic response that shows the user the problems with their decision that are also constructive and helpful. Show your response in a way that is easy to understand and follow. You can use markdown or bullet points."
+              systemPrompt: "The user is making some design decisions, please provide a antagnoistic response that shows the user the problems with their decision that are also constructive and helpful. You can use response such as the decision while benificial to some group of people, might bring problems to other group of people that the  users didn't consider. Show your response in a way that is easy to understand and follow. You can use markdown or bullet points."
             }),
           });
           
@@ -103,6 +104,11 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               <p><strong>Response:</strong> {response}</p>
             </div>
           ))}
+          {responses.length > 0 && (
+            <div style={{ marginTop: '20px' }}>
+              <SendtoBoard responses={responses} />
+            </div>
+          )}
         </>
       )}
     </div>
