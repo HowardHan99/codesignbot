@@ -1,7 +1,7 @@
 import React from 'react';
-import {Board} from '@mirohq/miro-api';
-
+import {Board, StickyNoteItem, FrameItem} from '@mirohq/miro-api';
 import initMiroAPI from '../utils/initMiroAPI';
+import { BoardDisplay } from '../components/BoardDisplay';
 import '../assets/style.css';
 
 const getBoards = async () => {
@@ -21,14 +21,73 @@ const getBoards = async () => {
     boards.push(board);
   }
 
+  // Serialize board data
+  const serializedBoards = boards.map(board => ({
+    id: board.id,
+    name: board.name
+  }));
+
   return {
-    boards,
+    boards: serializedBoards,
   };
+};
+
+const getStickyNotesContent = async (boardId: string) => {
+  const { miro, userId } = initMiroAPI();
+
+  // Ensure the user is authorized
+  if (!userId || !(await miro.isAuthorized(userId))) {
+    throw new Error('User is not authorized');
+  }
+
+  const api = miro.as(userId);
+
+  try {
+    const board = await api.getBoard(boardId);
+    const stickyNotes: string[] = [];
+    let designFrameId: string | null = null;
+
+    // First pass: find the Design-Decision frame
+    for await (const item of board.getAllItems()) {
+      if (
+        item instanceof FrameItem && 
+        item.data?.title === 'Design-Decision'
+      ) {
+        designFrameId = item.id;
+        break;
+      }
+    }
+
+    if (!designFrameId) {
+      console.log('No Design-Decision frame found');
+      return [];
+    }
+
+    // Second pass: collect sticky notes within the frame
+    for await (const item of board.getAllItems()) {
+      if (
+        item instanceof StickyNoteItem && 
+        item.parent?.id === designFrameId
+      ) {
+        const content = item.data?.content || '';
+        stickyNotes.push(content.replace(/<p>/g, '').replace(/<\/p>/g, ''));
+      }
+    }
+
+    return stickyNotes;
+  } catch (error) {
+    console.error('Error fetching sticky notes:', error);
+    throw error;
+  }
 };
 
 export default async function Page() {
   const {boards, authUrl} = await getBoards();
-
+  if (!boards) {
+    return <div>No boards found</div>;
+  }
+  const stickyNotes = await getStickyNotesContent(boards[0].id);
+  
   return (
     <div>
       <h3>API usage demo</h3>
@@ -42,15 +101,7 @@ export default async function Page() {
           Login
         </a>
       ) : (
-        <>
-          <p>This is a list of all the boards that your user has access to:</p>
-
-          <ul>
-            {boards?.map((board) => (
-              <li key={board.name}>{board.name}</li>
-            ))}
-          </ul>
-        </>
+        <BoardDisplay boards={boards} stickyNotes={stickyNotes} />
       )}
     </div>
   );

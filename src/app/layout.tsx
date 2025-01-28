@@ -3,7 +3,7 @@ import Image from 'next/image';
 import Script from 'next/script';
 
 import congratulations from '../assets/congratulations.png';
-import {SDKUsageDemo} from '../components/SDKUsageDemo';
+import {SendtoBoard} from '../components/SendtoBoard';
 import {MiroSDKInit} from '../components/SDKInit';
 
 export default function RootLayout({children}: PropsWithChildren) {
@@ -17,16 +17,17 @@ export default function RootLayout({children}: PropsWithChildren) {
         <MiroSDKInit />
         <div id="root">
           <div className="grid">
-            <div className="cs1 ce12">
+          <div className="cs1 ce12">{children}</div>
+
+            {/* <div className="cs1 ce12">
               <Image src={congratulations} alt="" />
               <h1>Congratulations!</h1>
               <p>You've just created your first Miro app!</p>
-            </div>
+            </div> */}
             <div className="cs1 ce12">
-              <SDKUsageDemo />
+              <SendtoBoard responses={[]} />
             </div>
             <hr className="cs1 ce12" />
-            <div className="cs1 ce12">{children}</div>
             <hr className="cs1 ce12" />
             <div className="cs1 ce12">
               <p>
