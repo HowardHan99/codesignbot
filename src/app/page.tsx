@@ -1,7 +1,7 @@
 import React from 'react';
 import {Board, StickyNoteItem, FrameItem} from '@mirohq/miro-api';
 import initMiroAPI from '../utils/initMiroAPI';
-import { MainBoard } from '../components/MainBoard';
+import { BoardDisplay } from '../components/BoardDisplay';
 import '../assets/style.css';
 
 const getBoards = async () => {
@@ -100,7 +100,7 @@ export default async function Page() {
           Login
         </a>
       ) : (
-        <MainBoard boards={boards} stickyNotes={stickyNotes} />
+        <BoardDisplay boards={boards} stickyNotes={stickyNotes} />
       )}
     </div>
   );

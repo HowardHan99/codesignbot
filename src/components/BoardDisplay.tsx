@@ -44,13 +44,13 @@ export function BoardDisplay({ boards, stickyNotes }: BoardDisplayProps) {
 
   return (
     <>
-      <p>This is a list of all the boards that your user has access to:</p>
+      {/* <p>This is a list of all the boards that your user has access to:</p>
       <ul>
         {boards?.map((board) => (
           <li key={board.id}>{board.name}</li>
         ))}
-      </ul>
-      <p>This is a list of all the sticky notes that your user has access to:</p>
+      </ul> */}
+      <p>This is a list of all the design decisions that you have made:</p>
       <ul>
         {stickyNotes?.map((stickyNote) => (
           <li key={stickyNote}>{stickyNote}</li>
@@ -73,11 +73,6 @@ export function BoardDisplay({ boards, stickyNotes }: BoardDisplayProps) {
             onComplete={onAnalysisComplete}
             onResponsesUpdate={handleResponsesUpdate}
           />
-          {gptResponses && gptResponses.length > 0 && !isAnalyzing && (
-            <div style={{ marginTop: '20px' }}>
-              <SendtoBoard responses={gptResponses} />
-            </div>
-          )}
         </div>
       )}
     </>

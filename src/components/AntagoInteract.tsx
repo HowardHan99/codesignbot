@@ -1,6 +1,12 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { SendtoBoard } from './SendtoBoard';
+import ResponseStore from '../utils/responseStore';
+
+interface StickyNote {
+  id: string;
+  content: string;
+}
 
 interface AntagoInteractProps {
   stickyNotes: string[];
@@ -14,78 +20,102 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   onResponsesUpdate 
 }) => {
   const [responses, setResponses] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);  // Start with loading true
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const responseStore = ResponseStore.getInstance();
 
-  useEffect(() => {
-    let isMounted = true;
+  const generateResponse = async (note: string, previousResponse?: string) => {
+    const response = await fetch('/api/openaiwrap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userPrompt: note,
+        systemPrompt: `The user is making some design decisions, please provide an antagonistic response that shows the user the problems with their decision that are also constructive and helpful. You can use response such as the decision while beneficial to some group of people, might bring problems to other group of people that the users didn't consider. Format your response as a list of points, with each main point separated by ** **. Do not use ** ** within a point itself. Example format: 'Point 1 explanation here ** ** Point 2 explanation here ** ** Point 3 explanation here'. Limit to 3 points.${
+          previousResponse ? `\n\nPrevious response for reference: ${previousResponse}` : ''
+        }`
+      }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    if (data.error) {
+      throw new Error(data.error);
+    }
 
-    const processNotes = async () => {
-      if (!stickyNotes.length) {
-        if (isMounted) {
-          setLoading(false);
-        }
-        return;
-      }
+    return data.response.replace(/•/g, '**').replace(/\n/g, ' ** ');
+  };
 
-      const newResponses = [];
+  // Split response into separate points
+  const splitResponse = (response: string): string[] => {
+    return response.split('**').map(point => point.trim()).filter(point => point.length > 0);
+  };
+
+  const processNotes = useCallback(async () => {
+    if (!stickyNotes.length) {
+      setLoading(false);
+      return;
+    }
+
+    const newResponses = [];
+    const splitResponses = [];
+    
+    try {
+      console.log('Starting to process notes:', stickyNotes);
       
-      try {
-        console.log('Starting to process notes:', stickyNotes);
+      for (let i = 0; i < stickyNotes.length; i++) {
+        const noteContent = stickyNotes[i];
+        const noteId = `note-${i}`; // Create a simple ID for storage
         
-        for (const note of stickyNotes) {
-          if (!isMounted) return;
+        // Check if content has changed
+        const hasChanged = responseStore.hasContentChanged(noteId, noteContent);
+        const storedResponse = responseStore.getStoredResponse(noteId);
+        
+        let response;
+        if (hasChanged) {
+          // Generate new response considering previous response
+          response = await generateResponse(noteContent, storedResponse?.response);
+          // Store the new response
+          responseStore.storeResponse(noteId, noteContent, response);
+        } else {
+          // Use stored response
+          response = storedResponse!.response;
+        }
 
-          const response = await fetch('/api/openaiwrap', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              userPrompt: note,
-              systemPrompt: "The user is making some design decisions, please provide a antagnoistic response that shows the user the problems with their decision that are also constructive and helpful. You can use response such as the decision while benificial to some group of people, might bring problems to other group of people that the  users didn't consider. Show your response in a way that is easy to understand and follow. You can use markdown or bullet points."
-            }),
-          });
-          
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          
-          const data = await response.json();
-          console.log('Received response:', data);
-          
-          if (data.error) {
-            throw new Error(data.error);
-          }
-          newResponses.push(data.response);
-        }
-        
-        if (isMounted) {
-          console.log('All notes processed, setting responses:', newResponses);
-          setResponses(newResponses);
-          onResponsesUpdate?.(newResponses);
-          onComplete?.();
-          setLoading(false);
-        }
-        
-      } catch (error) {
-        console.error('Error processing sticky notes:', error);
-        if (isMounted) {
-          setError('Failed to process sticky notes. Please try again.');
-          onComplete?.();
-          setLoading(false);
-        }
+        newResponses.push(response);
+        // Split each response into points and store them
+        splitResponses.push(...splitResponse(response));
       }
-    };
+      
+      console.log('All notes processed, setting responses:', newResponses);
+      setResponses(newResponses);
+      onResponsesUpdate?.(splitResponses); // Pass split responses to parent
+      onComplete?.();
+      setLoading(false);
+      
+    } catch (error) {
+      console.error('Error processing sticky notes:', error);
+      setError('Failed to process sticky notes. Please try again.');
+      onComplete?.();
+      setLoading(false);
+    }
+  }, [stickyNotes, onComplete, onResponsesUpdate]);
 
+  // Process notes when they change
+  useEffect(() => {
     processNotes();
+  }, [processNotes]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [stickyNotes]); // Only depend on stickyNotes
-
-  console.log('Rendering with state:', { loading, error, responses });
+  const handleRefresh = async () => {
+    setLoading(true);
+    setError(null);
+    responseStore.clear(); // Clear stored responses to force regeneration
+    await processNotes();
+  };
 
   if (error) {
     return <div className="error-message">{error}</div>;
@@ -97,18 +127,25 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         <div>Processing sticky notes...</div>
       ) : (
         <>
-          <h2>AI Responses to Sticky Notes</h2>
-          {responses.map((response, index) => (
-            <div key={index} className="response-pair">
-              <p><strong>Sticky Note:</strong> {stickyNotes[index]}</p>
-              <p><strong>Response:</strong> {response}</p>
-            </div>
-          ))}
-          {responses.length > 0 && (
-            <div style={{ marginTop: '20px' }}>
-              <SendtoBoard responses={responses} />
-            </div>
-          )}
+          <div style={{ marginBottom: '20px' }}>
+            <h2>Antagonistic Points</h2>
+            {responses.map((response, index) => (
+              <div key={index} className="response-pair" style={{ marginBottom: '20px', padding: '10px', border: '1px solid #ddd', borderRadius: '4px' }}>
+                <p><strong>Original Note:</strong> {stickyNotes[index]}</p>
+                <p><strong>Response Points:</strong></p>
+                <ul>
+                  {splitResponse(response).map((point, pointIndex) => (
+                    <li key={pointIndex} style={{ marginLeft: '20px', marginBottom: '5px' }}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            {responses.length > 0 && (
+              <SendtoBoard responses={responses.flatMap(response => splitResponse(response))} />
+            )}
+          </div>
         </>
       )}
     </div>
