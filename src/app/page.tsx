@@ -100,7 +100,7 @@ export default async function Page() {
           Login
         </a>
       ) : (
-        <BoardDisplay boards={boards} stickyNotes={stickyNotes} />
+        <BoardDisplay boards={boards}  />
       )}
     </div>
   );

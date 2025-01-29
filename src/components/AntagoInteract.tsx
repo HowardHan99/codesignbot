@@ -20,7 +20,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   onResponsesUpdate 
 }) => {
   const [responses, setResponses] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const responseStore = ResponseStore.getInstance();
 
@@ -57,65 +57,48 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
   const processNotes = useCallback(async () => {
     if (!stickyNotes.length) {
-      setLoading(false);
       return;
     }
 
+    setLoading(true);
     const newResponses = [];
     const splitResponses = [];
     
     try {
-      console.log('Starting to process notes:', stickyNotes);
+      console.log('Processing notes for analysis');
       
       for (let i = 0; i < stickyNotes.length; i++) {
         const noteContent = stickyNotes[i];
-        const noteId = `note-${i}`; // Create a simple ID for storage
+        const noteId = `note-${i}`;
         
-        // Check if content has changed
-        const hasChanged = responseStore.hasContentChanged(noteId, noteContent);
+        // Generate new response considering previous response
         const storedResponse = responseStore.getStoredResponse(noteId);
-        
-        let response;
-        if (hasChanged) {
-          // Generate new response considering previous response
-          response = await generateResponse(noteContent, storedResponse?.response);
-          // Store the new response
-          responseStore.storeResponse(noteId, noteContent, response);
-        } else {
-          // Use stored response
-          response = storedResponse!.response;
-        }
+        const response = await generateResponse(noteContent, storedResponse?.response);
+        responseStore.storeResponse(noteId, noteContent, response);
 
         newResponses.push(response);
-        // Split each response into points and store them
         splitResponses.push(...splitResponse(response));
       }
       
-      console.log('All notes processed, setting responses:', newResponses);
       setResponses(newResponses);
-      onResponsesUpdate?.(splitResponses); // Pass split responses to parent
+      onResponsesUpdate?.(splitResponses);
       onComplete?.();
-      setLoading(false);
       
     } catch (error) {
       console.error('Error processing sticky notes:', error);
       setError('Failed to process sticky notes. Please try again.');
       onComplete?.();
+    } finally {
       setLoading(false);
     }
-  }, [stickyNotes, onComplete, onResponsesUpdate]);
+  }, [stickyNotes, generateResponse, onComplete, onResponsesUpdate]);
 
-  // Process notes when they change
+  // Process notes when component mounts
   useEffect(() => {
-    processNotes();
-  }, [processNotes]);
-
-  const handleRefresh = async () => {
-    setLoading(true);
-    setError(null);
-    responseStore.clear(); // Clear stored responses to force regeneration
-    await processNotes();
-  };
+    if (stickyNotes.length > 0) {
+      processNotes();
+    }
+  }, []); // Only run once on mount
 
   if (error) {
     return <div className="error-message">{error}</div>;

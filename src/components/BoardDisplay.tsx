@@ -1,11 +1,6 @@
 'use client';
 import React, { useState, useCallback } from 'react';
-import dynamic from 'next/dynamic';
-import { SendtoBoard } from './SendtoBoard';
-
-const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
-  ssr: false 
-});
+import { MainBoard } from './DesignDecisions';
 
 interface SerializedBoard {
   id: string;
@@ -14,10 +9,9 @@ interface SerializedBoard {
 
 interface BoardDisplayProps {
   boards: SerializedBoard[];
-  stickyNotes: string[];
 }
 
-export function BoardDisplay({ boards, stickyNotes }: BoardDisplayProps) {
+export function BoardDisplay({ boards }: BoardDisplayProps) {
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [gptResponses, setGptResponses] = useState<string[]>([]);
@@ -26,8 +20,10 @@ export function BoardDisplay({ boards, stickyNotes }: BoardDisplayProps) {
     if (isAnalyzing) return;
     
     if (showAnalysis) {
-      setShowAnalysis(false);
-      setGptResponses([]); // Clear responses when hiding
+      // Instead of just hiding, refresh the analysis
+      setIsAnalyzing(true);
+      // Clear previous responses
+      setGptResponses([]);
     } else {
       setShowAnalysis(true);
       setIsAnalyzing(true);
@@ -43,38 +39,14 @@ export function BoardDisplay({ boards, stickyNotes }: BoardDisplayProps) {
   }, []);
 
   return (
-    <>
-      {/* <p>This is a list of all the boards that your user has access to:</p>
-      <ul>
-        {boards?.map((board) => (
-          <li key={board.id}>{board.name}</li>
-        ))}
-      </ul> */}
-      <p>This is a list of all the design decisions that you have made:</p>
-      <ul>
-        {stickyNotes?.map((stickyNote) => (
-          <li key={stickyNote}>{stickyNote}</li>
-        ))}
-      </ul>
-      <div style={{ marginBottom: '20px' }}>
-        <button 
-          className="button button-primary"
-          onClick={handleAnalysisClick}
-          disabled={isAnalyzing}
-        >
-          {isAnalyzing ? 'Analysis in Progress...' : 
-           showAnalysis ? 'Hide Analysis' : 'Analyze Sticky Notes'}
-        </button>
-      </div>
-      {showAnalysis && stickyNotes && (
-        <div>
-          <AntagoInteract 
-            stickyNotes={stickyNotes} 
-            onComplete={onAnalysisComplete}
-            onResponsesUpdate={handleResponsesUpdate}
-          />
-        </div>
-      )}
-    </>
+    <div>
+      <MainBoard 
+        showAnalysis={showAnalysis}
+        isAnalyzing={isAnalyzing}
+        onAnalysisClick={handleAnalysisClick}
+        onAnalysisComplete={onAnalysisComplete}
+        onResponsesUpdate={handleResponsesUpdate}
+      />
+    </div>
   );
 } 

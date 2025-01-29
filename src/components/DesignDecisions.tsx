@@ -24,18 +24,30 @@ interface ResponseMap {
   [key: string]: string; // Maps sticky note ID to its response
 }
 
-const DEBOUNCE_DELAY = 2000; // 2 seconds
+interface MainBoardProps {
+  showAnalysis: boolean;
+  isAnalyzing: boolean;
+  onAnalysisClick: () => void;
+  onAnalysisComplete: () => void;
+  onResponsesUpdate: (responses: string[]) => void;
+}
 
-export function MainBoard({ boards }: BoardDisplayProps) {
+// Constants for timing
+const DEBOUNCE_DELAY = 5000; // Increased to 5 seconds
+const UPDATE_INTERVAL = 1000; // 10 seconds between forced updates
+
+export function MainBoard({ 
+  showAnalysis, 
+  isAnalyzing, 
+  onAnalysisClick, 
+  onAnalysisComplete, 
+  onResponsesUpdate 
+}: MainBoardProps) {
   // State for sticky notes and frame
   const [designNotes, setDesignNotes] = useState<StickyNote[]>([]);
   const [designFrameId, setDesignFrameId] = useState<string | null>(null);
-  
-  // State for analysis and responses
-  const [showAnalysis, setShowAnalysis] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [responseMap, setResponseMap] = useState<ResponseMap>({});
-  const [gptResponses, setGptResponses] = useState<string[]>([]);
+  const [lastUpdateTime, setLastUpdateTime] = useState<number>(0);
   
   // Refs for debouncing
   const updateTimeoutRef = useRef<NodeJS.Timeout>();
@@ -97,8 +109,8 @@ export function MainBoard({ boards }: BoardDisplayProps) {
   };
 
   // Function to update design notes with debouncing
-  const updateDesignNotes = useCallback(async () => {
-    console.log('updateDesignNotes called');
+  const updateDesignNotes = useCallback(async (forceUpdate: boolean = false) => {
+    console.log('updateDesignNotes called, force update:', forceUpdate);
     const now = Date.now();
     const timeSinceLastUpdate = now - lastUpdateRef.current;
 
@@ -107,10 +119,16 @@ export function MainBoard({ boards }: BoardDisplayProps) {
       clearTimeout(updateTimeoutRef.current);
     }
 
-    // If we've updated recently, schedule an update for later
-    if (timeSinceLastUpdate < DEBOUNCE_DELAY) {
+    // If we've updated recently and this isn't a forced update, schedule an update for later
+    if (!forceUpdate && timeSinceLastUpdate < DEBOUNCE_DELAY) {
       console.log('Debouncing update...');
-      updateTimeoutRef.current = setTimeout(updateDesignNotes, DEBOUNCE_DELAY - timeSinceLastUpdate);
+      updateTimeoutRef.current = setTimeout(() => updateDesignNotes(true), DEBOUNCE_DELAY - timeSinceLastUpdate);
+      return;
+    }
+
+    // If not enough time has passed since last update and not forced, skip
+    if (!forceUpdate && (now - lastUpdateTime) < UPDATE_INTERVAL) {
+      console.log('Skipping update due to frequency limit');
       return;
     }
 
@@ -124,24 +142,17 @@ export function MainBoard({ boards }: BoardDisplayProps) {
       if (hasChanges) {
         console.log('Notes changed, updating state...');
         setDesignNotes(notes);
+        setLastUpdateTime(now);
         
-        // If we're analyzing, check for new notes that need responses
-        if (showAnalysis) {
-          const newNotes = notes.filter(note => !responseMap[note.id]);
-          if (newNotes.length > 0) {
-            console.log('New notes found, triggering analysis:', newNotes);
-            setIsAnalyzing(true);
-          }
-        }
-      } else {
-        console.log('No changes in notes');
+        // Don't automatically trigger analysis for content updates
+        // Only update the display
       }
 
-      lastUpdateRef.current = Date.now();
+      lastUpdateRef.current = now;
     } catch (error) {
       console.error('Error updating design notes:', error);
     }
-  }, [showAnalysis, responseMap, designNotes]);
+  }, [designNotes, lastUpdateTime]);
 
   // Set up event listeners for sticky note changes
   useEffect(() => {
@@ -152,28 +163,43 @@ export function MainBoard({ boards }: BoardDisplayProps) {
         // Initial fetch
         console.log('Setting up initial subscription...');
         if (isSubscribed) {
-          await updateDesignNotes();
+          await updateDesignNotes(true); // Force initial update
         }
 
         // Subscribe to board events
         const handleBoardChange = async () => {
           if (!isSubscribed) return;
           console.log('Board change detected');
-          await updateDesignNotes();
+          await updateDesignNotes(false); // Regular update with debounce
         };
 
-        // Subscribe to all relevant events
-        miro.board.ui.on('selection:update', async () => {
-          if (!isSubscribed) return;
-          const selection = await miro.board.getSelection();
-          console.log('Selection changed:', selection);
-          await handleBoardChange();
+        // Subscribe to all relevant events with reduced frequency
+        const events = [
+          'WIDGETS_CREATED',
+          'WIDGETS_DELETED',
+          'WIDGETS_TRANSFORMATION_UPDATED',
+          'ALL_WIDGETS_LOADED',
+          'METADATA_CHANGED'
+        ];
+
+        events.forEach(event => {
+          miro.board.ui.on(event as any, async () => {
+            if (!isSubscribed) return;
+            console.log(`Event triggered: ${event}`);
+            await handleBoardChange();
+          });
         });
 
-        miro.board.ui.on('content_change', handleBoardChange);
-        miro.board.ui.on('widgets_created', handleBoardChange);
-        miro.board.ui.on('widgets_deleted', handleBoardChange);
-        miro.board.ui.on('widgets_transformation_updated', handleBoardChange);
+        // Handle selection updates separately and less frequently
+        miro.board.ui.on('SELECTION_UPDATED', async () => {
+          if (!isSubscribed) return;
+          const selection = await miro.board.getSelection();
+          const hasStickies = selection.some(item => item.type === 'sticky_note');
+          if (hasStickies) {
+            console.log('Sticky note selection changed');
+            await handleBoardChange();
+          }
+        });
 
       } catch (error) {
         console.error('Error setting up event listeners:', error);
@@ -182,41 +208,26 @@ export function MainBoard({ boards }: BoardDisplayProps) {
 
     setupSubscription();
 
+    // Set up periodic forced updates
+    const intervalId = setInterval(() => {
+      if (isSubscribed) {
+        updateDesignNotes(true);
+      }
+    }, UPDATE_INTERVAL);
+
+    // Cleanup function
     return () => {
       console.log('Cleaning up subscriptions...');
       isSubscribed = false;
+      clearInterval(intervalId);
       if (updateTimeoutRef.current) {
         clearTimeout(updateTimeoutRef.current);
       }
     };
   }, [updateDesignNotes]);
 
-  // Handle analysis button click
-  const handleAnalysisClick = useCallback(() => {
-    if (isAnalyzing) return;
-    
-    if (showAnalysis) {
-      // Instead of just hiding, refresh the analysis
-      setIsAnalyzing(true);
-      // Clear previous responses
-      setGptResponses([]);
-      setResponseMap({});
-      // This will trigger a re-analysis with the current notes
-    } else {
-      setShowAnalysis(true);
-      setIsAnalyzing(true);
-    }
-  }, [isAnalyzing, showAnalysis]);
-
-  // Handle analysis completion
-  const onAnalysisComplete = useCallback(() => {
-    setIsAnalyzing(false);
-  }, []);
-
   // Handle responses update
   const handleResponsesUpdate = useCallback((responses: string[]) => {
-    setGptResponses(responses);
-    
     // Update response map
     const newResponseMap: ResponseMap = {};
     designNotes.forEach((note, index) => {
@@ -225,7 +236,8 @@ export function MainBoard({ boards }: BoardDisplayProps) {
       }
     });
     setResponseMap(newResponseMap);
-  }, [designNotes]);
+    onResponsesUpdate(responses);
+  }, [designNotes, onResponsesUpdate]);
 
   return (
     <>
@@ -255,7 +267,7 @@ export function MainBoard({ boards }: BoardDisplayProps) {
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
         <button 
           className="button button-primary"
-          onClick={handleAnalysisClick}
+          onClick={onAnalysisClick}
           disabled={isAnalyzing || designNotes.length === 0}
         >
           {isAnalyzing ? 'Analysis in Progress...' : 
