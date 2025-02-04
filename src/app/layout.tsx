@@ -5,6 +5,7 @@ import Script from 'next/script';
 import congratulations from '../assets/congratulations.png';
 import {SendtoBoard} from '../components/SendtoBoard';
 import {MiroSDKInit} from '../components/SDKInit';
+import { FirebaseProvider } from '../components/FirebaseProvider';
 
 export default function RootLayout({children}: PropsWithChildren) {
   return (
@@ -15,34 +16,36 @@ export default function RootLayout({children}: PropsWithChildren) {
           strategy="beforeInteractive"
         />
         <MiroSDKInit />
-        <div id="root">
-          <div className="grid">
-          <div className="cs1 ce12">{children}</div>
+        <FirebaseProvider>
+          <div id="root">
+            <div className="grid">
+            <div className="cs1 ce12">{children}</div>
 
-            {/* <div className="cs1 ce12">
-              <Image src={congratulations} alt="" />
-              <h1>Congratulations!</h1>
-              <p>You've just created your first Miro app!</p>
-            </div> */}
-            <div className="cs1 ce12">
+              {/* <div className="cs1 ce12">
+                <Image src={congratulations} alt="" />
+                <h1>Congratulations!</h1>
+                <p>You've just created your first Miro app!</p>
+              </div> */}
+              <div className="cs1 ce12">
+              </div>
+              {/* <hr className="cs1 ce12" />
+              <hr className="cs1 ce12" /> */}
+              {/* <div className="cs1 ce12">
+                <p>
+                  To explore more and build your own app, see the Miro Developer
+                  Platform documentation.
+                </p>
+                <a
+                  className="button button-secondary"
+                  target="_blank"
+                  href="https://developers.miro.com"
+                >
+                  Read the documentation
+                </a>
+              </div> */}
             </div>
-            {/* <hr className="cs1 ce12" />
-            <hr className="cs1 ce12" /> */}
-            {/* <div className="cs1 ce12">
-              <p>
-                To explore more and build your own app, see the Miro Developer
-                Platform documentation.
-              </p>
-              <a
-                className="button button-secondary"
-                target="_blank"
-                href="https://developers.miro.com"
-              >
-                Read the documentation
-              </a>
-            </div> */}
           </div>
-        </div>
+        </FirebaseProvider>
       </body>
     </html>
   );

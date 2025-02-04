@@ -1,106 +1,52 @@
-import React from 'react';
-import {Board, StickyNoteItem, FrameItem} from '@mirohq/miro-api';
-import initMiroAPI from '../utils/initMiroAPI';
+'use client';
+
+import React, { useEffect, useState } from 'react';
 import { BoardDisplay } from '../components/BoardDisplay';
+import { getMiroAuth } from '../utils/miroClient';
 import '../assets/style.css';
 
-const getBoards = async () => {
-  const {miro, userId} = initMiroAPI();
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyBsHoAvguKeV8XnT6EkV2Q0hyAv6OEw8bo",
+  authDomain: "codesignagent-f4420.firebaseapp.com",
+  databaseURL: "https://codesignagent-f4420-default-rtdb.firebaseio.com",
+  projectId: "codesignagent-f4420",
+  storageBucket: "codesignagent-f4420.firebasestorage.app",
+  messagingSenderId: "121164910498",
+  appId: "1:121164910498:web:552f246dc0a3f28792ecfb",
+  measurementId: "G-YKVCSPS593"
+};
 
-  // redirect to auth url if user has not authorized the app
-  if (!userId || !(await miro.isAuthorized(userId))) {
-    return {
-      authUrl: miro.getAuthUrl(),
+export { firebaseConfig };
+
+export default function Page() {
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [boards, setBoards] = useState<any[]>([]);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const auth = await getMiroAuth();
+      setAuthUrl(auth.authUrl);
+      setIsAuthorized(auth.isAuthorized);
     };
-  }
+    
+    checkAuth();
+  }, []);
 
-  const api = miro.as(userId);
-
-  const boards: Board[] = [];
-  for await (const board of api.getAllBoards()) {
-    boards.push(board);
-  }
-
-  // Serialize board data
-  const serializedBoards = boards.map(board => ({
-    id: board.id,
-    name: board.name
-  }));
-
-  return {
-    boards: serializedBoards,
-  };
-};
-
-const getStickyNotesContent = async (boardId: string) => {
-  const { miro, userId } = initMiroAPI();
-
-  // Ensure the user is authorized
-  if (!userId || !(await miro.isAuthorized(userId))) {
-    throw new Error('User is not authorized');
-  }
-
-  const api = miro.as(userId);
-
-  try {
-    const board = await api.getBoard(boardId);
-    const stickyNotes: string[] = [];
-    let designFrameId: string | null = null;
-
-    // First pass: find the Design-Decision frame
-    for await (const item of board.getAllItems()) {
-      if (
-        item instanceof FrameItem && 
-        item.data?.title === 'Design-Decision'
-      ) {
-        designFrameId = item.id;
-        break;
-      }
-    }
-
-    if (!designFrameId) {
-      console.log('No Design-Decision frame found');
-      return [];
-    }
-
-    // Second pass: collect sticky notes within the frame
-    for await (const item of board.getAllItems()) {
-      if (
-        item instanceof StickyNoteItem && 
-        item.parent?.id === designFrameId
-      ) {
-        const content = item.data?.content || '';
-        stickyNotes.push(content.replace(/<p>/g, '').replace(/<\/p>/g, ''));
-      }
-    }
-
-    return stickyNotes;
-  } catch (error) {
-    console.error('Error fetching sticky notes:', error);
-    throw error;
-  }
-};
-
-export default async function Page() {
-  const {boards, authUrl} = await getBoards();
-  if (!boards) {
-    return <div>No boards found</div>;
-  }
-  const stickyNotes = await getStickyNotesContent(boards[0].id);
-  
   return (
     <div>
-      <h3>Co-Design Agent</h3>
+      {/* <h3>Co-Design Agent</h3>
       <p>
         Apps that use the API usually would run on your own domain. During
         development, test on http://localhost:3000
-      </p>
-      {authUrl ? (
+      </p> */}
+      {authUrl && !isAuthorized ? (
         <a className="button button-primary" href={authUrl} target="_blank">
           Login
         </a>
       ) : (
-        <BoardDisplay boards={boards}  />
+        <BoardDisplay boards={boards} />
       )}
     </div>
   );

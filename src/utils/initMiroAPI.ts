@@ -1,39 +1,25 @@
 import {Miro} from '@mirohq/miro-api';
 import {cookies} from 'next/headers';
-import {State} from '@mirohq/miro-api/dist/storage';
 
 const tokensCookie = 'miro_tokens';
 
 export default function initMiroAPI() {
-  const cookieInstance = cookies();
+  const cookieStore = cookies();
+  const tokens = cookieStore.get(tokensCookie)?.value;
+  const state = tokens ? JSON.parse(tokens) : {};
 
-  const getCookieValue = (key: string = tokensCookie) => {
-    // Load state (tokens) from a cookie if it's set
-    try {
-      return JSON.parse(cookieInstance.get(key)?.value!) as State;
-    } catch (err) {
-      return null;
-    }
-  };
-
-  // setup a Miro instance that loads tokens from cookies
-  return {
-    miro: new Miro({
-      storage: {
-        get: async () => {
-          return getCookieValue() || undefined;
-        },
-        set: (_, state) => {
-          cookieInstance.set(tokensCookie, JSON.stringify(state), {
-            path: '/',
-            httpOnly: true,
-            sameSite: 'none',
-            secure: true,
-          });
-        },
+  const miro = new Miro({
+    storage: {
+      get: async () => state,
+      set: async (newState) => {
+        // State updates should be handled through API routes
+        console.log('State update requested:', newState);
       },
-    }),
-    // User id might be undefined if the user is not logged in yet, we will know it after the redirect happened
-    userId: getCookieValue()?.userId || '',
+    },
+  });
+
+  return {
+    miro,
+    userId: state.userId,
   };
 }
