@@ -215,14 +215,14 @@ export function MainBoard({
       <div style={{ marginBottom: '20px' }}>
         <h2>Design Decisions</h2>
         {designNotes.length === 0 ? (
-          <p>No sticky notes found in the "Design-Decision" frame.</p>
+          <p>No design decisions found in the "Design-Decision" frame.</p>
         ) : (
           <div>
-            <p>Current sticky notes in "Design-Decision" frame:</p>
+            <p>Current design decisions you are making:</p>
             <ul style={{ marginBottom: '20px' }}>
               {designNotes.map((note, index) => (
                 <li key={`${note.id}-${index}`}>
-                  <div><strong>Content:</strong> {note.content}</div>
+                  <div> {note.content.replace(/<\/?p>/g, '')}</div>
                 </li>
               ))}
             </ul>

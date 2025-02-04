@@ -90,13 +90,13 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({ responses }) => {
   };
 
   return (
-    <button
-      type="button"
-      onClick={addSticky}
-      className="button button-primary"
-      disabled={!responses?.length}
-    >
-      Send to Board ({responses?.length} responses)
-    </button>
+      <button
+        type="button"
+        onClick={addSticky}
+        className="button button-primary"
+        disabled={!responses?.length}
+      >
+        Send to Board ({responses?.length} responses)
+      </button>
   );
 };

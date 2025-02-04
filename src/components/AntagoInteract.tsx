@@ -19,6 +19,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [responses, setResponses] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSimplifiedMode, setIsSimplifiedMode] = useState(false);
+  const [simplifiedResponses, setSimplifiedResponses] = useState<string[]>([]);
   const responseStore = ResponseStore.getInstance();
   const processedRef = useRef(false);
   const [designChallenge, setDesignChallenge] = useState<string>('');
@@ -82,6 +84,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       throw new Error(data.error);
     }
 
+    console.log('Generated response:', data.response);
+
     return data.response.replace(/•/g, '**').replace(/\n/g, ' ** ');
   };
 
@@ -97,6 +101,31 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }).filter(point => point.length > 0);
   };
 
+  const simplifyResponse = async (response: string) => {
+    try {
+      const simplifyResult = await fetch('/api/openaiwrap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userPrompt: response,
+          systemPrompt: `Please simplify the following criticism points into three very concise, clear points. Each point should be no more than 20 words. Format the response with points separated by ** **. Do not include any other text, numbers, or formatting.`
+        }),
+      });
+
+      if (!simplifyResult.ok) {
+        throw new Error(`HTTP error! status: ${simplifyResult.status}`);
+      }
+
+      const data = await simplifyResult.json();
+      return data.response.replace(/•/g, '**').replace(/\n/g, ' ** ');
+    } catch (error) {
+      console.error('Error simplifying response:', error);
+      return response;
+    }
+  };
+
   const processNotes = useCallback(async (forceProcess: boolean = false) => {
     if (!stickyNotes.length || (processedRef.current && !forceProcess)) {
       return;
@@ -106,21 +135,26 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     
     try {
       console.log('Processing combined notes for analysis');
-      responseStore.clear(); // Clear stored responses on each analysis
+      responseStore.clear();
       
-      // Combine all sticky notes into one message
       const combinedMessage = stickyNotes.map((note, index) => 
         `Design Decision ${index + 1}: ${note}`
       ).join('\n');
       
       console.log('Combined message:', combinedMessage);
       
-      // Generate a single response for all decisions
+      // Generate full response
       const response = await generateResponse(combinedMessage);
-      const splitResponses = splitResponse(response);
+      setResponses([response]);
+
+      // Generate simplified response
+      const simplified = await simplifyResponse(response);
+      setSimplifiedResponses([simplified]);
       
-      setResponses([response]); // Store as single response
+      // Pass the appropriate response based on current mode
+      const splitResponses = splitResponse(isSimplifiedMode ? simplified : response);
       onResponsesUpdate?.(splitResponses);
+      
       processedRef.current = true;
       onComplete?.();
       
@@ -131,7 +165,21 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [stickyNotes, generateResponse, onComplete, onResponsesUpdate]);
+  }, [stickyNotes, generateResponse, onComplete, onResponsesUpdate, isSimplifiedMode]);
+
+  // Handle mode toggle
+  const handleModeToggle = useCallback(() => {
+    const newMode = !isSimplifiedMode;
+    setIsSimplifiedMode(newMode);
+    
+    // Update parent with appropriate responses when mode changes
+    if (responses.length > 0) {
+      // If switching to simplified mode, use simplified responses
+      // If switching back to full mode, use the stored full responses
+      const currentResponses = newMode ? simplifiedResponses : responses;
+      onResponsesUpdate?.(splitResponse(currentResponses[0]));
+    }
+  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate]);
 
   // Process notes on mount or refresh
   useEffect(() => {
@@ -145,7 +193,33 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         processNotes(false);
       }
     }
-  }, [shouldRefresh, stickyNotes, processNotes]); // Include all dependencies
+  }, [shouldRefresh, stickyNotes, processNotes]);
+
+  // Store both full and simplified responses in local storage for persistence
+  useEffect(() => {
+    if (responses.length > 0) {
+      responseStore.storeResponse('full-response', 'full', responses[0]);
+    }
+  }, [responses]);
+
+  useEffect(() => {
+    if (simplifiedResponses.length > 0) {
+      responseStore.storeResponse('simplified-response', 'simplified', simplifiedResponses[0]);
+    }
+  }, [simplifiedResponses]);
+
+  // Restore responses from storage on mount
+  useEffect(() => {
+    const storedFull = responseStore.getStoredResponse('full-response');
+    const storedSimplified = responseStore.getStoredResponse('simplified-response');
+    
+    if (storedFull?.response) {
+      setResponses([storedFull.response]);
+    }
+    if (storedSimplified?.response) {
+      setSimplifiedResponses([storedSimplified.response]);
+    }
+  }, []);
 
   if (error) {
     return <div className="error-message">{error}</div>;
@@ -158,10 +232,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       ) : (
         <>
           <div style={{ marginBottom: '20px' }}>
-            <h2>Antagonistic Analysis</h2>
-            {responses.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h2>Antagonistic Analysis</h2>
+            </div>
+            {(isSimplifiedMode ? simplifiedResponses : responses).length > 0 && (
               <div className="response-pair" style={{ marginBottom: '20px', padding: '10px', border: '1px solid #ddd', borderRadius: '4px' }}>
-                <div style={{ marginBottom: '15px' }}>
+                {/* <div style={{ marginBottom: '15px' }}>
                   <strong>Design Decisions:</strong>
                   <ul style={{ marginTop: '10px' }}>
                     {stickyNotes.map((note, index) => (
@@ -170,21 +246,32 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
                       </li>
                     ))}
                   </ul>
-                </div>
+                </div> */}
                 <div>
-                  <strong>Analysis Points:</strong>
+                  <strong>Analysis Points {isSimplifiedMode ? '(Simplified)' : ''}:</strong>
+                  <label className="toggle" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                  <input 
+                  type="checkbox" 
+                  tabIndex={0}
+                  checked={isSimplifiedMode}
+                  onChange={handleModeToggle}
+                  />
+                  <span style={{ marginLeft: '8px', fontSize: '14px' }}>
+                  {isSimplifiedMode ? 'Simplified Mode' : 'Full Mode'}
+                  </span>
+                  </label>
                   <ul>
-                    {splitResponse(responses[0]).map((point, pointIndex) => (
-                      <li key={pointIndex} style={{ marginLeft: '20px', marginBottom: '5px' }}>{point}</li>
+                    {splitResponse((isSimplifiedMode ? simplifiedResponses : responses)[0]).map((point, pointIndex) => (
+                      <li key={pointIndex} style={{ marginLeft: '0px', marginBottom: '5px' }}>{point}</li>
                     ))}
                   </ul>
                 </div>
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            {responses.length > 0 && (
-              <SendtoBoard responses={splitResponse(responses[0])} />
+          <div style={{ display: 'flex', justifyContent: 'left' }}>
+            {(isSimplifiedMode ? simplifiedResponses : responses).length > 0 && (
+              <SendtoBoard responses={splitResponse((isSimplifiedMode ? simplifiedResponses : responses)[0])} />
             )}
           </div>
         </>

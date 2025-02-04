@@ -20,3 +20,71 @@ img {
   max-width: 100%;
   height: auto;
 }
+
+/* Toggle Switch Styles */
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toggle input {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  margin: 0;
+  cursor: pointer;
+  opacity: 0;
+  z-index: 2;
+}
+
+.toggle input + span {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: #050038;
+}
+
+.toggle input + span::before {
+  content: '';
+  width: 40px;
+  height: 24px;
+  border-radius: 12px;
+  background: #E6E6E6;
+  position: absolute;
+  left: -40px;
+  transition: background 0.3s ease;
+}
+
+.toggle input + span::after {
+  content: '';
+  position: absolute;
+  left: -36px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.3s ease;
+}
+
+.toggle input:checked + span::before {
+  background: #4262FF;
+}
+
+.toggle input:checked + span::after {
+  transform: translateX(16px);
+}
+
+.toggle input:focus + span::before {
+  box-shadow: 0 0 0 2px rgba(66, 98, 255, 0.2);
+}
+
+/* Hover effect */
+.toggle:hover input + span::before {
+  background: #CCCCCC;
+}
+
+.toggle:hover input:checked + span::before {
+  background: #2D4BE3;
+}
