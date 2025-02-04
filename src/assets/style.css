@@ -88,3 +88,34 @@ img {
 .toggle:hover input:checked + span::before {
   background: #2D4BE3;
 }
+
+/* Tone Select Styles */
+.select {
+  appearance: none;
+  background-color: white;
+  border: 1px solid #c3c2cf;
+  border-radius: 4px;
+  padding: 4px 24px 4px 8px;
+  font-size: 14px;
+  color: #050038;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23050038' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.select:hover {
+  border-color: #4262ff;
+}
+
+.select:focus {
+  outline: none;
+  border-color: #4262ff;
+  box-shadow: 0 0 0 2px rgba(66, 98, 255, 0.2);
+}
+
+.select option {
+  padding: 8px;
+  background-color: white;
+  color: #050038;
+}

@@ -21,6 +21,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isSimplifiedMode, setIsSimplifiedMode] = useState(false);
   const [simplifiedResponses, setSimplifiedResponses] = useState<string[]>([]);
+  const [selectedTone, setSelectedTone] = useState<string>('');
   const responseStore = ResponseStore.getInstance();
   const processedRef = useRef(false);
   const [designChallenge, setDesignChallenge] = useState<string>('');
@@ -70,8 +71,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       },
       body: JSON.stringify({
         userPrompt: note,
-        systemPrompt: `The user has made several design decisions to tackle the design challenge: "${designChallenge || 'No challenge specified'}". Please analyze these decisions as a whole and provide antagonistic responses that show potential problems or conflicts between these decisions. Consider how these decisions might affect different stakeholders or create unexpected consequences when implemented together. Format your response as a list of points separated by ** **. Do not use numbers, bullet points, or ** ** within the points themselves that would create a split. Each point should be a complete, self-contained criticism. Example format: 'First criticism here ** ** Second criticism here ** ** Third criticism here'. DIRECTLY START WITH THE CRITICISM. No NEED FOR TITLE, SUMMARY, OR ANYTHING ELSE. Limit the 3 points.
-        }`,
+        systemPrompt: `The user has made several design decisions to tackle the design challenge: "${designChallenge || 'No challenge specified'}". Please analyze these decisions as a whole and provide antagonistic responses that show potential problems or conflicts between these decisions. Consider how these decisions might affect different stakeholders or create unexpected consequences when implemented together. Format your response as a list of points separated by ** **. Do not use numbers, bullet points, or ** ** within the points themselves that would create a split. Each point should be a complete, self-contained criticism. Example format: 'First criticism here ** ** Second criticism here ** ** Third criticism here'. DIRECTLY START WITH THE CRITICISM. No NEED FOR TITLE, SUMMARY, OR ANYTHING ELSE. Limit to 3 points.`,
       }),
     });
     
@@ -85,7 +85,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
 
     console.log('Generated response:', data.response);
-
     return data.response.replace(/•/g, '**').replace(/\n/g, ' ** ');
   };
 
@@ -126,6 +125,31 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   };
 
+  const adjustToneOnly = async (response: string, newTone: string) => {
+    try {
+      const adjustResult = await fetch('/api/openaiwrap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userPrompt: response,
+          systemPrompt: `Rewrite the following three criticism points using a ${newTone} tone. Keep the same core messages but adjust the language and delivery to match the ${newTone} tone. Ensure there are exactly three points. Format with ** ** between points. Do not add any additional text, numbers, or formatting.`
+        }),
+      });
+
+      if (!adjustResult.ok) {
+        throw new Error(`HTTP error! status: ${adjustResult.status}`);
+      }
+
+      const data = await adjustResult.json();
+      return data.response.replace(/•/g, '**').replace(/\n/g, ' ** ');
+    } catch (error) {
+      console.error('Error adjusting tone:', error);
+      return response;
+    }
+  };
+
   const processNotes = useCallback(async (forceProcess: boolean = false) => {
     if (!stickyNotes.length || (processedRef.current && !forceProcess)) {
       return;
@@ -143,11 +167,11 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       console.log('Combined message:', combinedMessage);
       
-      // Generate full response
+      // Generate initial response
       const response = await generateResponse(combinedMessage);
       setResponses([response]);
 
-      // Generate simplified response
+      // Generate simplified version from the response
       const simplified = await simplifyResponse(response);
       setSimplifiedResponses([simplified]);
       
@@ -165,7 +189,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [stickyNotes, generateResponse, onComplete, onResponsesUpdate, isSimplifiedMode]);
+  }, [stickyNotes, generateResponse, onComplete, onResponsesUpdate, isSimplifiedMode, selectedTone]);
 
   // Handle mode toggle
   const handleModeToggle = useCallback(() => {
@@ -181,19 +205,43 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate]);
 
-  // Process notes on mount or refresh
-  useEffect(() => {
-    if (stickyNotes.length > 0) {
-      if (shouldRefresh) {
-        // If it's a refresh, force processing
-        processedRef.current = false;
-        processNotes(true);
-      } else if (!processedRef.current) {
-        // If it's initial mount and not processed yet
-        processNotes(false);
+  // Handle tone change
+  const handleToneChange = useCallback(async (newTone: string) => {
+    setSelectedTone(newTone);
+    if (!responses.length) return;
+
+    try {
+      const currentResponse = isSimplifiedMode ? simplifiedResponses[0] : responses[0];
+      if (!newTone) {
+        // If switching to normal tone, use the original responses
+        const storedFull = responseStore.getStoredResponse('full-response');
+        const storedSimplified = responseStore.getStoredResponse('simplified-response');
+        if (storedFull?.response) setResponses([storedFull.response]);
+        if (storedSimplified?.response) setSimplifiedResponses([storedSimplified.response]);
+        onResponsesUpdate?.(splitResponse(isSimplifiedMode ? storedSimplified?.response || '' : storedFull?.response || ''));
+        return;
       }
+
+      const adjustedResponse = await adjustToneOnly(currentResponse, newTone);
+      if (isSimplifiedMode) {
+        setSimplifiedResponses([adjustedResponse]);
+      } else {
+        setResponses([adjustedResponse]);
+      }
+      onResponsesUpdate?.(splitResponse(adjustedResponse));
+    } catch (error) {
+      console.error('Error updating tone:', error);
     }
-  }, [shouldRefresh, stickyNotes, processNotes]);
+  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate]);
+
+  // Process notes only on explicit refresh or initial mount
+  useEffect(() => {
+    const shouldProcess = stickyNotes.length > 0 && (!processedRef.current || shouldRefresh);
+    if (shouldProcess) {
+      processedRef.current = false;
+      processNotes();
+    }
+  }, [shouldRefresh, stickyNotes]);
 
   // Store both full and simplified responses in local storage for persistence
   useEffect(() => {
@@ -232,37 +280,69 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       ) : (
         <>
           <div style={{ marginBottom: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h2>Antagonistic Analysis</h2>
+            <h2 style={{ margin: '0 0 16px 0' }}>Antagonistic Analysis</h2>
+            <div style={{ 
+              display: 'flex',
+              gap: '24px',
+              alignItems: 'center',
+              marginBottom: '20px',
+              padding: '12px',
+              backgroundColor: '#f5f5f7',
+              borderRadius: '8px'
+            }}>
+              <div style={{ 
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                minWidth: '100px'
+              }}>
+                <label style={{ fontSize: '14px', fontWeight: '500', whiteSpace: 'nowrap' }}>Tone:</label>
+                <select 
+                  value={selectedTone}
+                  onChange={(e) => handleToneChange(e.target.value)}
+                  className="select"
+                  style={{ flex: 1 }}
+                >
+                  <option value="">Normal</option>
+                  <option value="persuasive">Persuasive</option>
+                  <option value="aggressive">Aggressive</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </div>
+              <div style={{ 
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <label style={{ fontSize: '14px', fontWeight: '500', whiteSpace: 'nowrap' }}>Message:</label>
+                <label className="toggle" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
+                  <input 
+                    type="checkbox" 
+                    tabIndex={0}
+                    checked={isSimplifiedMode}
+                    onChange={handleModeToggle}
+                  />
+                  <span style={{ marginLeft: '0px', fontSize: '14px', whiteSpace: 'nowrap' }}>
+                    {isSimplifiedMode ? 'Simple' : 'Full'}
+                  </span>
+                </label>
+              </div>
             </div>
             {(isSimplifiedMode ? simplifiedResponses : responses).length > 0 && (
-              <div className="response-pair" style={{ marginBottom: '20px', padding: '10px', border: '1px solid #ddd', borderRadius: '4px' }}>
-                {/* <div style={{ marginBottom: '15px' }}>
-                  <strong>Design Decisions:</strong>
-                  <ul style={{ marginTop: '10px' }}>
-                    {stickyNotes.map((note, index) => (
-                      <li key={index} style={{ marginBottom: '5px' }}>
-                        Decision {index + 1}: {note}
-                      </li>
-                    ))}
-                  </ul>
-                </div> */}
+              <div className="response-pair" style={{ 
+                marginBottom: '20px', 
+                padding: '16px', 
+                border: '1px solid #e6e6e6', 
+                borderRadius: '8px',
+                backgroundColor: '#ffffff'
+              }}>
                 <div>
-                  <strong>Analysis Points {isSimplifiedMode ? '(Simplified)' : ''}:</strong>
-                  <label className="toggle" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-                  <input 
-                  type="checkbox" 
-                  tabIndex={0}
-                  checked={isSimplifiedMode}
-                  onChange={handleModeToggle}
-                  />
-                  <span style={{ marginLeft: '8px', fontSize: '14px' }}>
-                  {isSimplifiedMode ? 'Simplified Mode' : 'Full Mode'}
-                  </span>
-                  </label>
-                  <ul>
+                  <strong style={{ display: 'block', marginBottom: '12px' }}>
+                    Analysis Points {isSimplifiedMode ? '(Simplified)' : ''} {selectedTone ? `(${selectedTone} tone)` : ''}
+                  </strong>
+                  <ul style={{ margin: 0, paddingLeft: '20px' }}>
                     {splitResponse((isSimplifiedMode ? simplifiedResponses : responses)[0]).map((point, pointIndex) => (
-                      <li key={pointIndex} style={{ marginLeft: '0px', marginBottom: '5px' }}>{point}</li>
+                      <li key={pointIndex} style={{ marginBottom: '8px' }}>{point}</li>
                     ))}
                   </ul>
                 </div>
