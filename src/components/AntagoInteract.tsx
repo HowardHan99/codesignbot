@@ -1,28 +1,64 @@
 'use client';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SendtoBoard } from './SendtoBoard';
 import ResponseStore from '../utils/responseStore';
-
-interface StickyNote {
-  id: string;
-  content: string;
-}
 
 interface AntagoInteractProps {
   stickyNotes: string[];
   onComplete?: () => void;
   onResponsesUpdate?: (responses: string[]) => void;
+  shouldRefresh?: boolean;
 }
 
 const AntagoInteract: React.FC<AntagoInteractProps> = ({ 
   stickyNotes, 
   onComplete,
-  onResponsesUpdate 
+  onResponsesUpdate,
+  shouldRefresh = false
 }) => {
   const [responses, setResponses] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const responseStore = ResponseStore.getInstance();
+  const processedRef = useRef(false);
+  const [designChallenge, setDesignChallenge] = useState<string>('');
+
+  // Function to get design challenge from the frame
+  const getDesignChallenge = useCallback(async () => {
+    try {
+      // Get all frames
+      const frames = await miro.board.get({ type: 'frame' });
+      const challengeFrame = frames.find(f => f.title === 'Design-Challenge');
+      
+      if (!challengeFrame) {
+        console.log('Design-Challenge frame not found');
+        return '';
+      }
+
+      // Get sticky notes in the challenge frame
+      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      const challengeStickies = allStickies.filter(sticky => sticky.parentId === challengeFrame.id);
+      
+      if (challengeStickies.length === 0) {
+        console.log('No sticky notes found in Design-Challenge frame');
+        return '';
+      }
+
+      // Use the content of the first sticky note as the challenge
+      const challenge = challengeStickies.map(sticky => sticky.content).join('\n');
+      console.log('Found design challenge:', challenge);
+      return challenge;
+
+    } catch (err) {
+      console.error('Error getting design challenge:', err);
+      return '';
+    }
+  }, []);
+
+  // Fetch design challenge when component mounts
+  useEffect(() => {
+    getDesignChallenge().then(challenge => setDesignChallenge(challenge));
+  }, [getDesignChallenge]);
 
   const generateResponse = async (note: string, previousResponse?: string) => {
     const response = await fetch('/api/openaiwrap', {
@@ -32,9 +68,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       },
       body: JSON.stringify({
         userPrompt: note,
-        systemPrompt: `The user is making some design decisions, please provide an antagonistic response that shows the user the problems with their decision that are also constructive and helpful. You can use response such as the decision while beneficial to some group of people, might bring problems to other group of people that the users didn't consider. Format your response as a list of points, with each main point separated by ** **. Do not use ** ** within a point itself. Example format: 'Point 1 explanation here ** ** Point 2 explanation here ** ** Point 3 explanation here'. Limit to 3 points.${
-          previousResponse ? `\n\nPrevious response for reference: ${previousResponse}` : ''
-        }`
+        systemPrompt: `The user has made several design decisions to tackle the design challenge: "${designChallenge || 'No challenge specified'}". Please analyze these decisions as a whole and provide antagonistic responses that show potential problems or conflicts between these decisions. Consider how these decisions might affect different stakeholders or create unexpected consequences when implemented together. Format your response as a list of points separated by ** **. Do not use numbers, bullet points, or ** ** within the points themselves that would create a split. Each point should be a complete, self-contained criticism. Example format: 'First criticism here ** ** Second criticism here ** ** Third criticism here'. DIRECTLY START WITH THE CRITICISM. No NEED FOR TITLE, SUMMARY, OR ANYTHING ELSE. Limit the 3 points.
+        }`,
       }),
     });
     
@@ -52,36 +87,41 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
   // Split response into separate points
   const splitResponse = (response: string): string[] => {
-    return response.split('**').map(point => point.trim()).filter(point => point.length > 0);
+    // First split by ** **
+    const points = response.split('**').map(point => point.trim()).filter(point => point.length > 0);
+    
+    // Clean up any remaining numbers at the start of points
+    return points.map(point => {
+      // Remove numbered prefixes like "1.", "2.", etc.
+      return point.replace(/^\d+\.\s*/, '').trim();
+    }).filter(point => point.length > 0);
   };
 
-  const processNotes = useCallback(async () => {
-    if (!stickyNotes.length) {
+  const processNotes = useCallback(async (forceProcess: boolean = false) => {
+    if (!stickyNotes.length || (processedRef.current && !forceProcess)) {
       return;
     }
 
     setLoading(true);
-    const newResponses = [];
-    const splitResponses = [];
     
     try {
-      console.log('Processing notes for analysis');
+      console.log('Processing combined notes for analysis');
+      responseStore.clear(); // Clear stored responses on each analysis
       
-      for (let i = 0; i < stickyNotes.length; i++) {
-        const noteContent = stickyNotes[i];
-        const noteId = `note-${i}`;
-        
-        // Generate new response considering previous response
-        const storedResponse = responseStore.getStoredResponse(noteId);
-        const response = await generateResponse(noteContent, storedResponse?.response);
-        responseStore.storeResponse(noteId, noteContent, response);
-
-        newResponses.push(response);
-        splitResponses.push(...splitResponse(response));
-      }
+      // Combine all sticky notes into one message
+      const combinedMessage = stickyNotes.map((note, index) => 
+        `Design Decision ${index + 1}: ${note}`
+      ).join('\n');
       
-      setResponses(newResponses);
+      console.log('Combined message:', combinedMessage);
+      
+      // Generate a single response for all decisions
+      const response = await generateResponse(combinedMessage);
+      const splitResponses = splitResponse(response);
+      
+      setResponses([response]); // Store as single response
       onResponsesUpdate?.(splitResponses);
+      processedRef.current = true;
       onComplete?.();
       
     } catch (error) {
@@ -93,12 +133,19 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   }, [stickyNotes, generateResponse, onComplete, onResponsesUpdate]);
 
-  // Process notes when component mounts
+  // Process notes on mount or refresh
   useEffect(() => {
     if (stickyNotes.length > 0) {
-      processNotes();
+      if (shouldRefresh) {
+        // If it's a refresh, force processing
+        processedRef.current = false;
+        processNotes(true);
+      } else if (!processedRef.current) {
+        // If it's initial mount and not processed yet
+        processNotes(false);
+      }
     }
-  }, []); // Only run once on mount
+  }, [shouldRefresh, stickyNotes, processNotes]); // Include all dependencies
 
   if (error) {
     return <div className="error-message">{error}</div>;
@@ -111,22 +158,33 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       ) : (
         <>
           <div style={{ marginBottom: '20px' }}>
-            <h2>Antagonistic Points</h2>
-            {responses.map((response, index) => (
-              <div key={index} className="response-pair" style={{ marginBottom: '20px', padding: '10px', border: '1px solid #ddd', borderRadius: '4px' }}>
-                <p><strong>Original Note:</strong> {stickyNotes[index]}</p>
-                <p><strong>Response Points:</strong></p>
-                <ul>
-                  {splitResponse(response).map((point, pointIndex) => (
-                    <li key={pointIndex} style={{ marginLeft: '20px', marginBottom: '5px' }}>{point}</li>
-                  ))}
-                </ul>
+            <h2>Antagonistic Analysis</h2>
+            {responses.length > 0 && (
+              <div className="response-pair" style={{ marginBottom: '20px', padding: '10px', border: '1px solid #ddd', borderRadius: '4px' }}>
+                <div style={{ marginBottom: '15px' }}>
+                  <strong>Design Decisions:</strong>
+                  <ul style={{ marginTop: '10px' }}>
+                    {stickyNotes.map((note, index) => (
+                      <li key={index} style={{ marginBottom: '5px' }}>
+                        Decision {index + 1}: {note}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <strong>Analysis Points:</strong>
+                  <ul>
+                    {splitResponse(responses[0]).map((point, pointIndex) => (
+                      <li key={pointIndex} style={{ marginLeft: '20px', marginBottom: '5px' }}>{point}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
-            ))}
+            )}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             {responses.length > 0 && (
-              <SendtoBoard responses={responses.flatMap(response => splitResponse(response))} />
+              <SendtoBoard responses={splitResponse(responses[0])} />
             )}
           </div>
         </>

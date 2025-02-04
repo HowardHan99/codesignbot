@@ -33,8 +33,8 @@ interface MainBoardProps {
 }
 
 // Constants for timing
-const DEBOUNCE_DELAY = 5000; // Increased to 5 seconds
-const UPDATE_INTERVAL = 1000; // 10 seconds between forced updates
+const DEBOUNCE_DELAY = 10000; // Increased to 10 seconds
+const UPDATE_INTERVAL = 30000; // 30 seconds between forced updates
 
 export function MainBoard({ 
   showAnalysis, 
@@ -46,9 +46,20 @@ export function MainBoard({
   // State for sticky notes and frame
   const [designNotes, setDesignNotes] = useState<StickyNote[]>([]);
   const [designFrameId, setDesignFrameId] = useState<string | null>(null);
-  const [responseMap, setResponseMap] = useState<ResponseMap>({});
-  const [lastUpdateTime, setLastUpdateTime] = useState<number>(0);
+  const [shouldRefresh, setShouldRefresh] = useState(false);
   
+  // Handle refresh click
+  const handleRefreshClick = useCallback(() => {
+    setShouldRefresh(true);
+    onAnalysisClick();
+  }, [onAnalysisClick]);
+
+  // Reset refresh flag when analysis completes
+  const handleAnalysisComplete = useCallback(() => {
+    setShouldRefresh(false);
+    onAnalysisComplete();
+  }, [onAnalysisComplete]);
+
   // Refs for debouncing
   const updateTimeoutRef = useRef<NodeJS.Timeout>();
   const lastUpdateRef = useRef<number>(0);
@@ -126,12 +137,6 @@ export function MainBoard({
       return;
     }
 
-    // If not enough time has passed since last update and not forced, skip
-    if (!forceUpdate && (now - lastUpdateTime) < UPDATE_INTERVAL) {
-      console.log('Skipping update due to frequency limit');
-      return;
-    }
-
     try {
       const notes = await getCurrentStickyNotes();
       console.log('Got new notes:', notes);
@@ -142,17 +147,11 @@ export function MainBoard({
       if (hasChanges) {
         console.log('Notes changed, updating state...');
         setDesignNotes(notes);
-        setLastUpdateTime(now);
-        
-        // Don't automatically trigger analysis for content updates
-        // Only update the display
       }
-
-      lastUpdateRef.current = now;
     } catch (error) {
       console.error('Error updating design notes:', error);
     }
-  }, [designNotes, lastUpdateTime]);
+  }, [designNotes]);
 
   // Set up event listeners for sticky note changes
   useEffect(() => {
@@ -173,13 +172,10 @@ export function MainBoard({
           await updateDesignNotes(false); // Regular update with debounce
         };
 
-        // Subscribe to all relevant events with reduced frequency
+        // Only listen to essential events
         const events = [
           'WIDGETS_CREATED',
-          'WIDGETS_DELETED',
-          'WIDGETS_TRANSFORMATION_UPDATED',
-          'ALL_WIDGETS_LOADED',
-          'METADATA_CHANGED'
+          'WIDGETS_DELETED'
         ];
 
         events.forEach(event => {
@@ -190,17 +186,6 @@ export function MainBoard({
           });
         });
 
-        // Handle selection updates separately and less frequently
-        miro.board.ui.on('SELECTION_UPDATED', async () => {
-          if (!isSubscribed) return;
-          const selection = await miro.board.getSelection();
-          const hasStickies = selection.some(item => item.type === 'sticky_note');
-          if (hasStickies) {
-            console.log('Sticky note selection changed');
-            await handleBoardChange();
-          }
-        });
-
       } catch (error) {
         console.error('Error setting up event listeners:', error);
       }
@@ -208,14 +193,13 @@ export function MainBoard({
 
     setupSubscription();
 
-    // Set up periodic forced updates
+    // Set up periodic forced updates with longer interval
     const intervalId = setInterval(() => {
       if (isSubscribed) {
         updateDesignNotes(true);
       }
     }, UPDATE_INTERVAL);
 
-    // Cleanup function
     return () => {
       console.log('Cleaning up subscriptions...');
       isSubscribed = false;
@@ -225,19 +209,6 @@ export function MainBoard({
       }
     };
   }, [updateDesignNotes]);
-
-  // Handle responses update
-  const handleResponsesUpdate = useCallback((responses: string[]) => {
-    // Update response map
-    const newResponseMap: ResponseMap = {};
-    designNotes.forEach((note, index) => {
-      if (responses[index]) {
-        newResponseMap[note.id] = responses[index];
-      }
-    });
-    setResponseMap(newResponseMap);
-    onResponsesUpdate(responses);
-  }, [designNotes, onResponsesUpdate]);
 
   return (
     <>
@@ -252,11 +223,6 @@ export function MainBoard({
               {designNotes.map((note, index) => (
                 <li key={`${note.id}-${index}`}>
                   <div><strong>Content:</strong> {note.content}</div>
-                  {showAnalysis && responseMap[note.id] && (
-                    <div style={{ marginLeft: '20px', color: '#666' }}>
-                      <strong>Response:</strong> {responseMap[note.id]}
-                    </div>
-                  )}
                 </li>
               ))}
             </ul>
@@ -267,7 +233,7 @@ export function MainBoard({
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
         <button 
           className="button button-primary"
-          onClick={onAnalysisClick}
+          onClick={showAnalysis ? handleRefreshClick : onAnalysisClick}
           disabled={isAnalyzing || designNotes.length === 0}
         >
           {isAnalyzing ? 'Analysis in Progress...' : 
@@ -279,8 +245,9 @@ export function MainBoard({
         <div>
           <AntagoInteract 
             stickyNotes={designNotes.map(note => note.content)}
-            onComplete={onAnalysisComplete}
-            onResponsesUpdate={handleResponsesUpdate}
+            onComplete={handleAnalysisComplete}
+            onResponsesUpdate={onResponsesUpdate}
+            shouldRefresh={shouldRefresh}
           />
         </div>
       )}
