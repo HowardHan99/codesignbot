@@ -237,7 +237,7 @@ export function MainBoard({
           disabled={isAnalyzing || designNotes.length === 0}
         >
           {isAnalyzing ? 'Analysis in Progress...' : 
-           showAnalysis ? 'Refresh Analysis' : 'Analyze Sticky Notes'}
+           showAnalysis ? 'Refresh Analysis' : 'Analyze the Design Decisions'}
         </button>
       </div>
 
