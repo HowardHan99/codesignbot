@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SendtoBoard } from './SendtoBoard';
 import ResponseStore from '../utils/responseStore';
+import { saveAnalysis } from '../utils/firebase';
 
 interface AntagoInteractProps {
   stickyNotes: string[];
@@ -175,6 +176,22 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       const simplified = await simplifyResponse(response);
       setSimplifiedResponses([simplified]);
       
+      // Save to Firebase
+      try {
+        await saveAnalysis({
+          timestamp: null, // Will be set by serverTimestamp()
+          designChallenge: designChallenge,
+          decisions: stickyNotes,
+          analysis: {
+            full: splitResponse(response),
+            simplified: splitResponse(simplified)
+          },
+          tone: selectedTone || 'normal'
+        });
+      } catch (error) {
+        console.error('Error saving to Firebase:', error);
+      }
+      
       // Pass the appropriate response based on current mode
       const splitResponses = splitResponse(isSimplifiedMode ? simplified : response);
       onResponsesUpdate?.(splitResponses);
@@ -189,7 +206,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [stickyNotes, generateResponse, onComplete, onResponsesUpdate, isSimplifiedMode, selectedTone]);
+  }, [stickyNotes, generateResponse, onComplete, onResponsesUpdate, isSimplifiedMode, selectedTone, designChallenge]);
 
   // Handle mode toggle
   const handleModeToggle = useCallback(() => {
@@ -228,11 +245,28 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       } else {
         setResponses([adjustedResponse]);
       }
+
+      // Save tone change to Firebase
+      try {
+        await saveAnalysis({
+          timestamp: null,
+          designChallenge: designChallenge,
+          decisions: stickyNotes,
+          analysis: {
+            full: splitResponse(isSimplifiedMode ? responses[0] : adjustedResponse),
+            simplified: splitResponse(isSimplifiedMode ? adjustedResponse : simplifiedResponses[0])
+          },
+          tone: newTone
+        });
+      } catch (error) {
+        console.error('Error saving tone change to Firebase:', error);
+      }
+
       onResponsesUpdate?.(splitResponse(adjustedResponse));
     } catch (error) {
       console.error('Error updating tone:', error);
     }
-  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate]);
+  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, stickyNotes, designChallenge]);
 
   // Process notes only on explicit refresh or initial mount
   useEffect(() => {
