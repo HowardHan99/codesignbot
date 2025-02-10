@@ -23,7 +23,7 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({ responses }) => {
         title: FRAME_TITLE,
         x: 1000,
         y: 0,
-        width: 1200,
+        width: STICKY_WIDTH * 3 + SPACING * 4, // Width to accommodate 3 columns
         height: 1000
       });
     }
@@ -31,17 +31,14 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({ responses }) => {
     return frame;
   };
 
-  const findEmptySpace = async (frame: any, stickyIndex: number) => {
+  const findEmptySpace = (frame: any, stickyIndex: number) => {
     // Calculate grid position with 3 columns for better spacing
     const col = stickyIndex % 3; // 3 columns
     const row = Math.floor(stickyIndex / 3);
     
-    // Calculate position relative to frame with more spacing
-    const startX = frame.x - frame.width/2 + STICKY_WIDTH;  // Start further from left edge
-    const startY = frame.y - frame.height/2 + STICKY_WIDTH/2;  // Start from top
-    
-    const x = startX + col * (STICKY_WIDTH + SPACING);
-    const y = startY + row * (STICKY_WIDTH + SPACING);
+    // Calculate position relative to frame's coordinate system
+    const x = frame.x - frame.width/2 + SPACING + (col * (STICKY_WIDTH + SPACING)) + STICKY_WIDTH/2;
+    const y = frame.y - frame.height/2 + SPACING + (row * (STICKY_WIDTH + SPACING)) + STICKY_WIDTH/2;
     
     return { x, y };
   };
@@ -62,9 +59,9 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({ responses }) => {
         const response = responses[i];
         
         // Find empty space for this sticky
-        const position = await findEmptySpace(frame, i);
+        const position = findEmptySpace(frame, i);
         
-        // Create the sticky note inside the frame's boundaries
+        // Create the sticky note
         const stickyNote = await miro.board.createStickyNote({
           content: response,
           x: position.x,
@@ -76,6 +73,23 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({ responses }) => {
         });
         
         createdStickies.push(stickyNote);
+      }
+
+      // Adjust frame size if needed
+      const rows = Math.ceil(responses.length / 3);
+      const neededHeight = (rows * (STICKY_WIDTH + SPACING)) + SPACING;
+      if (neededHeight > frame.height) {
+        // Create new frame with updated height
+        const updatedFrame = await miro.board.createFrame({
+          title: frame.title,
+          x: frame.x,
+          y: frame.y,
+          width: frame.width,
+          height: neededHeight
+        });
+
+        // Delete old frame (this will not delete the sticky notes)
+        await miro.board.remove(frame);
       }
 
       // Select and zoom to all created sticky notes
@@ -90,13 +104,13 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({ responses }) => {
   };
 
   return (
-      <button
-        type="button"
-        onClick={addSticky}
-        className="button button-primary"
-        disabled={!responses?.length}
-      >
-        Send to Board ({responses?.length} responses)
-      </button>
+    <button
+      type="button"
+      onClick={addSticky}
+      className="button button-primary"
+      disabled={!responses?.length}
+    >
+      Send to Board ({responses?.length} responses)
+    </button>
   );
 };

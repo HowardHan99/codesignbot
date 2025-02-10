@@ -2,7 +2,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SendtoBoard } from './SendtoBoard';
 import ResponseStore from '../utils/responseStore';
-import { saveAnalysis } from '../utils/firebase';
+import { saveAnalysis, getSynthesizedPoints } from '../utils/firebase';
+import { mergeSimilarPoints } from '../utils/textProcessing';
 
 interface AntagoInteractProps {
   stickyNotes: string[];
@@ -23,6 +24,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [isSimplifiedMode, setIsSimplifiedMode] = useState(false);
   const [simplifiedResponses, setSimplifiedResponses] = useState<string[]>([]);
   const [selectedTone, setSelectedTone] = useState<string>('');
+  const [synthesizedPoints, setSynthesizedPoints] = useState<string[]>([]);
   const responseStore = ResponseStore.getInstance();
   const processedRef = useRef(false);
   const [designChallenge, setDesignChallenge] = useState<string>('');
@@ -63,6 +65,21 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   useEffect(() => {
     getDesignChallenge().then(challenge => setDesignChallenge(challenge));
   }, [getDesignChallenge]);
+
+  // Function to get synthesized points
+  const fetchSynthesizedPoints = useCallback(async () => {
+    try {
+      const points = await getSynthesizedPoints();
+      setSynthesizedPoints(points);
+    } catch (error) {
+      console.error('Error fetching synthesized points:', error);
+    }
+  }, []);
+
+  // Fetch synthesized points when component mounts
+  useEffect(() => {
+    fetchSynthesizedPoints();
+  }, [fetchSynthesizedPoints]);
 
   const generateResponse = async (note: string, previousResponse?: string) => {
     const response = await fetch('/api/openaiwrap', {
@@ -314,18 +331,91 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         return;
       }
 
-      // Get all sticky notes in the frame
+      // Calculate frame bounds
+      const frameBounds = {
+        left: responseFrame.x - responseFrame.width / 2,
+        right: responseFrame.x + responseFrame.width / 2,
+        top: responseFrame.y - responseFrame.height / 2,
+        bottom: responseFrame.y + responseFrame.height / 2
+      };
+
+      // Get all sticky notes
       const allStickies = await miro.board.get({ type: 'sticky_note' });
-      const frameStickies = allStickies.filter(sticky => sticky.parentId === responseFrame.id);
       
-      // Delete all sticky notes in the frame
-      for (const sticky of frameStickies) {
+      // Filter sticky notes that are within the frame bounds
+      const stickiesToRemove = allStickies.filter(sticky => {
+        const isInBounds = 
+          sticky.x >= frameBounds.left &&
+          sticky.x <= frameBounds.right &&
+          sticky.y >= frameBounds.top &&
+          sticky.y <= frameBounds.bottom;
+        return isInBounds;
+      });
+      
+      // Remove all sticky notes within the frame bounds
+      for (const sticky of stickiesToRemove) {
         await miro.board.remove(sticky);
       }
       
-      console.log(`Removed ${frameStickies.length} sticky notes from Antagonistic-Response frame`);
+      console.log(`Removed ${stickiesToRemove.length} sticky notes from Antagonistic-Response frame area`);
     } catch (error) {
       console.error('Error cleaning analysis:', error);
+    }
+  };
+
+  const sendSynthesizedPointsToBoard = async () => {
+    if (!synthesizedPoints.length) return;
+
+    try {
+      // Process and merge similar points
+      const processedPoints = mergeSimilarPoints(synthesizedPoints);
+      
+      // Get all frames
+      const frames = await miro.board.get({ type: 'frame' });
+      let responseFrame = frames.find(f => f.title === 'Antagonistic-Response');
+      
+      if (!responseFrame) {
+        // If frame doesn't exist, create it
+        responseFrame = await miro.board.createFrame({
+          title: 'Antagonistic-Response',
+          x: 1000,
+          y: 0,
+          width: 400,
+          height: Math.max(500, processedPoints.length * 50)
+        });
+      }
+
+      // Create formatted text with sections
+      const formattedText = [
+        '🤖 Synthesized Design Critiques',
+        '',
+        'These points represent the key concerns raised across different analyses:',
+        '',
+        ...processedPoints.map((point, index) => `${index + 1}. ${point}`),
+        '',
+        `Total unique points: ${processedPoints.length} (consolidated from ${synthesizedPoints.length} original points)`
+      ].join('\n');
+
+      // Create text box
+      const textBox = await miro.board.createText({
+        content: formattedText,
+        x: responseFrame.x,
+        y: responseFrame.y,
+        width: 350,
+        style: {
+          textAlign: 'left',
+          fontSize: 14,
+          color: '#1a1a1a',
+          fontFamily: 'open_sans'
+        }
+      });
+
+      // Zoom to the created text box
+      await miro.board.viewport.zoomTo(textBox);
+      await miro.board.select({ id: textBox.id });
+
+    } catch (error) {
+      console.error('Error sending synthesized points to board:', error);
     }
   };
 
@@ -419,6 +509,14 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
                   className="button button-secondary"
                 >
                   Clean Analysis Board
+                </button>
+                <button
+                  type="button"
+                  onClick={sendSynthesizedPointsToBoard}
+                  className="button button-secondary"
+                  disabled={!synthesizedPoints.length}
+                >
+                  Show All Suggested Points ({synthesizedPoints.length})
                 </button>
               </>
             )}

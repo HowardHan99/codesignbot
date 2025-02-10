@@ -72,10 +72,8 @@ export function MainBoard({
       
       if (designFrame) {
         setDesignFrameId(designFrame.id);
-        console.log('Found Design-Decision frame:', designFrame.id);
         return designFrame.id;
       }
-      console.log('Design-Decision frame not found');
       return null;
     } catch (err) {
       console.error('Error getting Design-Decision frame:', err);
@@ -88,29 +86,23 @@ export function MainBoard({
     try {
       const frameId = await getDesignFrameId();
       if (!frameId) {
-        console.log('Design-Decision frame not found');
         return [];
       }
 
       // Get all sticky notes on the board
       const allStickies = await miro.board.get({ type: 'sticky_note' });
-      console.log('Total sticky notes found:', allStickies.length);
       
       // Filter sticky notes that belong to the Design-Decision frame
       const frameStickies = allStickies.filter(sticky => {
         const belongs = sticky.parentId === frameId;
-        console.log(`Sticky note ${sticky.id}: parentId=${sticky.parentId}, frameId=${frameId}, belongs=${belongs}`);
         return belongs;
       });
       
-      console.log('Sticky notes in Design-Decision frame:', frameStickies.length);
-
       const notes = frameStickies.map(item => ({
         id: item.id,
         content: item.content || ''
       }));
 
-      console.log('Processed notes:', notes);
       return notes;
 
     } catch (err) {
@@ -121,7 +113,6 @@ export function MainBoard({
 
   // Function to update design notes with debouncing
   const updateDesignNotes = useCallback(async (forceUpdate: boolean = false) => {
-    console.log('updateDesignNotes called, force update:', forceUpdate);
     const now = Date.now();
     const timeSinceLastUpdate = now - lastUpdateRef.current;
 
@@ -132,20 +123,17 @@ export function MainBoard({
 
     // If we've updated recently and this isn't a forced update, schedule an update for later
     if (!forceUpdate && timeSinceLastUpdate < DEBOUNCE_DELAY) {
-      console.log('Debouncing update...');
       updateTimeoutRef.current = setTimeout(() => updateDesignNotes(true), DEBOUNCE_DELAY - timeSinceLastUpdate);
       return;
     }
 
     try {
       const notes = await getCurrentStickyNotes();
-      console.log('Got new notes:', notes);
       
       // Compare with current notes to see if there are actual changes
       const hasChanges = JSON.stringify(notes) !== JSON.stringify(designNotes);
       
       if (hasChanges) {
-        console.log('Notes changed, updating state...');
         setDesignNotes(notes);
       }
     } catch (error) {
@@ -160,7 +148,6 @@ export function MainBoard({
     const setupSubscription = async () => {
       try {
         // Initial fetch
-        console.log('Setting up initial subscription...');
         if (isSubscribed) {
           await updateDesignNotes(true); // Force initial update
         }
@@ -168,7 +155,6 @@ export function MainBoard({
         // Subscribe to board events
         const handleBoardChange = async () => {
           if (!isSubscribed) return;
-          console.log('Board change detected');
           await updateDesignNotes(false); // Regular update with debounce
         };
 
@@ -181,7 +167,6 @@ export function MainBoard({
         events.forEach(event => {
           miro.board.ui.on(event as any, async () => {
             if (!isSubscribed) return;
-            console.log(`Event triggered: ${event}`);
             await handleBoardChange();
           });
         });
@@ -201,7 +186,6 @@ export function MainBoard({
     }, UPDATE_INTERVAL);
 
     return () => {
-      console.log('Cleaning up subscriptions...');
       isSubscribed = false;
       clearInterval(intervalId);
       if (updateTimeoutRef.current) {
