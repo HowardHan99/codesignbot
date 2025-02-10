@@ -144,56 +144,58 @@ export function processSuggestion(text: string): ProcessedPoint {
   };
 }
 
-export function mergeSimilarPoints(points: string[]): string[] {
+export const splitResponse = (response: string): string[] => {
+  if (!response) return [];
+  
+  // First split by ** **
+  const points = response.split('**').map(point => point.trim()).filter(point => point.length > 0);
+  
+  // Clean up any remaining numbers at the start of points
+  return points.map(point => {
+    // Remove numbered prefixes like "1.", "2.", etc.
+    return point.replace(/^\d+\.\s*/, '').trim();
+  }).filter(point => point.length > 0);
+};
+
+export const mergeSimilarPoints = (points: string[]): string[] => {
   if (!points.length) return [];
 
-  // Process all points
-  const processedPoints = points.map(processSuggestion);
-  const mergedPoints = new Map<string, ProcessedPoint>();
+  // Group similar points together
+  const groups: string[][] = [];
+  const usedPoints = new Set<string>();
 
-  // First pass: group by normalized key
-  processedPoints.forEach(point => {
-    const existing = mergedPoints.get(point.key);
-    if (existing) {
-      // Keep the shorter version
-      if (point.original.length < existing.original.length) {
-        mergedPoints.set(point.key, point);
-      }
-    } else {
-      mergedPoints.set(point.key, point);
-    }
-  });
-
-  // Second pass: check for similar points using enhanced similarity
-  const finalPoints = new Map<string, ProcessedPoint>();
-  Array.from(mergedPoints.values()).forEach(point => {
-    let foundMatch = false;
-    let bestMatchKey = '';
-    let bestMatchSimilarity = 0;
+  for (const point of points) {
+    if (usedPoints.has(point)) continue;
     
-    for (const [key, existingPoint] of finalPoints.entries()) {
-      const similarity = getSimilarity(point.simplified, existingPoint.simplified);
-      
-      if (similarity > 0.6 && similarity > bestMatchSimilarity) { // Lower threshold for more aggressive merging
-        bestMatchSimilarity = similarity;
-        bestMatchKey = key;
-        foundMatch = true;
-      }
-    }
-    
-    if (foundMatch) {
-      // Keep the more concise version
-      const existing = finalPoints.get(bestMatchKey)!;
-      if (point.original.length < existing.original.length) {
-        finalPoints.set(bestMatchKey, point);
-      }
-    } else {
-      finalPoints.set(point.key, point);
-    }
-  });
+    const similarPoints = [point];
+    usedPoints.add(point);
 
-  // Return original texts of merged points, sorted by length for readability
-  return Array.from(finalPoints.values())
-    .map(point => point.original)
-    .sort((a, b) => a.length - b.length);
+    // Find similar points
+    for (const otherPoint of points) {
+      if (!usedPoints.has(otherPoint) && calculateSimilarity(point, otherPoint) > 0.7) {
+        similarPoints.push(otherPoint);
+        usedPoints.add(otherPoint);
+      }
+    }
+
+    groups.push(similarPoints);
+  }
+
+  // Select the most representative point from each group
+  return groups.map(group => {
+    // Choose the shortest point as it's likely the most concise
+    return group.reduce((shortest, current) => 
+      current.length < shortest.length ? current : shortest
+    );
+  });
+};
+
+function calculateSimilarity(str1: string, str2: string): number {
+  const words1 = new Set(str1.toLowerCase().split(/\s+/));
+  const words2 = new Set(str2.toLowerCase().split(/\s+/));
+  
+  const intersection = new Set([...words1].filter(x => words2.has(x)));
+  const union = new Set([...words1, ...words2]);
+  
+  return intersection.size / union.size;
 } 
