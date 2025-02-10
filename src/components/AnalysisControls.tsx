@@ -1,12 +1,19 @@
+/**
+ * Props interface for the AnalysisControls component
+ */
 interface AnalysisControlsProps {
-  selectedTone: string;
-  isSimplifiedMode: boolean;
-  synthesizedPointsCount: number;
-  onToneChange: (tone: string) => void;
-  onModeToggle: () => void;
-  onShowSynthesizedPoints: () => void;
+  selectedTone: string;              // Currently selected tone for the analysis
+  isSimplifiedMode: boolean;         // Whether simplified mode is active
+  synthesizedPointsCount: number;    // Number of synthesized points available
+  onToneChange: (tone: string) => void;          // Handler for tone changes
+  onModeToggle: () => void;                      // Handler for mode toggle
+  onShowSynthesizedPoints: () => void;           // Handler for showing synthesized points
 }
 
+/**
+ * Component for controlling analysis settings and displaying synthesized points
+ * Provides UI controls for tone selection, mode toggle, and synthesized points display
+ */
 export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
   selectedTone,
   isSimplifiedMode,
@@ -25,6 +32,7 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
       backgroundColor: '#f5f5f7',
       borderRadius: '8px'
     }}>
+      {/* Synthesized Points Button */}
       <button
         type="button"
         onClick={onShowSynthesizedPoints}
@@ -41,11 +49,13 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
         Show All Suggested Points ({synthesizedPointsCount})
       </button>
 
+      {/* Controls Container */}
       <div style={{ 
         display: 'flex',
         gap: '10px',
         alignItems: 'center',
       }}>
+        {/* Tone Selection */}
         <div style={{ 
           display: 'flex',
           alignItems: 'center',
@@ -65,6 +75,8 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
             <option value="critical">Critical</option>
           </select>
         </div>
+
+        {/* Mode Toggle */}
         <div style={{ 
           display: 'flex',
           alignItems: 'center',
