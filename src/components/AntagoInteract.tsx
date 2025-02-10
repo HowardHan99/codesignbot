@@ -303,6 +303,32 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   }, []);
 
+  const cleanAnalysis = async () => {
+    try {
+      // Get all frames
+      const frames = await miro.board.get({ type: 'frame' });
+      const responseFrame = frames.find(f => f.title === 'Antagonistic-Response');
+      
+      if (!responseFrame) {
+        console.log('No Antagonistic-Response frame found');
+        return;
+      }
+
+      // Get all sticky notes in the frame
+      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      const frameStickies = allStickies.filter(sticky => sticky.parentId === responseFrame.id);
+      
+      // Delete all sticky notes in the frame
+      for (const sticky of frameStickies) {
+        await miro.board.remove(sticky);
+      }
+      
+      console.log(`Removed ${frameStickies.length} sticky notes from Antagonistic-Response frame`);
+    } catch (error) {
+      console.error('Error cleaning analysis:', error);
+    }
+  };
+
   if (error) {
     return <div className="error-message">{error}</div>;
   }
@@ -383,9 +409,18 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'left' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', justifyContent: 'left' }}>
             {(isSimplifiedMode ? simplifiedResponses : responses).length > 0 && (
-              <SendtoBoard responses={splitResponse((isSimplifiedMode ? simplifiedResponses : responses)[0])} />
+              <>
+                <SendtoBoard responses={splitResponse((isSimplifiedMode ? simplifiedResponses : responses)[0])} />
+                <button
+                  type="button"
+                  onClick={cleanAnalysis}
+                  className="button button-secondary"
+                >
+                  Clean Analysis Board
+                </button>
+              </>
             )}
           </div>
         </>
