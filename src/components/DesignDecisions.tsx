@@ -43,10 +43,10 @@ export function MainBoard({
   onAnalysisComplete, 
   onResponsesUpdate 
 }: MainBoardProps) {
-  // State for sticky notes and frame
   const [designNotes, setDesignNotes] = useState<StickyNote[]>([]);
   const [designFrameId, setDesignFrameId] = useState<string | null>(null);
   const [shouldRefresh, setShouldRefresh] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
   
   // Handle refresh click
   const handleRefreshClick = useCallback(() => {
@@ -57,6 +57,7 @@ export function MainBoard({
   // Reset refresh flag when analysis completes
   const handleAnalysisComplete = useCallback(() => {
     setShouldRefresh(false);
+    setIsExpanded(false);
     onAnalysisComplete();
   }, [onAnalysisComplete]);
 
@@ -197,20 +198,37 @@ export function MainBoard({
   return (
     <>
       <div style={{ marginBottom: '20px' }}>
-        <h2>Design Decisions</h2>
-        {designNotes.length === 0 ? (
-          <p>No design decisions found in the "Design-Decision" frame.</p>
-        ) : (
-          <div>
-            <p>Current design decisions you are making:</p>
-            <ul style={{ marginBottom: '20px' }}>
-              {designNotes.map((note, index) => (
-                <li key={`${note.id}-${index}`}>
-                  <div> {note.content.replace(/<\/?p>/g, '')}</div>
-                </li>
-              ))}
-            </ul>
-          </div>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '16px'
+        }}>
+          <h2 style={{ margin: 0 }}>Design Decisions</h2>
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="button button-secondary"
+            style={{ padding: '4px 8px', minWidth: '80px' }}
+          >
+            {isExpanded ? 'Collapse' : 'Expand'}
+          </button>
+        </div>
+        
+        {isExpanded && (
+          designNotes.length === 0 ? (
+            <p>No design decisions found in the "Design-Decision" frame.</p>
+          ) : (
+            <div>
+              <p>Current design decisions you are making:</p>
+              <ul style={{ marginBottom: '20px' }}>
+                {designNotes.map((note, index) => (
+                  <li key={`${note.id}-${index}`}>
+                    <div>{note.content.replace(/<\/?p>/g, '')}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
         )}
       </div>
 

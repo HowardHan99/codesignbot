@@ -21,7 +21,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [responses, setResponses] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isSimplifiedMode, setIsSimplifiedMode] = useState(false);
+  const [isSimplifiedMode, setIsSimplifiedMode] = useState(true);
   const [simplifiedResponses, setSimplifiedResponses] = useState<string[]>([]);
   const [selectedTone, setSelectedTone] = useState<string>('');
   const [synthesizedPoints, setSynthesizedPoints] = useState<string[]>([]);
@@ -433,55 +433,78 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             <h2 style={{ margin: '0 0 16px 0' }}>Antagonistic Analysis</h2>
             <div style={{ 
               display: 'flex',
-              gap: '24px',
-              alignItems: 'center',
+              flexDirection: 'column',
+              gap: '16px',
               marginBottom: '20px',
               padding: '12px',
               backgroundColor: '#f5f5f7',
               borderRadius: '8px'
             }}>
+              <button
+                type="button"
+                onClick={sendSynthesizedPointsToBoard}
+                className="button button-primary"
+                disabled={!synthesizedPoints.length}
+                style={{ 
+                  alignSelf: 'flex-start', 
+                  width: '100%',
+                  backgroundColor: '#4262ff',
+                  color: '#ffffff',
+                  fontWeight: '500'
+                }}
+              >
+                Show All Suggested Points ({synthesizedPoints.length})
+              </button>
+
               <div style={{ 
                 display: 'flex',
+                gap: '10px',
                 alignItems: 'center',
-                gap: '8px',
-                minWidth: '100px'
               }}>
-                <label style={{ fontSize: '14px', fontWeight: '500', whiteSpace: 'nowrap' }}>Tone:</label>
-                <select 
-                  value={selectedTone}
-                  onChange={(e) => handleToneChange(e.target.value)}
-                  className="select"
-                  style={{ flex: 1 }}
-                >
-                  <option value="">Normal</option>
-                  <option value="persuasive">Persuasive</option>
-                  <option value="aggressive">Aggressive</option>
-                  <option value="critical">Critical</option>
-                </select>
-              </div>
-              <div style={{ 
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <label style={{ fontSize: '14px', fontWeight: '500', whiteSpace: 'nowrap' }}>Message:</label>
-                <label className="toggle" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
-                  <input 
-                    type="checkbox" 
-                    tabIndex={0}
-                    checked={isSimplifiedMode}
-                    onChange={handleModeToggle}
-                  />
-                  <span style={{ marginLeft: '0px', fontSize: '14px', whiteSpace: 'nowrap' }}>
-                    {isSimplifiedMode ? 'Simple' : 'Full'}
-                  </span>
-                </label>
+                <div style={{ 
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  minWidth: '100px'
+                }}>
+                  <label style={{ fontSize: '14px', fontWeight: '500', whiteSpace: 'nowrap' }}>Tone:</label>
+                  <select 
+                    value={selectedTone}
+                    onChange={(e) => handleToneChange(e.target.value)}
+                    className="select"
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">Normal</option>
+                    <option value="persuasive">Persuasive</option>
+                    <option value="aggressive">Aggressive</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                </div>
+                <div style={{ 
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '2px'
+                }}>
+                  <label style={{ fontSize: '14px', fontWeight: '500', whiteSpace: 'nowrap' }}>Message:</label>
+                  <label className="toggle" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
+                    <input 
+                      type="checkbox" 
+                      tabIndex={0}
+                      checked={isSimplifiedMode}
+                      onChange={handleModeToggle}
+                    />
+                    <span style={{ marginLeft: '0px', fontSize: '14px', whiteSpace: 'nowrap' }}>
+                      {isSimplifiedMode ? 'Simple' : 'Full'}
+                    </span>
+                  </label>
+                </div>
               </div>
             </div>
+
             {(isSimplifiedMode ? simplifiedResponses : responses).length > 0 && (
               <div className="response-pair" style={{ 
                 marginBottom: '20px', 
-                padding: '16px', 
+                padding: '2px', 
                 border: '1px solid #e6e6e6', 
                 borderRadius: '8px',
                 backgroundColor: '#ffffff'
@@ -499,6 +522,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               </div>
             )}
           </div>
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', justifyContent: 'left' }}>
             {(isSimplifiedMode ? simplifiedResponses : responses).length > 0 && (
               <>
@@ -509,14 +533,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
                   className="button button-secondary"
                 >
                   Clean Analysis Board
-                </button>
-                <button
-                  type="button"
-                  onClick={sendSynthesizedPointsToBoard}
-                  className="button button-secondary"
-                  disabled={!synthesizedPoints.length}
-                >
-                  Show All Suggested Points ({synthesizedPoints.length})
                 </button>
               </>
             )}
