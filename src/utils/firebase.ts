@@ -41,6 +41,15 @@ function aggressiveMergePoints(points: string[]): string[] {
   // First round of merging with standard similarity
   let mergedPoints = mergeSimilarPoints(points);
   
+  console.log('All synthesized points before cutting:', {
+    total: points.length,
+    points: points
+  });
+  console.log('Points after initial merging:', {
+    total: mergedPoints.length,
+    points: mergedPoints
+  });
+  
   // If we still have too many points, do another round with more aggressive merging
   if (mergedPoints.length > 10) {
     // Group points by their main topic/theme
@@ -65,6 +74,11 @@ function aggressiveMergePoints(points: string[]): string[] {
       .map(group => group.sort((a, b) => a.length - b.length)[0])
       .sort((a, b) => a.length - b.length)
       .slice(0, 10); // Ensure we have at most 10 points
+
+    console.log('Points after aggressive merging:', {
+      total: mergedPoints.length,
+      points: mergedPoints
+    });
   }
   
   return mergedPoints;

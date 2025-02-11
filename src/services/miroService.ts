@@ -130,4 +130,37 @@ export class MiroService {
       console.error('Error sending synthesized points to board:', error);
     }
   }
+
+  /**
+   * Retrieves consensus points from the Consensus frame
+   * @returns Promise resolving to an array of consensus points
+   */
+  public static async getConsensusPoints(): Promise<string[]> {
+    try {
+      // Find the Consensus frame
+      const frames = await miro.board.get({ type: 'frame' });
+      const consensusFrame = frames.find(f => f.title === 'Consensus');
+      
+      if (!consensusFrame) {
+        console.log('Consensus frame not found');
+        return [];
+      }
+
+      // Get sticky notes within the consensus frame
+      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      const consensusStickies = allStickies.filter(sticky => sticky.parentId === consensusFrame.id);
+      
+      if (consensusStickies.length === 0) {
+        console.log('No sticky notes found in Consensus frame');
+        return [];
+      }
+
+      // Return array of consensus points
+      return consensusStickies.map(sticky => sticky.content);
+
+    } catch (err) {
+      console.error('Error getting consensus points:', err);
+      return [];
+    }
+  }
 } 

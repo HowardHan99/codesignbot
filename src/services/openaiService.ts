@@ -36,10 +36,34 @@ export class OpenAIService {
    * Generates an antagonistic analysis of design decisions
    * @param userPrompt - The combined design decisions to analyze
    * @param designChallenge - The context of the design challenge
+   * @param existingPoints - Array of existing synthesized points to avoid overlap
+   * @param consensusPoints - Array of consensus points that should not be questioned
    * @returns Promise resolving to the formatted analysis
    */
-  public static async generateAnalysis(userPrompt: string, designChallenge: string): Promise<string> {
-    const systemPrompt = `The user has made several design decisions to tackle the design challenge: "${designChallenge || 'No challenge specified'}". Please analyze these decisions as a whole and provide antagonistic responses that show potential problems or conflicts between these decisions. Consider how these decisions might affect different stakeholders or create unexpected consequences when implemented together. Format your response as a list of points separated by ** **. Do not use numbers, bullet points, or ** ** within the points themselves that would create a split. Each point should be a complete, self-contained criticism. Example format: 'First criticism here ** ** Second criticism here ** ** Third criticism here'. DIRECTLY START WITH THE CRITICISM. No NEED FOR TITLE, SUMMARY, OR ANYTHING ELSE. Limit to 3 points.`;
+  public static async generateAnalysis(
+    userPrompt: string, 
+    designChallenge: string,
+    existingPoints: string[] = [],
+    consensusPoints: string[] = []
+  ): Promise<string> {
+    const existingPointsText = existingPoints.length > 0 
+      ? `\n\nExisting criticism points to avoid overlapping with:\n${existingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
+      : '';
+
+    const consensusPointsText = consensusPoints.length > 0
+      ? `\n\nConsensus points that should NOT be questioned or criticized:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
+      : '';
+
+    const systemPrompt = `The user has made several design decisions to tackle the design challenge: "${designChallenge || 'No challenge specified'}". Please analyze these decisions as a whole and provide antagonistic responses that show potential problems or conflicts between these decisions. Consider how these decisions might affect different stakeholders or create unexpected consequences when implemented together.
+
+Your response should:
+1. NEVER question or criticize the consensus points listed below - these are established agreements that must be respected
+2. Avoid overlapping with or repeating existing criticism points
+3. Focus on finding new angles and perspectives not covered by existing points
+4. Provide fresh insights that complement rather than repeat previous analyses
+5. Only criticize the design decisions that are not in the consensus points list
+
+Format your response as a list of points separated by ** **. Do not use numbers, bullet points, or ** ** within the points themselves that would create a split. Each point should be a complete, self-contained criticism. Example format: 'First criticism here ** ** Second criticism here ** ** Third criticism here'. DIRECTLY START WITH THE CRITICISM. No NEED FOR TITLE, SUMMARY, OR ANYTHING ELSE. Limit to 3 points.${consensusPointsText}${existingPointsText}`;
 
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt,

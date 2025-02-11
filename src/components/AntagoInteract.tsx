@@ -34,6 +34,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [selectedTone, setSelectedTone] = useState<string>('');
   const [synthesizedPoints, setSynthesizedPoints] = useState<string[]>([]);
   const [designChallenge, setDesignChallenge] = useState<string>('');
+  const [consensusPoints, setConsensusPoints] = useState<string[]>([]);
   
   // Singleton instance for managing response storage
   const responseStore = ResponseStore.getInstance();
@@ -42,9 +43,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const processedRef = useRef(false);
   const processingRef = useRef(false);  // New ref to prevent concurrent processing
 
-  // Fetch design challenge on mount
+  // Fetch design challenge and consensus points on mount
   useEffect(() => {
-    MiroService.getDesignChallenge().then(challenge => setDesignChallenge(challenge));
+    Promise.all([
+      MiroService.getDesignChallenge(),
+      MiroService.getConsensusPoints()
+    ]).then(([challenge, consensus]) => {
+      setDesignChallenge(challenge);
+      setConsensusPoints(consensus);
+    });
   }, []);
 
   // Fetch synthesized points on mount
@@ -88,7 +95,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       ).join('\n');
       
       // Generate initial response
-      const response = await OpenAIService.generateAnalysis(combinedMessage, designChallenge);
+      const response = await OpenAIService.generateAnalysis(
+        combinedMessage, 
+        designChallenge,
+        synthesizedPoints,  // Pass existing synthesized points
+        consensusPoints    // Pass consensus points
+      );
       setResponses([response]);
 
       // Generate simplified version
@@ -126,7 +138,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setLoading(false);
       processingRef.current = false;  // Reset processing flag
     }
-  }, [stickyNotes, designChallenge, isSimplifiedMode, selectedTone, onComplete, onResponsesUpdate]);
+  }, [stickyNotes, designChallenge, isSimplifiedMode, selectedTone, onComplete, onResponsesUpdate, synthesizedPoints, consensusPoints]);
 
   /**
    * Handle toggling between simplified and full response modes
