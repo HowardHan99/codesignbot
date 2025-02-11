@@ -8,6 +8,7 @@ interface AnalysisResultsProps {
   isSimplifiedMode: boolean;     // Whether simplified mode is active
   selectedTone: string;          // Currently selected tone
   onCleanAnalysis: () => void;   // Handler for cleaning the analysis board
+  isChangingTone?: boolean;      // Whether tone is currently being changed
 }
 
 /**
@@ -20,6 +21,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   isSimplifiedMode,
   selectedTone,
   onCleanAnalysis,
+  isChangingTone = false,
 }) => {
   // Don't render anything if there are no responses
   if (!responses.length) return null;
@@ -32,9 +34,46 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
         padding: '2px', 
         border: '1px solid #e6e6e6', 
         borderRadius: '8px',
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        position: 'relative',
+        minHeight: '100px'
       }}>
-        <div>
+        {isChangingTone && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(255, 255, 255, 0.8)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1,
+            borderRadius: '8px'
+          }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              border: '3px solid #f3f3f3',
+              borderTop: '3px solid #4262ff',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              marginBottom: '10px'
+            }} />
+            <div style={{ color: '#666', fontSize: '14px' }}>
+              Adjusting tone...
+            </div>
+            <style jsx>{`
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `}</style>
+          </div>
+        )}
+        <div style={{ opacity: isChangingTone ? 0.3 : 1, transition: 'opacity 0.2s' }}>
           {/* Header showing current mode and tone */}
           <strong style={{ display: 'block', marginBottom: '12px' }}>
             Analysis Points {isSimplifiedMode ? '(Simplified)' : ''} {selectedTone ? `(${selectedTone} tone)` : ''}
@@ -57,6 +96,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
           type="button"
           onClick={onCleanAnalysis}
           className="button button-secondary"
+          disabled={isChangingTone}
         >
           Clean Analysis Board
         </button>

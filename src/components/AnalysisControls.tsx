@@ -96,6 +96,20 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
           </label>
         </div>
       </div>
+
+      {/* Simplified Mode Note */}
+      {isSimplifiedMode && (
+        <div style={{ 
+          fontSize: '13px', 
+          color: '#666',
+          fontStyle: 'italic',
+          borderTop: '1px solid rgba(0,0,0,0.1)',
+          marginTop: '4px',
+          paddingTop: '12px'
+        }}>
+          💡 Currently showing simplified points. Toggle the Message switch above to see the full points.
+        </div>
+      )}
     </div>
   );
 }; 

@@ -11,12 +11,20 @@ import { AnalysisResults } from './AnalysisResults';
 import ResponseStore from '../utils/responseStore';
 import { saveAnalysis, getSynthesizedPoints } from '../utils/firebase';
 import { splitResponse } from '../utils/textProcessing';
+import { EmbeddingService } from '../services/embeddingService';
 
 interface AntagoInteractProps {
   stickyNotes: string[];          // Array of sticky note contents from the design decisions
   onComplete?: () => void;        // Callback when analysis is complete
   onResponsesUpdate?: (responses: string[]) => void;  // Callback to update parent with new responses
   shouldRefresh?: boolean;        // Flag to trigger a refresh of the analysis
+}
+
+interface StoredResponses {
+  normal: string;
+  persuasive?: string;
+  aggressive?: string;
+  critical?: string;
 }
 
 const AntagoInteract: React.FC<AntagoInteractProps> = ({ 
@@ -35,6 +43,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [synthesizedPoints, setSynthesizedPoints] = useState<string[]>([]);
   const [designChallenge, setDesignChallenge] = useState<string>('');
   const [consensusPoints, setConsensusPoints] = useState<string[]>([]);
+  const [isChangingTone, setIsChangingTone] = useState(false);
+  const [storedFullResponses, setStoredFullResponses] = useState<StoredResponses>({ normal: '' });
+  const [storedSimplifiedResponses, setStoredSimplifiedResponses] = useState<StoredResponses>({ normal: '' });
   
   // Singleton instance for managing response storage
   const responseStore = ResponseStore.getInstance();
@@ -69,7 +80,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
   /**
    * Process sticky notes to generate analysis
-   * @param forceProcess - Force processing even if already processed
    */
   const processNotes = useCallback(async (forceProcess: boolean = false) => {
     // Prevent processing if no notes or already processed
@@ -84,6 +94,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
     processingRef.current = true;
     setLoading(true);
+    setSelectedTone(''); // Reset tone to normal
     
     try {
       console.log('Processing combined notes for analysis');
@@ -98,14 +109,16 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       const response = await OpenAIService.generateAnalysis(
         combinedMessage, 
         designChallenge,
-        synthesizedPoints,  // Pass existing synthesized points
-        consensusPoints    // Pass consensus points
+        synthesizedPoints,
+        consensusPoints
       );
       setResponses([response]);
+      setStoredFullResponses({ normal: response }); // Store normal tone
 
       // Generate simplified version
       const simplified = await OpenAIService.simplifyAnalysis(response);
       setSimplifiedResponses([simplified]);
+      setStoredSimplifiedResponses({ normal: simplified }); // Store normal tone
       
       // Save to Firebase
       try {
@@ -136,7 +149,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       onComplete?.();
     } finally {
       setLoading(false);
-      processingRef.current = false;  // Reset processing flag
+      processingRef.current = false;
     }
   }, [stickyNotes, designChallenge, isSimplifiedMode, selectedTone, onComplete, onResponsesUpdate, synthesizedPoints, consensusPoints]);
 
@@ -161,46 +174,51 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     if (!responses.length) return;
 
     try {
-      const currentResponse = isSimplifiedMode ? simplifiedResponses[0] : responses[0];
+      setIsChangingTone(true);
+      
+      // If no tone selected, use normal version
       if (!newTone) {
-        // Restore original responses when returning to normal tone
-        const storedFull = responseStore.getStoredResponse('full-response');
-        const storedSimplified = responseStore.getStoredResponse('simplified-response');
-        if (storedFull?.response) setResponses([storedFull.response]);
-        if (storedSimplified?.response) setSimplifiedResponses([storedSimplified.response]);
-        onResponsesUpdate?.(splitResponse(isSimplifiedMode ? storedSimplified?.response || '' : storedFull?.response || ''));
+        const normalFull = storedFullResponses.normal;
+        const normalSimplified = storedSimplifiedResponses.normal;
+        setResponses([normalFull]);
+        setSimplifiedResponses([normalSimplified]);
+        onResponsesUpdate?.(splitResponse(isSimplifiedMode ? normalSimplified : normalFull));
         return;
       }
 
-      // Adjust tone of current response
-      const adjustedResponse = await OpenAIService.adjustTone(currentResponse, newTone);
-      if (isSimplifiedMode) {
-        setSimplifiedResponses([adjustedResponse]);
-      } else {
-        setResponses([adjustedResponse]);
+      // Check if we already have this tone version stored
+      const storedResponses = isSimplifiedMode ? storedSimplifiedResponses : storedFullResponses;
+      if (storedResponses[newTone as keyof StoredResponses]) {
+        const storedResponse = storedResponses[newTone as keyof StoredResponses]!;
+        if (isSimplifiedMode) {
+          setSimplifiedResponses([storedResponse]);
+        } else {
+          setResponses([storedResponse]);
+        }
+        onResponsesUpdate?.(splitResponse(storedResponse));
+        return;
       }
 
-      // Save updated analysis to Firebase
-      try {
-        await saveAnalysis({
-          timestamp: null,
-          designChallenge: designChallenge,
-          decisions: stickyNotes,
-          analysis: {
-            full: splitResponse(isSimplifiedMode ? responses[0] : adjustedResponse),
-            simplified: splitResponse(isSimplifiedMode ? adjustedResponse : simplifiedResponses[0])
-          },
-          tone: newTone
-        });
-      } catch (error) {
-        console.error('Error saving tone change to Firebase:', error);
+      // If we don't have this tone stored, generate it
+      const currentResponse = isSimplifiedMode ? simplifiedResponses[0] : responses[0];
+      const adjustedResponse = await OpenAIService.adjustTone(currentResponse, newTone);
+      
+      // Store the new tone version
+      if (isSimplifiedMode) {
+        setStoredSimplifiedResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
+        setSimplifiedResponses([adjustedResponse]);
+      } else {
+        setStoredFullResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
+        setResponses([adjustedResponse]);
       }
 
       onResponsesUpdate?.(splitResponse(adjustedResponse));
     } catch (error) {
       console.error('Error updating tone:', error);
+    } finally {
+      setIsChangingTone(false);
     }
-  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, stickyNotes, designChallenge]);
+  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, storedFullResponses, storedSimplifiedResponses]);
 
   // Process notes on refresh or initial mount
   useEffect(() => {
@@ -237,6 +255,14 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   }, []);
 
+  // Reset stored responses when analysis is refreshed
+  useEffect(() => {
+    if (shouldRefresh) {
+      setStoredFullResponses({ normal: '' });
+      setStoredSimplifiedResponses({ normal: '' });
+    }
+  }, [shouldRefresh]);
+
   if (error) {
     return <div className="error-message">{error}</div>;
   }
@@ -264,6 +290,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               isSimplifiedMode={isSimplifiedMode}
               selectedTone={selectedTone}
               onCleanAnalysis={() => MiroService.cleanAnalysisBoard()}
+              isChangingTone={isChangingTone}
             />
           </div>
         </>
