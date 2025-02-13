@@ -1,30 +1,16 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { BoardDisplay } from '../components/BoardDisplay';
 import { getMiroAuth } from '../utils/miroClient';
 import '../assets/style.css';
 
-// Firebase config
-const firebaseConfig = {
-  apiKey: "AIzaSyBsHoAvguKeV8XnT6EkV2Q0hyAv6OEw8bo",
-  authDomain: "codesignagent-f4420.firebaseapp.com",
-  databaseURL: "https://codesignagent-f4420-default-rtdb.firebaseio.com",
-  projectId: "codesignagent-f4420",
-  storageBucket: "codesignagent-f4420.firebasestorage.app",
-  messagingSenderId: "121164910498",
-  appId: "1:121164910498:web:552f246dc0a3f28792ecfb",
-  measurementId: "G-YKVCSPS593"
-};
-
-export { firebaseConfig };
-
 export default function Page() {
-  const [authUrl, setAuthUrl] = useState<string | null>(null);
-  const [isAuthorized, setIsAuthorized] = useState(false);
-  const [boards, setBoards] = useState<any[]>([]);
+  const [authUrl, setAuthUrl] = React.useState<string | null>(null);
+  const [isAuthorized, setIsAuthorized] = React.useState(false);
+  const [boards, setBoards] = React.useState<any[]>([]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     const checkAuth = async () => {
       const auth = await getMiroAuth();
       setAuthUrl(auth.authUrl);

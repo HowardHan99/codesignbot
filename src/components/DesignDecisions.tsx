@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import { MiroService } from '../services/miroService';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
@@ -47,12 +48,30 @@ export function MainBoard({
   const [designFrameId, setDesignFrameId] = useState<string | null>(null);
   const [shouldRefresh, setShouldRefresh] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [isSavingImage, setIsSavingImage] = useState(false);
   
   // Handle refresh click
   const handleRefreshClick = useCallback(() => {
     setShouldRefresh(true);
     onAnalysisClick();
   }, [onAnalysisClick]);
+
+  // Handle save robot image
+  const handleSaveRobotImage = useCallback(async () => {
+    try {
+      setIsSavingImage(true);
+      const imagePaths = await MiroService.getAllImagesFromFrame();
+      if (imagePaths.length > 0) {
+        console.log('Images saved successfully:', imagePaths);
+      } else {
+        console.log('No images found in Sketch-Reference frame');
+      }
+    } catch (error) {
+      console.error('Error saving images:', error);
+    } finally {
+      setIsSavingImage(false);
+    }
+  }, []);
 
   // Reset refresh flag when analysis completes
   const handleAnalysisComplete = useCallback(() => {
@@ -227,6 +246,14 @@ export function MainBoard({
                   </li>
                 ))}
               </ul>
+              <button
+                onClick={handleSaveRobotImage}
+                className="button button-secondary"
+                style={{ marginBottom: '16px' }}
+                disabled={isSavingImage}
+              >
+                {isSavingImage ? 'Saving Images...' : 'Save All Images'}
+              </button>
             </div>
           )
         )}

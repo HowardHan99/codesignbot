@@ -2,7 +2,7 @@
 
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getDatabase, ref, push, serverTimestamp, get, Database } from 'firebase/database';
-import { firebaseConfig } from '../app/page';
+import { firebaseConfig } from './config';
 import { mergeSimilarPoints } from './textProcessing';
 
 // Initialize Firebase only on the client side
