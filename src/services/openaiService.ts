@@ -156,4 +156,43 @@ Important:
 
     return result.response.replace(/•/g, '**').replace(/\n/g, ' ** ');
   }
+
+  /**
+   * Generates a response in a conversation context
+   * @param userMessage - The user's current message
+   * @param designChallenge - The context of the design challenge
+   * @param currentCriticism - Array of current criticism points
+   * @param conversationContext - Previous conversation history
+   * @returns Promise resolving to the assistant's response
+   */
+  public static async generateConversationResponse(
+    userMessage: string,
+    designChallenge: string,
+    currentCriticism: string[],
+    conversationContext: string
+  ): Promise<string> {
+    const systemPrompt = `You are a design critique agent helping with the design challenge: "${designChallenge}".
+You have provided these criticisms:
+${currentCriticism.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+
+Previous conversation context:
+${conversationContext}
+
+Rules:
+1. If the user clarifies something about your criticism, remember it for future interactions
+2. If the user disagrees with a point, engage in a constructive discussion
+3. Keep responses focused on the design challenge and your criticisms
+4. Be direct but professional
+5. If the user types "noted", acknowledge and move on
+6. If you receive an instruction starting with "instruct:", follow it precisely
+
+Respond to the user's message in a helpful and constructive way.`;
+
+    const result = await this.makeRequest('/api/openaiwrap', {
+      userPrompt: userMessage,
+      systemPrompt,
+    });
+
+    return result.response;
+  }
 } 

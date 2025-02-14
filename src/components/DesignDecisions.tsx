@@ -2,6 +2,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { MiroService } from '../services/miroService';
+import { ConversationBox } from './ConversationBox';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
@@ -49,6 +50,7 @@ export function MainBoard({
   const [shouldRefresh, setShouldRefresh] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
   const [isSavingImage, setIsSavingImage] = useState(false);
+  const [designChallenge, setDesignChallenge] = useState<string>('');
   
   // Handle refresh click
   const handleRefreshClick = useCallback(() => {
@@ -214,6 +216,22 @@ export function MainBoard({
     };
   }, [updateDesignNotes]);
 
+  useEffect(() => {
+    updateDesignNotes();
+  }, [updateDesignNotes]);
+
+  useEffect(() => {
+    const fetchDesignChallenge = async () => {
+      try {
+        const challenge = await MiroService.getDesignChallenge();
+        setDesignChallenge(challenge);
+      } catch (error) {
+        console.error('Error fetching design challenge:', error);
+      }
+    };
+    fetchDesignChallenge();
+  }, []);
+
   return (
     <>
       <div style={{ marginBottom: '20px' }}>
@@ -254,6 +272,14 @@ export function MainBoard({
               >
                 {isSavingImage ? 'Saving Images...' : 'Save All Images'}
               </button>
+
+              <ConversationBox
+                designChallenge={designChallenge}
+                currentCriticism={[]}
+                onInstructionReceived={(instruction) => {
+                  console.log('Received instruction:', instruction);
+                }}
+              />
             </div>
           )
         )}

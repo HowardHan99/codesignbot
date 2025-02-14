@@ -88,7 +88,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
       </div>
 
       {/* Board Control Buttons */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', justifyContent: 'left' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', justifyContent: 'left', marginTop: '20px' }}>
         {/* Button to send responses to Miro board */}
         <SendtoBoard responses={responses} />
         {/* Button to clean existing analysis from board */}
