@@ -3,28 +3,18 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { MiroService } from '../services/miroService';
 import { ConversationBox } from './ConversationBox';
+import { OpenAIService } from '../services/openaiService';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
 });
 
-interface SerializedBoard {
-  id: string;
-  name: string;
-}
-
-interface BoardDisplayProps {
-  boards: SerializedBoard[];
-}
 
 interface StickyNote {
   id: string;
   content: string;
 }
 
-interface ResponseMap {
-  [key: string]: string; // Maps sticky note ID to its response
-}
 
 interface MainBoardProps {
   showAnalysis: boolean;
@@ -50,7 +40,10 @@ export function MainBoard({
   const [shouldRefresh, setShouldRefresh] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
   const [isSavingImage, setIsSavingImage] = useState(false);
+  const [isParsingImage, setIsParsingImage] = useState(false);
   const [designChallenge, setDesignChallenge] = useState<string>('');
+  const [currentResponses, setCurrentResponses] = useState<string[]>([]);
+  const [imageContext, setImageContext] = useState<string>('');
   
   // Handle refresh click
   const handleRefreshClick = useCallback(() => {
@@ -72,6 +65,27 @@ export function MainBoard({
       console.error('Error saving images:', error);
     } finally {
       setIsSavingImage(false);
+    }
+  }, []);
+
+  // Handle parse robot image
+  const handleParseRobotImage = useCallback(async () => {
+    try {
+      setIsParsingImage(true);
+      const imagePaths = await MiroService.getAllImagesFromFrame();
+      if (imagePaths.length > 0) {
+        // Get image descriptions from OpenAI Vision
+        const descriptions = await OpenAIService.analyzeImages(imagePaths);
+        const combinedContext = descriptions.join('\n\nNext Image:\n');
+        setImageContext(combinedContext);
+        console.log('Images parsed successfully:', descriptions);
+      } else {
+        console.log('No images found in Sketch-Reference frame');
+      }
+    } catch (error) {
+      console.error('Error parsing images:', error);
+    } finally {
+      setIsParsingImage(false);
     }
   }, []);
 
@@ -232,6 +246,11 @@ export function MainBoard({
     fetchDesignChallenge();
   }, []);
 
+  const handleResponsesUpdate = useCallback((responses: string[]) => {
+    setCurrentResponses(responses);
+    onResponsesUpdate(responses);
+  }, [onResponsesUpdate]);
+
   return (
     <>
       <div style={{ marginBottom: '20px' }}>
@@ -250,6 +269,24 @@ export function MainBoard({
             {isExpanded ? 'Collapse' : 'Expand'}
           </button>
         </div>
+
+        {/* Image Action Buttons */}
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+          <button
+            onClick={handleSaveRobotImage}
+            className="button button-secondary"
+            disabled={isSavingImage}
+          >
+            {isSavingImage ? 'Saving Images...' : 'Save Images'}
+          </button>
+          <button
+            onClick={handleParseRobotImage}
+            className="button button-secondary"
+            disabled={isParsingImage}
+          >
+            {isParsingImage ? 'Parsing Images...' : 'Parse Images'}
+          </button>
+        </div>
         
         {isExpanded && (
           designNotes.length === 0 ? (
@@ -264,22 +301,6 @@ export function MainBoard({
                   </li>
                 ))}
               </ul>
-              <button
-                onClick={handleSaveRobotImage}
-                className="button button-secondary"
-                style={{ marginBottom: '16px' }}
-                disabled={isSavingImage}
-              >
-                {isSavingImage ? 'Saving Images...' : 'Save All Images'}
-              </button>
-
-              <ConversationBox
-                designChallenge={designChallenge}
-                currentCriticism={[]}
-                onInstructionReceived={(instruction) => {
-                  console.log('Received instruction:', instruction);
-                }}
-              />
             </div>
           )
         )}
@@ -297,14 +318,22 @@ export function MainBoard({
       </div>
 
       {showAnalysis && designNotes.length > 0 && (
-        <div>
+        <>
           <AntagoInteract 
             stickyNotes={designNotes.map(note => note.content)}
             onComplete={handleAnalysisComplete}
-            onResponsesUpdate={onResponsesUpdate}
+            onResponsesUpdate={handleResponsesUpdate}
             shouldRefresh={shouldRefresh}
+            imageContext={imageContext}
           />
-        </div>
+          <ConversationBox
+            designChallenge={designChallenge}
+            currentCriticism={currentResponses}
+            onInstructionReceived={(instruction) => {
+              console.log('Received instruction:', instruction);
+            }}
+          />
+        </>
       )}
     </>
   );

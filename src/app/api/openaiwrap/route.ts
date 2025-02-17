@@ -12,13 +12,39 @@ export const dynamic = 'force-dynamic'; // No caching
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userPrompt, systemPrompt } = body;
+    const { userPrompt, systemPrompt, isVisionRequest } = body;
 
     if (!userPrompt || !systemPrompt) {
       return NextResponse.json(
         { error: 'Missing userPrompt or systemPrompt' },
         { status: 400 }
       );
+    }
+
+    if (isVisionRequest) {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4-vision-preview',
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Please analyze this image:' },
+              {
+                type: 'image_url',
+                image_url: userPrompt,
+              },
+            ],
+          },
+        ],
+        max_tokens: 500,
+      });
+
+      const assistantMessage = response.choices[0]?.message?.content || 'No response';
+      return NextResponse.json({ response: assistantMessage });
     }
 
     const response = await openai.chat.completions.create({

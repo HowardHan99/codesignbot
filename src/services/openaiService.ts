@@ -195,4 +195,39 @@ Respond to the user's message in a helpful and constructive way.`;
 
     return result.response;
   }
+
+  /**
+   * Analyzes images using OpenAI's Vision model
+   * @param imagePaths Array of image paths to analyze
+   * @returns Promise resolving to array of image descriptions
+   */
+  public static async analyzeImages(imagePaths: string[]): Promise<string[]> {
+    try {
+      const descriptions = await Promise.all(imagePaths.map(async (path) => {
+        const result = await fetch('/api/openaiwrap', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userPrompt: path,
+            systemPrompt: 'You are a helpful assistant analyzing design sketches. Describe the key elements, interactions, and design patterns you observe in this image. Focus on the user interface elements and their relationships.',
+            isVisionRequest: true
+          }),
+        });
+
+        if (!result.ok) {
+          throw new Error(`Failed to analyze image: ${result.status}`);
+        }
+
+        const { response } = await result.json();
+        return response;
+      }));
+
+      return descriptions;
+    } catch (error) {
+      console.error('Error analyzing images:', error);
+      throw error;
+    }
+  }
 } 

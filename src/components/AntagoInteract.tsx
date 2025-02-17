@@ -18,6 +18,7 @@ interface AntagoInteractProps {
   onComplete?: () => void;        // Callback when analysis is complete
   onResponsesUpdate?: (responses: string[]) => void;  // Callback to update parent with new responses
   shouldRefresh?: boolean;        // Flag to trigger a refresh of the analysis
+  imageContext?: string;          // Context from analyzed images
 }
 
 interface StoredResponses {
@@ -31,7 +32,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   stickyNotes, 
   onComplete,
   onResponsesUpdate,
-  shouldRefresh = false
+  shouldRefresh = false,
+  imageContext
 }) => {
   // State management for responses and UI
   const [responses, setResponses] = useState<string[]>([]);
@@ -104,10 +106,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       const combinedMessage = stickyNotes.map((note, index) => 
         `Design Decision ${index + 1}: ${note}`
       ).join('\n');
+
+      // Add image context if available
+      const messageWithContext = imageContext 
+        ? `${combinedMessage}\n\nRelevant visual context from design sketches:\n${imageContext}`
+        : combinedMessage;
       
       // Generate initial response
       const response = await OpenAIService.generateAnalysis(
-        combinedMessage, 
+        messageWithContext, 
         designChallenge,
         synthesizedPoints,
         consensusPoints
@@ -151,7 +158,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setLoading(false);
       processingRef.current = false;
     }
-  }, [stickyNotes, designChallenge, isSimplifiedMode, selectedTone, onComplete, onResponsesUpdate, synthesizedPoints, consensusPoints]);
+  }, [stickyNotes, designChallenge, isSimplifiedMode, selectedTone, onComplete, onResponsesUpdate, synthesizedPoints, consensusPoints, imageContext]);
 
   /**
    * Handle toggling between simplified and full response modes

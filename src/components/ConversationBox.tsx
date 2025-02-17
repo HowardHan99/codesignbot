@@ -140,7 +140,7 @@ export const ConversationBox: React.FC<ConversationBoxProps> = ({
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-          placeholder={messages.length === 0 ? "Start a conversation about your design decisions..." : "Type your message here..."}
+          placeholder="Ask me about the analysis or your design decisions..."
           style={{
             flex: 1,
             padding: '8px 12px',
