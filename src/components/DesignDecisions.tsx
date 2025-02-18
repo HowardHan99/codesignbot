@@ -4,6 +4,8 @@ import dynamic from 'next/dynamic';
 import { MiroService } from '../services/miroService';
 import { ConversationBox } from './ConversationBox';
 import { OpenAIService } from '../services/openaiService';
+import { MiroConversationModal } from './MiroConversationModal';
+import { ConversationPanel } from './ConversationPanel';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
@@ -44,7 +46,7 @@ export function MainBoard({
   const [designChallenge, setDesignChallenge] = useState<string>('');
   const [currentResponses, setCurrentResponses] = useState<string[]>([]);
   const [imageContext, setImageContext] = useState<string>('');
-  
+
   // Handle refresh click
   const handleRefreshClick = useCallback(() => {
     setShouldRefresh(true);
@@ -251,6 +253,22 @@ export function MainBoard({
     onResponsesUpdate(responses);
   }, [onResponsesUpdate]);
 
+  const handleOpenConversation = useCallback(async () => {
+    await miro.board.ui.openModal({
+      url: '/conversation-modal',
+      width: 400,
+      height: 600,
+      fullscreen: false,
+    });
+
+    // Send the current context to the modal
+    window.postMessage({
+      type: 'INIT_MODAL',
+      designChallenge,
+      currentCriticism: currentResponses
+    }, '*');
+  }, [designChallenge, currentResponses]);
+
   return (
     <>
       <div style={{ marginBottom: '20px' }}>
@@ -326,13 +344,13 @@ export function MainBoard({
             shouldRefresh={shouldRefresh}
             imageContext={imageContext}
           />
-          <ConversationBox
-            designChallenge={designChallenge}
-            currentCriticism={currentResponses}
-            onInstructionReceived={(instruction) => {
-              console.log('Received instruction:', instruction);
-            }}
-          />
+          <button
+            onClick={handleOpenConversation}
+            className="button button-primary"
+            style={{ marginTop: '16px' }}
+          >
+            Respond to Analysis
+          </button>
         </>
       )}
     </>
