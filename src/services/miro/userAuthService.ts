@@ -101,11 +101,8 @@ export class UserAuthService {
         storedData[access.frameId] = access.authorizedEmails;
       });
 
-      const appData: AppData = {
-        [this.AUTH_METADATA_KEY]: storedData as Json
-      };
-      
-      await miro.board.setAppData(appData, this.AUTH_METADATA_SCOPE);
+      const data = storedData as Json;
+      await miro.board.setAppData(this.AUTH_METADATA_KEY, data);
     } catch (error) {
       console.error('Error saving authorized access:', error);
       throw error;
