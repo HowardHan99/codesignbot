@@ -1,5 +1,6 @@
 import { Frame } from '@mirohq/websdk-types';
 import { UserAuthService } from './userAuthService';
+import BoardTokenManager from '../../utils/boardTokenManager';
 
 /**
  * Service for handling Miro frame operations
@@ -8,6 +9,21 @@ export class MiroFrameService {
   // Constants for remote frame positioning
   private static readonly REMOTE_OFFSET_X = 20000; // Far right
   private static readonly REMOTE_OFFSET_Y = 20000; // Far down
+
+  /**
+   * Initialize the service with a specific board token if needed
+   */
+  public static async initializeWithBoard(boardId: string, token: string): Promise<void> {
+    BoardTokenManager.saveToken(boardId, token);
+  }
+
+  /**
+   * Get the current board ID
+   */
+  public static async getCurrentBoardId(): Promise<string> {
+    const board = await miro.board.getInfo();
+    return board.id;
+  }
 
   /**
    * Finds a frame by its title
