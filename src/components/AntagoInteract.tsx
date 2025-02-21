@@ -39,7 +39,14 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [responses, setResponses] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isSimplifiedMode, setIsSimplifiedMode] = useState(true);
+  const [isSimplifiedMode, setIsSimplifiedMode] = useState(() => {
+    // Initialize from localStorage if available, otherwise default to false
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('isSimplifiedMode');
+      return saved ? JSON.parse(saved) : false;
+    }
+    return false;
+  });
   const [simplifiedResponses, setSimplifiedResponses] = useState<string[]>([]);
   const [selectedTone, setSelectedTone] = useState<string>('');
   const [synthesizedPoints, setSynthesizedPoints] = useState<string[]>([]);
@@ -56,12 +63,20 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const processedRef = useRef(false);
   const processingRef = useRef(false);  // New ref to prevent concurrent processing
 
+  // Save to localStorage whenever isSimplifiedMode changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('isSimplifiedMode', JSON.stringify(isSimplifiedMode));
+    }
+  }, [isSimplifiedMode]);
+
   // Fetch design challenge and consensus points on mount
   useEffect(() => {
     Promise.all([
       MiroService.getDesignChallenge(),
       MiroService.getConsensusPoints()
     ]).then(([challenge, consensus]) => {
+      console.log('Fetched initial consensus points:', consensus);
       setDesignChallenge(challenge);
       setConsensusPoints(consensus);
     });
@@ -84,8 +99,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
    * Process sticky notes to generate analysis
    */
   const processNotes = useCallback(async (forceProcess: boolean = false) => {
-    // Prevent processing if no notes or already processed
-    if (!stickyNotes.length || (processedRef.current && !forceProcess)) {
+    // Prevent processing if no notes
+    if (!stickyNotes.length) {
       return;
     }
 
@@ -96,14 +111,31 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
     processingRef.current = true;
     setLoading(true);
-    setSelectedTone(''); // Reset tone to normal
+    setSelectedTone('');
     
     try {
       console.log('Processing combined notes for analysis');
+      console.log('Current consensus points:', consensusPoints);
       responseStore.clear();
+
+      // Get fresh sticky notes from the Design-Decision frame
+      const frames = await miro.board.get({ type: 'frame' });
+      const designFrame = frames.find(f => f.title === 'Design-Decision');
+      
+      if (!designFrame) {
+        throw new Error('Design-Decision frame not found');
+      }
+
+      // Get all sticky notes on the board
+      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      
+      // Filter sticky notes that belong to the Design-Decision frame
+      const frameStickies = allStickies
+        .filter(sticky => sticky.parentId === designFrame.id)
+        .map(sticky => sticky.content || '');
       
       // Combine sticky notes into a single message
-      const combinedMessage = stickyNotes.map((note, index) => 
+      const combinedMessage = frameStickies.map((note, index) => 
         `Design Decision ${index + 1}: ${note}`
       ).join('\n');
 
@@ -129,16 +161,19 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       // Save to Firebase
       try {
-        await saveAnalysis({
+        const analysisData = {
           timestamp: null,
           designChallenge: designChallenge,
-          decisions: stickyNotes,
+          decisions: frameStickies,
           analysis: {
             full: splitResponse(response),
             simplified: splitResponse(simplified)
           },
-          tone: selectedTone || 'normal'
-        });
+          tone: selectedTone || 'normal',
+          consensusPoints: consensusPoints
+        };
+        console.log('Saving analysis with data:', analysisData);
+        await saveAnalysis(analysisData);
       } catch (error) {
         console.error('Error saving to Firebase:', error);
       }
@@ -155,23 +190,23 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setError('Failed to process sticky notes. Please try again.');
       onComplete?.();
     } finally {
-      setLoading(false);
       processingRef.current = false;
+      setLoading(false);
     }
-  }, [stickyNotes, designChallenge, isSimplifiedMode, selectedTone, onComplete, onResponsesUpdate, synthesizedPoints, consensusPoints, imageContext]);
+  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints]);
 
-  /**
-   * Handle toggling between simplified and full response modes
-   */
+  // Handle mode toggle
   const handleModeToggle = useCallback(() => {
-    const newMode = !isSimplifiedMode;
-    setIsSimplifiedMode(newMode);
-    
-    if (responses.length > 0) {
-      const currentResponses = newMode ? simplifiedResponses : responses;
-      onResponsesUpdate?.(splitResponse(currentResponses[0]));
-    }
-  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate]);
+    setIsSimplifiedMode((prev: boolean) => {
+      const newMode = !prev;
+      // Update responses if they exist
+      if (responses.length > 0) {
+        const currentResponses = newMode ? simplifiedResponses : responses;
+        onResponsesUpdate?.(splitResponse(currentResponses[0]));
+      }
+      return newMode;
+    });
+  }, [responses, simplifiedResponses, onResponsesUpdate]);
 
   /**
    * Handle tone changes and update responses accordingly
@@ -256,11 +291,28 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     
     if (storedFull?.response) {
       setResponses([storedFull.response]);
+      setStoredFullResponses({ normal: storedFull.response });
     }
     if (storedSimplified?.response) {
       setSimplifiedResponses([storedSimplified.response]);
+      setStoredSimplifiedResponses({ normal: storedSimplified.response });
     }
-  }, []);
+
+    // Update parent with the correct response type based on saved mode
+    if (isSimplifiedMode && storedSimplified?.response) {
+      onResponsesUpdate?.(splitResponse(storedSimplified.response));
+    } else if (!isSimplifiedMode && storedFull?.response) {
+      onResponsesUpdate?.(splitResponse(storedFull.response));
+    }
+  }, []); // Keep empty dependency array for mount-only execution
+
+  // Add effect to update responses when mode changes
+  useEffect(() => {
+    const currentResponses = isSimplifiedMode ? simplifiedResponses : responses;
+    if (currentResponses.length > 0) {
+      onResponsesUpdate?.(splitResponse(currentResponses[0]));
+    }
+  }, [isSimplifiedMode, responses, simplifiedResponses, onResponsesUpdate]);
 
   // Reset stored responses when analysis is refreshed
   useEffect(() => {

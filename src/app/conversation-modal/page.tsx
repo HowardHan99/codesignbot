@@ -8,7 +8,9 @@ export default function ConversationModalPage() {
   const [currentCriticism, setCurrentCriticism] = useState<string[]>([]);
 
   useEffect(() => {
-    // Get data from the parent window
+    // Get data from the broadcast channel
+    const channel = new BroadcastChannel('miro-conversation');
+    
     const handleMessage = (event: MessageEvent) => {
       if (event.data.type === 'INIT_MODAL') {
         setDesignChallenge(event.data.designChallenge);
@@ -16,8 +18,11 @@ export default function ConversationModalPage() {
       }
     };
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    channel.addEventListener('message', handleMessage);
+    return () => {
+      channel.removeEventListener('message', handleMessage);
+      channel.close();
+    };
   }, []);
 
   const handleClose = () => {
@@ -34,6 +39,7 @@ export default function ConversationModalPage() {
     <div style={{
       background: 'transparent',
       minHeight: '100vh',
+      width: '100vw',
       margin: 0,
       padding: 0,
       overflow: 'hidden'
@@ -42,17 +48,23 @@ export default function ConversationModalPage() {
         designChallenge={designChallenge}
         currentCriticism={currentCriticism}
         onClose={handleClose}
-        onInstructionReceived={handleInstruction}
       />
       <style jsx global>{`
         body {
           background: transparent !important;
-          margin: 0;
-          padding: 0;
+          margin: 0 !important;
+          padding: 0 !important;
           overflow: hidden;
+          width: 100vw;
         }
         #__next {
           background: transparent !important;
+          width: 100%;
+        }
+        #root {
+          padding: 0 !important;
+          margin: 0 !important;
+          width: 100%;
         }
         * {
           box-sizing: border-box;

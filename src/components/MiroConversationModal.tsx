@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { OpenAIService } from '../services/openaiService';
+import { MiroService } from '../services/miroService';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -21,26 +22,22 @@ export const MiroConversationModal: React.FC<MiroConversationModalProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Initialize with welcome message
   useEffect(() => {
     const welcomeMessage = {
       role: 'assistant' as const,
-      content: `Welcome to the Design Discussion! I've analyzed your design decisions and provided critical feedback. This is your space to:
-
-1. Respond to the criticism points
-2. Explain your design rationale
-3. Ask for clarification on any points
-4. Share additional context
-
-Your responses will help me better understand your design thinking and provide more nuanced feedback. If you close this dialog without responding, I'll interpret that as choosing not to address these points.
-
-Here are the current criticism points to discuss:
+      content: `Here are the criticism points for your design:
 
 ${currentCriticism.map((point, index) => `${index + 1}. ${point}`).join('\n')}
 
-How would you like to address these points?`,
+You can:
+- Accept all points if you agree with the feedback
+- Ignore all points if you disagree
+- Or start a detailed discussion about specific points
+`,
       timestamp: new Date()
     };
     setMessages([welcomeMessage]);
@@ -60,57 +57,178 @@ How would you like to address these points?`,
 
     try {
       setIsLoading(true);
-      setMessages(prev => [...prev, { role: 'user', content: inputMessage, timestamp: new Date() }]);
-
-      const conversationContext = messages
-        .map(msg => `${msg.role}: ${msg.content}`)
-        .join('\n');
-
-      const response = await OpenAIService.generateConversationResponse(
-        inputMessage,
-        designChallenge,
-        currentCriticism,
-        conversationContext
-      );
-
-      setMessages(prev => [...prev, { role: 'assistant', content: response, timestamp: new Date() }]);
+      const userMessage: Message = { role: 'user', content: inputMessage, timestamp: new Date() };
+      setMessages(prev => [...prev, userMessage]);
       setInputMessage('');
-    } catch (error) {
-      console.error('Error sending message:', error);
-      setMessages(prev => [
-        ...prev,
-        { 
-          role: 'assistant', 
-          content: 'Sorry, I encountered an error processing your message. Please try again.',
-          timestamp: new Date()
+      
+      if (isWaitingForResponse) {
+        // Format the consensus point based on the context
+        let consensusPoint = '';
+        const lastAssistantMessage = messages[messages.length - 1]?.content || '';
+        
+        if (lastAssistantMessage.includes('why you accept')) {
+          // Format acceptance consensus
+          consensusPoint = `DESIGN DECISION ACCEPTANCE: Designers accepted the following points:\n${
+            currentCriticism.map((point, i) => `${i + 1}. ${point}`).join('\n')
+          }\nReasoning: ${inputMessage}`;
+        } else if (lastAssistantMessage.includes('why you disagree')) {
+          // Format rejection consensus
+          consensusPoint = `DESIGN DECISION REJECTION: Designers rejected the following points:\n${
+            currentCriticism.map((point, i) => `${i + 1}. ${point}`).join('\n')
+          }\nReasoning: ${inputMessage}`;
+        } else {
+          // Format general instruction consensus
+          consensusPoint = `DESIGN INSTRUCTION: For criticism points:\n${
+            currentCriticism.map((point, i) => `${i + 1}. ${point}`).join('\n')
+          }\nDesigners' instruction: ${inputMessage}`;
         }
-      ]);
+        
+        try {
+          // Add to consensus frame
+          await MiroService.addConsensusPoints([consensusPoint]);
+          
+          const conversationContext = messages
+            .map(msg => `${msg.role}: ${msg.content}`)
+            .join('\n');
+
+          const response = await OpenAIService.generateConversationResponse(
+            inputMessage,
+            designChallenge,
+            currentCriticism,
+            conversationContext
+          );
+
+          const assistantMessage: Message = { 
+            role: 'assistant', 
+            content: 'I\'ve recorded your feedback in the consensus. ' + response,
+            timestamp: new Date() 
+          };
+          setMessages(prev => [...prev, assistantMessage]);
+          
+          // Close modal after a delay if this was an accept/reject explanation
+          if (lastAssistantMessage.includes('why you accept') || lastAssistantMessage.includes('why you disagree')) {
+            setTimeout(() => onClose?.(), 2000);
+          }
+        } catch (error) {
+          console.error('Error processing consensus:', error);
+          const errorMessage: Message = { 
+            role: 'assistant', 
+            content: 'I\'ve received your feedback, but there was an error saving it. Would you like to try again?',
+            timestamp: new Date() 
+          };
+          setMessages(prev => [...prev, errorMessage]);
+        }
+      }
+      
+      setIsWaitingForResponse(false);
+    } catch (error) {
+      console.error('Error in message handling:', error);
+      const errorMessage: Message = { 
+        role: 'assistant', 
+        content: 'Sorry, I encountered an error. Please try again or try rephrasing your feedback.',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  return (
-    <div className="modal-container">
-      <div className="modal-header">
-        <h3>Design Discussion</h3>
-        {onClose && (
-          <button onClick={onClose} className="close-button">×</button>
-        )}
-      </div>
+  const handleContinueDiscussion = () => {
+    setIsWaitingForResponse(true);
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: 'I\'m ready to discuss further. What would you like to clarify or discuss?',
+      timestamp: new Date()
+    }]);
+  };
 
-      <div className="messages-container">
+  const handleEndDiscussion = () => {
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: 'Discussion ended. Your responses have been recorded and will be considered in future analyses.',
+      timestamp: new Date()
+    }]);
+    setTimeout(() => onClose?.(), 2000);
+  };
+
+  const handleAcceptAll = async () => {
+    try {
+      setIsWaitingForResponse(true);
+      setMessages(prev => [...prev, 
+        { role: 'assistant', content: 'Please explain why you accept these points. This will help inform future analyses.', timestamp: new Date() }
+      ]);
+    } catch (error) {
+      console.error('Error in accept all flow:', error);
+    }
+  };
+
+  const handleIgnoreAll = async () => {
+    try {
+      setIsWaitingForResponse(true);
+      setMessages(prev => [...prev, 
+        { role: 'assistant', content: 'Please explain why you disagree with these points. This will help inform future analyses.', timestamp: new Date() }
+      ]);
+    } catch (error) {
+      console.error('Error in ignore all flow:', error);
+    }
+  };
+
+  const handleOtherInstructions = () => {
+    setIsWaitingForResponse(true);
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: 'Please provide your specific instructions or questions about the criticism points. These will be saved as consensus points to inform future analyses.',
+      timestamp: new Date()
+    }]);
+  };
+
+  return (
+    <div style={{ 
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100vh',
+      width: '100%',
+      background: 'white',
+      padding: '32px'
+    }}>
+      {/* Messages Container */}
+      <div style={{ 
+        flex: 1,
+        overflowY: 'auto',
+        marginBottom: '24px',
+        border: '1px solid #e6e6e6',
+        borderRadius: '12px',
+        padding: '16px'
+      }}>
         {messages.map((message, index) => (
           <div
             key={index}
-            className={`message ${message.role}`}
+            style={{
+              marginBottom: '12px',
+              textAlign: message.role === 'user' ? 'right' : 'left'
+            }}
           >
-            <div className="message-content">
-              {message.content.split('\n').map((line, i) => (
-                <p key={i}>{line}</p>
-              ))}
+            <div
+              style={{
+                display: 'inline-block',
+                maxWidth: '100%',
+                padding: '16px',
+                borderRadius: '12px',
+                backgroundColor: message.role === 'user' ? '#4262ff' : '#f5f5f7',
+                color: message.role === 'user' ? '#ffffff' : '#050038',
+                whiteSpace: 'pre-wrap'
+              }}
+            >
+              {message.content}
             </div>
-            <div className="message-timestamp">
+            <div
+              style={{
+                fontSize: '12px',
+                color: '#666',
+                marginTop: '4px'
+              }}
+            >
               {message.timestamp.toLocaleTimeString()}
             </div>
           </div>
@@ -118,137 +236,96 @@ How would you like to address these points?`,
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="input-container">
-        <input
-          type="text"
-          value={inputMessage}
-          onChange={(e) => setInputMessage(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-          placeholder="Type your response here..."
-          disabled={isLoading}
-        />
-        <button
-          onClick={handleSendMessage}
-          className="button button-primary"
-          disabled={isLoading}
-        >
-          {isLoading ? '...' : 'Send'}
-        </button>
-      </div>
+      {/* Initial Action Buttons */}
+      {messages.length === 1 && (
+        <div style={{ 
+          display: 'flex',
+          gap: '12px',
+          marginBottom: '24px'
+        }}>
+          <button
+            onClick={handleAcceptAll}
+            className="button button-primary"
+            style={{ flex: 1 }}
+          >
+            Accept All Points
+          </button>
+          <button
+            onClick={handleIgnoreAll}
+            className="button button-secondary"
+            style={{ flex: 1 }}
+          >
+            Ignore All Points
+          </button>
+          <button
+            onClick={handleOtherInstructions}
+            className="button button-primary"
+            style={{ flex: 1, backgroundColor: '#6c757d' }}
+          >
+            Other Instructions
+          </button>
+        </div>
+      )}
 
-      <style jsx>{`
-        .modal-container {
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          background: white;
-        }
+      {/* Input and Control Buttons */}
+      {isWaitingForResponse && (
+        <div style={{ 
+          borderTop: '1px solid #eee',
+          paddingTop: '24px'
+        }}>
+          <div style={{ 
+            display: 'flex',
+            gap: '12px',
+            marginBottom: '16px'
+          }}>
+            <input
+              type="text"
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+              placeholder="Type your instructions or questions..."
+              style={{
+                flex: 1,
+                padding: '12px 16px',
+                borderRadius: '6px',
+                border: '1px solid #c3c2cf',
+                fontSize: '14px'
+              }}
+              disabled={isLoading}
+            />
+            <button
+              onClick={handleSendMessage}
+              className="button button-primary"
+              disabled={isLoading || !inputMessage.trim()}
+              style={{ minWidth: '100px' }}
+            >
+              Send
+            </button>
+          </div>
 
-        .modal-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 16px;
-          background: #f5f5f7;
-          border-bottom: 1px solid #e6e6e6;
-        }
-
-        .modal-header h3 {
-          margin: 0;
-          font-size: 16px;
-          font-weight: 600;
-        }
-
-        .close-button {
-          background: none;
-          border: none;
-          font-size: 24px;
-          cursor: pointer;
-          color: #666;
-          padding: 0 8px;
-        }
-
-        .close-button:hover {
-          color: #ff4444;
-        }
-
-        .messages-container {
-          flex: 1;
-          overflow-y: auto;
-          padding: 16px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .message {
-          display: flex;
-          flex-direction: column;
-          max-width: 85%;
-        }
-
-        .message.user {
-          align-self: flex-end;
-        }
-
-        .message.assistant {
-          align-self: flex-start;
-        }
-
-        .message-content {
-          padding: 12px 16px;
-          border-radius: 8px;
-          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-        }
-
-        .message-content p {
-          margin: 0;
-          padding: 4px 0;
-        }
-
-        .message.user .message-content {
-          background-color: #4262ff;
-          color: white;
-        }
-
-        .message.assistant .message-content {
-          background-color: #f5f5f7;
-          color: #1a1a1a;
-        }
-
-        .message-timestamp {
-          font-size: 11px;
-          color: #666;
-          margin-top: 4px;
-          padding: 0 4px;
-        }
-
-        .input-container {
-          display: flex;
-          gap: 8px;
-          padding: 16px;
-          background: white;
-          border-top: 1px solid #e6e6e6;
-        }
-
-        .input-container input {
-          flex: 1;
-          padding: 8px 12px;
-          border-radius: 4px;
-          border: 1px solid #e6e6e6;
-          font-size: 14px;
-        }
-
-        .input-container input:focus {
-          outline: none;
-          border-color: #4262ff;
-          box-shadow: 0 0 0 2px rgba(66, 98, 255, 0.2);
-        }
-
-        .input-container button {
-          min-width: 80px;
-        }
-      `}</style>
+          {/* Get Response Button */}
+          <div style={{ 
+            display: 'flex',
+            gap: '12px'
+          }}>
+            <button
+              onClick={handleContinueDiscussion}
+              className="button button-primary"
+              style={{ flex: 1 }}
+              disabled={!isWaitingForResponse}
+            >
+              Get a Response
+            </button>
+            <button
+              onClick={handleEndDiscussion}
+              className="button button-secondary"
+              style={{ flex: 1 }}
+            >
+              End Discussion
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }; 

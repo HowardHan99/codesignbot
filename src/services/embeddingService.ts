@@ -9,7 +9,7 @@ export class EmbeddingService {
   /**
    * Gets embeddings for a given text using OpenAI's API with caching
    */
-  private static async getEmbedding(text: string): Promise<number[]> {
+  public static async getEmbedding(text: string): Promise<number[]> {
     // Try to get from cache first
     const cachedEmbedding = await this.cache.getFromCache(text);
     if (cachedEmbedding) {
@@ -40,7 +40,7 @@ export class EmbeddingService {
   /**
    * Calculates cosine similarity between two vectors
    */
-  private static cosineSimilarity(a: number[], b: number[]): number {
+  public static cosineSimilarity(a: number[], b: number[]): number {
     const dotProduct = a.reduce((sum, val, i) => sum + val * b[i], 0);
     const magnitudeA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
     const magnitudeB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));

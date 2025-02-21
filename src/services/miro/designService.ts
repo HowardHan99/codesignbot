@@ -39,22 +39,43 @@ export class MiroDesignService {
    */
   public static async getConsensusPoints(): Promise<string[]> {
     try {
+      console.log('Starting to fetch consensus points...');
       const consensusFrame = await MiroFrameService.findFrameByTitle('Consensus');
       
       if (!consensusFrame) {
         console.log('Consensus frame not found');
         return [];
       }
+      console.log('Found Consensus frame:', consensusFrame);
 
-      const consensusStickies = await MiroFrameService.getStickiesInFrame(consensusFrame);
+      // Get all sticky notes first to debug
+      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      console.log('All sticky notes on board:', allStickies.map(s => ({
+        id: s.id,
+        content: s.content,
+        parentId: s.parentId
+      })));
+
+      const consensusStickies = allStickies.filter(sticky => sticky.parentId === consensusFrame.id);
+      console.log('Filtered consensus stickies by parentId:', consensusStickies);
       
-      if (consensusStickies.length === 0) {
+      // Also try getting by coordinates
+      const stickiesByCoords = await MiroFrameService.getItemsInFrameBounds(consensusFrame);
+      console.log('Stickies found by coordinates:', stickiesByCoords);
+      
+      // Combine both methods
+      const combinedStickies = [...new Set([...consensusStickies, ...stickiesByCoords])];
+      console.log('Combined unique stickies:', combinedStickies);
+      
+      if (combinedStickies.length === 0) {
         console.log('No sticky notes found in Consensus frame');
         return [];
       }
 
       // Return array of consensus points
-      return consensusStickies.map(sticky => sticky.content);
+      const points = combinedStickies.map(sticky => sticky.content);
+      console.log('Extracted consensus points:', points);
+      return points;
 
     } catch (err) {
       console.error('Error getting consensus points:', err);
@@ -67,18 +88,26 @@ export class MiroDesignService {
    */
   public static async cleanAnalysisBoard(): Promise<void> {
     try {
-      const responseFrame = await MiroFrameService.findFrameByTitle('Antagonistic-Response');
-      
+      // Get frames first
+      const frames = await miro.board.get({ type: 'frame' });
+      const responseFrame = frames.find(frame => frame.title === 'Antagonistic-Response');
+
       if (!responseFrame) {
         console.log('No Antagonistic-Response frame found');
         return;
       }
 
-      const stickiesToRemove = await MiroFrameService.getItemsInFrameBounds(responseFrame);
+      // Get all sticky notes and filter by parentId
+      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      const frameStickies = allStickies.filter(sticky => sticky.parentId === responseFrame.id);
       
-      for (const sticky of stickiesToRemove) {
+      // Remove sticky notes one by one
+      for (const sticky of frameStickies) {
         await miro.board.remove(sticky);
       }
+
+      console.log(`Removed ${frameStickies.length} sticky notes from Antagonistic-Response frame`);
+      
     } catch (error) {
       console.error('Error cleaning analysis:', error);
     }

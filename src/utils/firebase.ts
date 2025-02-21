@@ -4,6 +4,7 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getDatabase, ref, push, serverTimestamp, get, Database } from 'firebase/database';
 import { firebaseConfig } from './config';
 import { mergeSimilarPoints } from './textProcessing';
+import { MiroDesignService } from '../services/miro/designService';
 
 // Initialize Firebase only on the client side
 let app: FirebaseApp | undefined;
@@ -34,6 +35,7 @@ export interface AnalysisData {
     simplified: string[];
   };
   tone?: string;
+  consensusPoints?: string[];
 }
 
 // Helper function to aggressively merge points
@@ -88,11 +90,13 @@ export async function saveAnalysis(data: AnalysisData) {
   try {
     const database = getFirebaseDB();
     const analysisRef = ref(database, 'analyses');
+    
+    // Save with timestamp
     await push(analysisRef, {
       ...data,
       timestamp: serverTimestamp(),
     });
-    console.log('Analysis saved to Firebase');
+    console.log('Analysis saved to Firebase with consensus points:', data.consensusPoints?.length || 0);
   } catch (error) {
     console.error('Error saving analysis:', error);
     throw error;

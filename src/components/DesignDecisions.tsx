@@ -254,6 +254,7 @@ export function MainBoard({
   }, [onResponsesUpdate]);
 
   const handleOpenConversation = useCallback(async () => {
+    // Open the modal first
     await miro.board.ui.openModal({
       url: '/conversation-modal',
       width: 400,
@@ -261,12 +262,17 @@ export function MainBoard({
       fullscreen: false,
     });
 
-    // Send the current context to the modal
-    window.postMessage({
-      type: 'INIT_MODAL',
-      designChallenge,
-      currentCriticism: currentResponses
-    }, '*');
+    // Wait a bit for the modal to initialize
+    setTimeout(() => {
+      // Send the current context to the modal using broadcast channel
+      const channel = new BroadcastChannel('miro-conversation');
+      channel.postMessage({
+        type: 'INIT_MODAL',
+        designChallenge,
+        currentCriticism: currentResponses
+      });
+      channel.close();
+    }, 500);
   }, [designChallenge, currentResponses]);
 
   return (

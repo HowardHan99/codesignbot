@@ -1,3 +1,5 @@
+import { ConflictResolutionService } from './conflictResolutionService';
+
 /**
  * Interface for OpenAI API responses
  */
@@ -38,62 +40,127 @@ export class OpenAIService {
    * @param designChallenge - The context of the design challenge
    * @param existingPoints - Array of existing synthesized points to avoid overlap
    * @param consensusPoints - Array of consensus points that should not be questioned
-   * @param relevantAnalyses - Array of relevant past analyses to learn from
    * @returns Promise resolving to the formatted analysis
    */
   public static async generateAnalysis(
     userPrompt: string, 
     designChallenge: string,
     existingPoints: string[] = [],
-    consensusPoints: string[] = [],
-    relevantAnalyses: Array<{ decisions: string[]; analysis: { full: string[]; simplified: string[] } }> = []
+    consensusPoints: string[] = []
   ): Promise<string> {
-    const existingPointsText = existingPoints.length > 0 
-      ? `\n\nExisting criticism points to avoid overlapping with:\n${existingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
-      : '';
-
     const consensusPointsText = consensusPoints.length > 0
       ? `\n\nConsensus points that should NOT be questioned or criticized:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
       : '';
 
-    // Format relevant analyses for the prompt
-    const relevantAnalysesText = relevantAnalyses.length > 0
-      ? `\n\nHere are some relevant analyses from similar past design decisions that might be helpful:
-${relevantAnalyses.map((item, i) => `
-Example ${i + 1}:
-Design Decisions:
-${item.decisions.map((d, j) => `${j + 1}. ${d}`).join('\n')}
-
-Analysis:
-${item.analysis.full.map((a, j) => `${j + 1}. ${a}`).join('\n')}
-`).join('\n')}`
-      : '';
-
-    const systemPrompt = `You are analyzing design decisions for the design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 3 critical points that identify potential problems or conflicts in these decisions.
+    const systemPrompt = `You are analyzing design decisions for the design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 6 critical points that identify potential problems or conflicts in these decisions.
 
 Rules:
 1. NEVER question or criticize the consensus points - these are established agreements that must be respected
-2. Avoid overlapping with existing criticism points
-3. Focus on potential problems, conflicts, or negative consequences to the underconsidered groups
-4. Always provide EXACTLY 3 points, no more, no less
-5. NEVER include titles, numbers, bullet points, or any other prefixes
-6. NEVER use the word "Title:", "Point:", "Criticism:", or similar labels
-7. Each point should be a complete, self-contained criticism
-8. Keep each point focused on a single issue
+2. Focus on potential problems, conflicts, or negative consequences
+3. Always provide EXACTLY 6 points, no more, no less
+4. Each point should be a complete, self-contained criticism
+5. Keep each point focused on a single issue
 
-Format your response as exactly 3 points separated by ** **. Example:
-First complete criticism point here ** ** Second complete criticism point here ** ** Third complete criticism point here
-
-Important:
-- Start directly with the first point
-- No introductions or summaries
-- No numbering or bullet points
-- No labels or titles
-- Just the 3 points separated by ** **${consensusPointsText}${existingPointsText}`;
+Format your response as exactly 6 points separated by ** **. Example:
+First point here ** ** Second point here ** ** Third point here ** ** Fourth point here ** ** Fifth point here ** ** Sixth point here${consensusPointsText}`;
 
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt,
       systemPrompt,
+    });
+
+    // Clean and validate the response
+    let points = result.response
+      .replace(/•/g, '')
+      .replace(/\d+\./g, '')
+      .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/\*\*\s+\*\*/g, '**')
+      .trim()
+      .split('**')
+      .map(point => point.trim())
+      .filter(point => point.length > 0);
+
+    // Ensure we have exactly 6 points
+    while (points.length < 6) {
+      points.push(points[points.length - 1] || 'This design decision requires further analysis');
+    }
+    points = points.slice(0, 6);
+
+    // Now filter for conflicts and select the best 3 points
+    const filteredPoints = await this.filterNonConflictingPoints(points, consensusPoints);
+    
+    return filteredPoints.join(' ** ');
+  }
+
+  /**
+   * Filters points to ensure they don't conflict with consensus points
+   */
+  private static async filterNonConflictingPoints(
+    points: string[], 
+    consensusPoints: string[]
+  ): Promise<string[]> {
+    const systemPrompt = `You are filtering design criticism points to ensure they don't conflict with consensus points.
+
+Consensus points that must not be contradicted:
+${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
+
+Review these 6 criticism points and:
+1. Select exactly 3 points that do NOT conflict with the consensus points
+2. If a point conflicts, skip it and move to the next one
+3. If fewer than 3 non-conflicting points are found, generate substitutes that:
+   - Address different aspects than the consensus points
+   - Maintain critical perspective
+   - Are unique from other selected points
+
+Return exactly 3 final points separated by ** **.`;
+
+    const result = await this.makeRequest('/api/openaiwrap', {
+      userPrompt: points.join('\n'),
+      systemPrompt,
+    });
+
+    let filteredPoints = result.response
+      .replace(/•/g, '')
+      .replace(/\d+\./g, '')
+      .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/\*\*\s+\*\*/g, '**')
+      .trim()
+      .split('**')
+      .map(point => point.trim())
+      .filter(point => point.length > 0);
+
+    // Ensure exactly 3 points
+    while (filteredPoints.length < 3) {
+      filteredPoints.push(filteredPoints[filteredPoints.length - 1] || 'This point needs revision');
+    }
+    filteredPoints = filteredPoints.slice(0, 3);
+
+    return filteredPoints;
+  }
+
+  /**
+   * Simplifies a given analysis into more concise points
+   * @param response - The analysis to simplify
+   * @returns Promise resolving to the simplified analysis
+   */
+  public static async simplifyAnalysis(response: string): Promise<string> {
+    const result = await this.makeRequest('/api/openaiwrap', {
+      userPrompt: response,
+      systemPrompt: `Please simplify the following criticism points into three very concise, clear points.
+
+Rules:
+1. You MUST provide EXACTLY 3 points, no more, no less
+2. Each point should be no more than 20 words
+3. Keep the core message of each original point
+4. Do not use any numbering, bullet points, or labels
+5. Format with exactly two ** ** between points
+
+Example format:
+First point here ** ** Second point here ** ** Third point here
+
+Do not include any other text or formatting.`
     });
 
     // Clean and validate the response
@@ -109,30 +176,17 @@ Important:
     // Split points and ensure exactly 3
     let points = cleanedResponse.split('**').map(point => point.trim()).filter(point => point.length > 0);
     
-    // If we have fewer than 3 points, repeat the last point
+    // Handle cases with wrong number of points
     while (points.length < 3) {
-      points.push(points[points.length - 1] || 'This design decision requires further analysis');
+      if (points.length > 0) {
+        points.push(points[points.length - 1]);
+      } else {
+        points.push('This point needs further simplification');
+      }
     }
-    
-    // If we have more than 3 points, take only the first 3
     points = points.slice(0, 3);
 
-    // Rejoin with proper separator
     return points.join(' ** ');
-  }
-
-  /**
-   * Simplifies a given analysis into more concise points
-   * @param response - The analysis to simplify
-   * @returns Promise resolving to the simplified analysis
-   */
-  public static async simplifyAnalysis(response: string): Promise<string> {
-    const result = await this.makeRequest('/api/openaiwrap', {
-      userPrompt: response,
-      systemPrompt: `Please simplify the following criticism points into three very concise, clear points. Each point should be no more than 20 words. Format the response with points separated by ** **. Do not include any other text, numbers, or formatting.`
-    });
-
-    return result.response.replace(/•/g, '**').replace(/\n/g, ' ** ');
   }
 
   /**
@@ -144,17 +198,55 @@ Important:
   public static async adjustTone(response: string, newTone: string): Promise<string> {
     const toneInstructions = {
       persuasive: `Act as a charismatic consultant who genuinely wants to help. Use phrases like "Consider this perspective...", "What if we looked at it this way...", "I understand the intention, however...", "Let's explore a different angle...". Be diplomatic but firm in your critiques.`,
-      aggressive: `Act as a brutally honest critic who doesn't hold back. Use strong phrases like "You are completely wrong!", "How could you not see that...?". But not necessary these phrases. Be confrontational and direct, expressing strong disagreement and frustration.`,
-      critical: `Act as a meticulous academic reviewer. Use analytical phrases like "This approach is fundamentally flawed...", "The evidence does not support...", "This lacks rigorous consideration of...", "A critical examination reveals...". Be thorough and uncompromising in your analysis.`
+      aggressive: `Act as a brutally honest critic who doesn't hold back. Use strong phrases like "This approach is fundamentally flawed!", "This completely misses the mark...". Be confrontational and direct, expressing strong disagreement and frustration.`,
+      critical: `Act as a meticulous academic reviewer. Use analytical phrases like "The evidence does not support...", "This lacks rigorous consideration of...", "A critical examination reveals...". Be thorough and uncompromising in your analysis.`
     };
 
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt: response,
       systemPrompt: `${toneInstructions[newTone as keyof typeof toneInstructions] || 'Be direct but professional.'}
-    Rewrite the following three criticism points using this personality and tone. Keep the core messages but adjust the language and delivery to match the personality. Format with ** ** between points. Do not add any additional text, numbers, or formatting.`
+
+Rules for the response:
+1. You MUST provide EXACTLY 3 points, no more, no less
+2. Each point should be a complete, self-contained criticism
+3. Do not use any numbering, bullet points, or labels
+4. Keep each point focused on a single issue
+5. Maintain the core message of each original point while adjusting the tone
+6. Format your response with exactly two ** ** between each point
+
+Example format:
+First point here ** ** Second point here ** ** Third point here
+
+Rewrite the following criticism points using this format and tone. Do not add any additional text or formatting.`
     });
 
-    return result.response.replace(/•/g, '**').replace(/\n/g, ' ** ');
+    // Clean and validate the response
+    let cleanedResponse = result.response
+      .replace(/•/g, '') // Remove bullet points
+      .replace(/\d+\./g, '') // Remove numbered lists
+      .replace(/Title:|\bPoint\b:|\bCriticism\b:/gi, '') // Remove any titles or labels
+      .replace(/\n+/g, ' ') // Replace newlines with spaces
+      .replace(/\s+/g, ' ') // Normalize spaces
+      .replace(/\*\*\s+\*\*/g, '**') // Clean up multiple ** sequences
+      .trim();
+
+    // Split points and ensure exactly 3
+    let points = cleanedResponse.split('**').map(point => point.trim()).filter(point => point.length > 0);
+    
+    // If we have fewer than 3 points, repeat the last point or add generic points
+    while (points.length < 3) {
+      if (points.length > 0) {
+        points.push(points[points.length - 1]);
+      } else {
+        points.push('This design decision requires further analysis');
+      }
+    }
+    
+    // If we have more than 3 points, take only the first 3
+    points = points.slice(0, 3);
+
+    // Rejoin with proper separator
+    return points.join(' ** ');
   }
 
   /**
