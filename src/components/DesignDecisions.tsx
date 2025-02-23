@@ -6,17 +6,21 @@ import { ConversationBox } from './ConversationBox';
 import { OpenAIService } from '../services/openaiService';
 import { MiroConversationModal } from './MiroConversationModal';
 import { ConversationPanel } from './ConversationPanel';
+import { MiroDesignService } from '../services/miro/designService';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
 });
-
 
 interface StickyNote {
   id: string;
   content: string;
 }
 
+interface Connection {
+  from: string;
+  to: string;
+}
 
 interface MainBoardProps {
   showAnalysis: boolean;
@@ -30,6 +34,118 @@ interface MainBoardProps {
 const DEBOUNCE_DELAY = 10000; // Increased to 10 seconds
 const UPDATE_INTERVAL = 30000; // 30 seconds between forced updates
 
+// Add this helper function before the MainBoard component
+const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
+  // Create a map of notes by their content for easy lookup
+  const noteMap = new Map<string, StickyNote>();
+  notes.forEach(note => noteMap.set(note.content.replace(/<\/?p>/g, ''), note));
+
+  // Create a map to track children for each note
+  const childrenMap = new Map<string, Set<string>>();
+  // Create a map to track parents for each note (to identify root nodes)
+  const parentMap = new Map<string, Set<string>>();
+
+  // Initialize maps
+  notes.forEach(note => {
+    const content = note.content.replace(/<\/?p>/g, '');
+    childrenMap.set(content, new Set());
+    parentMap.set(content, new Set());
+  });
+
+  // Build the relationship maps
+  connections.forEach(connection => {
+    const fromContent = connection.from;
+    const toContent = connection.to;
+    
+    // Add child relationship
+    const children = childrenMap.get(fromContent);
+    if (children) {
+      children.add(toContent);
+    }
+    
+    // Add parent relationship
+    const parents = parentMap.get(toContent);
+    if (parents) {
+      parents.add(fromContent);
+    }
+  });
+
+  // Find root nodes (nodes with no parents)
+  const rootNodes = Array.from(noteMap.keys())
+    .filter(content => !parentMap.get(content)?.size);
+
+  // Recursive function to build the tree structure
+  const buildTree = (content: string, visited = new Set<string>()): any => {
+    if (visited.has(content)) {
+      return null; // Prevent circular references
+    }
+    visited.add(content);
+
+    const children = Array.from(childrenMap.get(content) || [])
+      .map(childContent => buildTree(childContent, new Set(visited)))
+      .filter(child => child !== null);
+
+    return {
+      content,
+      id: noteMap.get(content)?.id,
+      children: children.length > 0 ? children : undefined
+    };
+  };
+
+  // Build trees starting from root nodes
+  return rootNodes.map(root => buildTree(root));
+};
+
+// Add this component before the MainBoard component
+const DecisionTreeNode: React.FC<{
+  node: any;
+  level: number;
+}> = ({ node, level }) => {
+  return (
+    <li style={{ marginLeft: level > 0 ? '5px' : '0' }}>
+      <div style={{ 
+        display: 'flex',
+        alignItems: 'center',
+        marginBottom: '8px'
+      }}>
+        {level > 0 && (
+          <span style={{ 
+            marginRight: '2px',
+            color: '#666',
+            fontSize: '14px'
+          }}>
+            └
+          </span>
+        )}
+        <div style={{
+          padding: '2px 12px',
+          backgroundColor: '#f5f5f7',
+          borderRadius: '4px',
+          border: '1px solid #e6e6e6',
+          flex: 1
+        }}>
+          {node.content}
+        </div>
+      </div>
+      {node.children && (
+        <ul style={{ 
+          listStyle: 'none',
+          padding: 0,
+          margin: 0
+        }}>
+          {node.children.map((child: any, index: number) => (
+            <DecisionTreeNode
+              key={`${child.id}-${index}`}
+              node={child}
+              level={level + 1}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+};
+
 export function MainBoard({ 
   showAnalysis, 
   isAnalyzing, 
@@ -38,6 +154,7 @@ export function MainBoard({
   onResponsesUpdate 
 }: MainBoardProps) {
   const [designNotes, setDesignNotes] = useState<StickyNote[]>([]);
+  const [designConnections, setDesignConnections] = useState<Connection[]>([]);
   const [designFrameId, setDesignFrameId] = useState<string | null>(null);
   const [shouldRefresh, setShouldRefresh] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -98,10 +215,6 @@ export function MainBoard({
     onAnalysisComplete();
   }, [onAnalysisComplete]);
 
-  // Refs for debouncing
-  const updateTimeoutRef = useRef<NodeJS.Timeout>();
-  const lastUpdateRef = useRef<number>(0);
-
   // Function to get the Design-Decision frame ID
   const getDesignFrameId = async () => {
     try {
@@ -119,12 +232,12 @@ export function MainBoard({
     }
   };
 
-  // Function to get current sticky notes from the Design-Decision frame
+  // Function to get current sticky notes and connections from the Design-Decision frame
   const getCurrentStickyNotes = async () => {
     try {
       const frameId = await getDesignFrameId();
       if (!frameId) {
-        return [];
+        return { notes: [], connections: [] };
       }
 
       // Get all sticky notes on the board
@@ -141,11 +254,15 @@ export function MainBoard({
         content: item.content || ''
       }));
 
-      return notes;
+      // Get connections between sticky notes
+      const analysis = await MiroDesignService.analyzeDesignDecisions();
+      const connections = analysis[0]?.connections || [];
+
+      return { notes, connections };
 
     } catch (err) {
-      console.error('Error getting sticky notes:', err);
-      return [];
+      console.error('Error getting sticky notes and connections:', err);
+      return { notes: [], connections: [] };
     }
   };
 
@@ -166,20 +283,28 @@ export function MainBoard({
     }
 
     try {
-      const notes = await getCurrentStickyNotes();
+      const { notes, connections } = await getCurrentStickyNotes();
       
-      // Compare with current notes to see if there are actual changes
-      const hasChanges = JSON.stringify(notes) !== JSON.stringify(designNotes);
+      // Compare with current notes and connections to see if there are actual changes
+      const hasNotesChanged = JSON.stringify(notes) !== JSON.stringify(designNotes);
+      const hasConnectionsChanged = JSON.stringify(connections) !== JSON.stringify(designConnections);
       
-      if (hasChanges) {
+      if (hasNotesChanged) {
         setDesignNotes(notes);
+      }
+      if (hasConnectionsChanged) {
+        setDesignConnections(connections);
       }
     } catch (error) {
       console.error('Error updating design notes:', error);
     }
-  }, [designNotes]);
+  }, [designNotes, designConnections]);
 
-  // Set up event listeners for sticky note changes
+  // Refs for debouncing
+  const updateTimeoutRef = useRef<NodeJS.Timeout>();
+  const lastUpdateRef = useRef<number>(0);
+
+  // Set up event listeners for sticky note and connector changes
   useEffect(() => {
     let isSubscribed = true;
 
@@ -196,10 +321,12 @@ export function MainBoard({
           await updateDesignNotes(false); // Regular update with debounce
         };
 
-        // Only listen to essential events
+        // Listen to both sticky note and connector events
         const events = [
           'WIDGETS_CREATED',
-          'WIDGETS_DELETED'
+          'WIDGETS_DELETED',
+          'CONNECTOR_CREATED',
+          'CONNECTOR_DELETED'
         ];
 
         events.forEach(event => {
@@ -317,12 +444,19 @@ export function MainBoard({
             <p>No design decisions found in the "Design-Decision" frame.</p>
           ) : (
             <div>
-              <p>Current design decisions you are making:</p>
-              <ul style={{ marginBottom: '20px' }}>
-                {designNotes.map((note, index) => (
-                  <li key={`${note.id}-${index}`}>
-                    <div>{note.content.replace(/<\/?p>/g, '')}</div>
-                  </li>
+              <p>Design Decision Structure:</p>
+              <ul style={{ 
+                listStyle: 'none',
+                padding: 0,
+                margin: 0,
+                marginBottom: '20px'
+              }}>
+                {buildDecisionTree(designNotes, designConnections).map((tree: any, index: number) => (
+                  <DecisionTreeNode
+                    key={`tree-${index}`}
+                    node={tree}
+                    level={0}
+                  />
                 ))}
               </ul>
             </div>

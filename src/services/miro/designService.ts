@@ -1,4 +1,23 @@
 import { MiroFrameService } from './frameService';
+import { StickyNote, Connector, Frame } from '@mirohq/websdk-types';
+import BoardTokenManager from '../../utils/boardTokenManager';
+
+const MIRO_API_URL = 'https://api.miro.com/v2';
+
+interface MiroConnector {
+  id: string;
+  startItem: {
+    id: string;
+  };
+  endItem: {
+    id: string;
+  };
+}
+
+interface MiroConnectorResponse {
+  data: MiroConnector[];
+  cursor?: string;
+}
 
 /**
  * Service for handling design-related operations in Miro
@@ -163,5 +182,212 @@ export class MiroDesignService {
     } catch (error) {
       console.error('Error sending synthesized points to board:', error);
     }
+  }
+
+  /**
+   * Monitors and records connections between sticky notes
+   */
+  public static async monitorStickyConnections(): Promise<void> {
+    try {
+      // Subscribe to connector creation events
+      await miro.board.ui.on('connector:created', async (event) => {
+        const connector = event.connector;
+        
+        if (!connector.start?.item || !connector.end?.item) return;
+        
+        // Get the connected items
+        const startItem = await miro.board.getById(connector.start.item);
+        const endItem = await miro.board.getById(connector.end.item);
+        
+        // Check if both items are sticky notes
+        if (startItem.type === 'sticky_note' && endItem.type === 'sticky_note') {
+          const startSticky = startItem as StickyNote;
+          const endSticky = endItem as StickyNote;
+          
+          console.log('New connection created:', {
+            from: startSticky.content,
+            to: endSticky.content
+          });
+          
+          // Create a text label for the connection
+          await miro.board.createText({
+            content: `${startSticky.content} links to ${endSticky.content}`,
+            x: (startSticky.x + endSticky.x) / 2,
+            y: (startSticky.y + endSticky.y) / 2 - 50,
+            width: 200,
+            style: {
+              textAlign: 'center',
+              fontSize: 10,
+              color: '#4262ff'
+            }
+          });
+        }
+      });
+
+      console.log('Sticky note connection monitoring initialized');
+    } catch (error) {
+      console.error('Error setting up connection monitoring:', error);
+    }
+  }
+
+  /**
+   * Gets all connections between sticky notes on the board
+   */
+  public static async getStickyConnections(): Promise<Array<{from: string, to: string}>> {
+    try {
+      // Get all connectors on the board
+      const connectors = await miro.board.get({ type: 'connector' }) as Connector[];
+      const connections: Array<{from: string, to: string}> = [];
+
+      // Process each connector
+      for (const connector of connectors) {
+        if (!connector.start?.item || !connector.end?.item) continue;
+        
+        const startItem = await miro.board.getById(connector.start.item);
+        const endItem = await miro.board.getById(connector.end.item);
+
+        if (startItem.type === 'sticky_note' && endItem.type === 'sticky_note') {
+          const startSticky = startItem as StickyNote;
+          const endSticky = endItem as StickyNote;
+          
+          connections.push({
+            from: startSticky.content,
+            to: endSticky.content
+          });
+        }
+      }
+
+      return connections;
+    } catch (error) {
+      console.error('Error getting sticky connections:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Analyzes design decisions based on sticky note connections
+   */
+  public static async analyzeDesignDecisions(): Promise<Array<{section: string, connections: Array<{from: string, to: string}>}>> {
+    try {
+      // Get all connectors using the Miro SDK
+      const connectors = await miro.board.get({ type: 'connector' }) as Connector[];
+      console.log('Found connectors:', connectors.length);
+
+      // Get all sticky notes on the board
+      const allStickies = await miro.board.get({ type: 'sticky_note' }) as StickyNote[];
+      console.log('Found sticky notes:', allStickies.length);
+      
+      const stickiesMap = new Map<string, StickyNote>();
+      allStickies.forEach(sticky => stickiesMap.set(sticky.id, sticky));
+
+      // Get the Design-Decision frame
+      const designFrame = await MiroFrameService.findFrameByTitle('Design-Decision');
+      if (!designFrame) {
+        console.log('Design-Decision frame not found');
+        return [];
+      }
+      console.log('Found Design-Decision frame:', designFrame.id);
+
+      // Get stickies in the Design-Decision frame
+      const designStickies = await MiroFrameService.getStickiesInFrame(designFrame);
+      console.log('Found stickies in Design-Decision frame:', designStickies.length);
+      
+      const designStickyIds = new Set(designStickies.map(sticky => sticky.id));
+
+      // Helper function to clean HTML tags
+      const cleanContent = (content: string) => {
+        return content
+          .replace(/<\/?p>/g, '') // Remove <p> tags
+          .replace(/<[^>]+>/g, '') // Remove any other HTML tags
+          .trim();
+      };
+
+      // Filter connections that involve stickies in the Design-Decision frame
+      const designConnections: Array<{from: string, to: string}> = [];
+      
+      for (const connector of connectors) {
+        if (!connector.start?.item || !connector.end?.item) continue;
+        
+        const startItem = await miro.board.getById(connector.start.item);
+        const endItem = await miro.board.getById(connector.end.item);
+        
+        if (startItem.type === 'sticky_note' && endItem.type === 'sticky_note') {
+          const startSticky = startItem as StickyNote;
+          const endSticky = endItem as StickyNote;
+          
+          // Check if either sticky is in the Design-Decision frame
+          if (designStickyIds.has(startSticky.id) || designStickyIds.has(endSticky.id)) {
+            designConnections.push({
+              from: cleanContent(startSticky.content),
+              to: cleanContent(endSticky.content)
+            });
+          }
+        }
+      }
+
+      console.log('Design connections:', {
+        total: designConnections.length,
+        connections: designConnections.map(conn => ({
+          from: conn.from,
+          to: conn.to
+        }))
+      });
+      
+      return [{
+        section: 'Design Decisions',
+        connections: designConnections
+      }];
+
+    } catch (error) {
+      console.error('Error analyzing design decisions:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Gets all connectors from a board using cursor-based pagination
+   */
+  private static async getAllConnectors(boardId: string): Promise<MiroConnector[]> {
+    const allConnectors: MiroConnector[] = [];
+    let cursor: string | undefined;
+    
+    // Get access token from BoardTokenManager
+    const token = BoardTokenManager.getToken(boardId);
+    if (!token) {
+      console.error('No access token found for board:', boardId);
+      return [];
+    }
+    
+    do {
+      try {
+        // Construct URL with cursor if available
+        let url = `${MIRO_API_URL}/boards/${boardId}/connectors?limit=50`;
+        if (cursor) {
+          url += `&cursor=${cursor}`;
+        }
+
+        // Make API request
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to get connectors: ${response.status}`);
+        }
+
+        const data: MiroConnectorResponse = await response.json();
+        allConnectors.push(...data.data);
+        cursor = data.cursor;
+
+      } catch (error) {
+        console.error('Error fetching connectors:', error);
+        break;
+      }
+    } while (cursor);
+
+    return allConnectors;
   }
 } 

@@ -1,5 +1,3 @@
-import { ConflictResolutionService } from './conflictResolutionService';
-
 /**
  * Interface for OpenAI API responses
  */
@@ -67,6 +65,7 @@ First point here ** ** Second point here ** ** Third point here ** ** Fourth poi
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt,
       systemPrompt,
+      useGpt4: true // Use GPT-4 for generating analysis
     });
 
     // Clean and validate the response
@@ -107,8 +106,9 @@ ${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
 
 Review these 6 criticism points and:
 1. Select exactly 3 points that do NOT conflict with the consensus points
-2. If a point conflicts, skip it and move to the next one
+2. If a point conflicts with the consensus points such as the designer has already considered or addresses, skip it and move to the next one  
 3. If fewer than 3 non-conflicting points are found, generate substitutes that:
+   - focus on different aspects, such as different user groups, different parts of the design decision, or different parts of the design process
    - Address different aspects than the consensus points
    - Maintain critical perspective
    - Are unique from other selected points
@@ -118,6 +118,7 @@ Return exactly 3 final points separated by ** **.`;
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt: points.join('\n'),
       systemPrompt,
+      useGpt4: true // Use GPT-4 for filtering points
     });
 
     let filteredPoints = result.response

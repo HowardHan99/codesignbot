@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'; // No caching
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userPrompt, systemPrompt, isVisionRequest } = body;
+    const { userPrompt, systemPrompt, isVisionRequest, useGpt4 } = body;
 
     if (!userPrompt || !systemPrompt) {
       return NextResponse.json(
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     }
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: useGpt4 ? 'gpt-4-turbo-preview' : 'gpt-3.5-turbo',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
