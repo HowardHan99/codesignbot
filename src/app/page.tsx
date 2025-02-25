@@ -26,6 +26,20 @@ export default function Page() {
 
   // Handle redirect with token
   React.useEffect(() => {
+    // Save the default token from env
+    if (process.env.NEXT_PUBLIC_MIRO_OAUTH_TOKEN && process.env.NEXT_PUBLIC_MIRO_BOARD_ID) {
+      BoardTokenManager.saveToken(process.env.NEXT_PUBLIC_MIRO_BOARD_ID, process.env.NEXT_PUBLIC_MIRO_OAUTH_TOKEN);
+      // Force authorized state for the default board
+      setBoardAuths([{
+        boardId: process.env.NEXT_PUBLIC_MIRO_BOARD_ID!,
+        authUrl: '',
+        isAuthorized: true,
+        name: 'Default Board'
+      }]);
+      setIsLoading(false);
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const boardId = params.get('board_id');
     const accessToken = params.get('access_token');
@@ -52,6 +66,18 @@ export default function Page() {
         const defaultAuth = await getMiroAuth();
         const storedTokens = BoardTokenManager.getAllTokens();
         
+        // If we have the default board token, use only that
+        if (process.env.NEXT_PUBLIC_MIRO_BOARD_ID && storedTokens.has(process.env.NEXT_PUBLIC_MIRO_BOARD_ID)) {
+          setBoardAuths([{
+            boardId: process.env.NEXT_PUBLIC_MIRO_BOARD_ID,
+            authUrl: '',
+            isAuthorized: true,
+            name: 'Default Board'
+          }]);
+          setIsLoading(false);
+          return;
+        }
+
         const additionalAuths = Array.from(storedTokens.entries()).map(([boardId, token]) => ({
           boardId,
           authUrl: defaultAuth.authUrl,
