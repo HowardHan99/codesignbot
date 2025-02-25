@@ -7,6 +7,8 @@ import { OpenAIService } from '../services/openaiService';
 import { MiroConversationModal } from './MiroConversationModal';
 import { ConversationPanel } from './ConversationPanel';
 import { MiroDesignService } from '../services/miro/designService';
+import { VoiceRecorder } from './VoiceRecorder';
+import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
@@ -303,6 +305,30 @@ export function MainBoard({
     }, 500);
   }, [designChallenge, currentResponses]);
 
+  // Handle new design points from voice recording
+  const handleNewDesignPoints = useCallback(async (points: string[]) => {
+    if (!points.length) return;
+    
+    try {
+      // Get the design frame ID if we don't have it yet
+      let frameId = designFrameId;
+      if (!frameId) {
+        frameId = await getDesignFrameId();
+      }
+      
+      // Process each point and create sticky notes in the Design-Decision frame
+      await TranscriptProcessingService.createDesignProposalStickies(
+        points.map(point => ({ proposal: point })),
+        'Design-Decision'
+      );
+      
+      // Refresh the design decisions after adding new notes
+      await handleRefreshDesignDecisions();
+    } catch (error) {
+      console.error('Error processing design points:', error);
+    }
+  }, [designFrameId, getDesignFrameId, handleRefreshDesignDecisions]);
+
   // Initial frame ID fetch
   useEffect(() => {
     getDesignFrameId();
@@ -335,6 +361,12 @@ export function MainBoard({
             </button>
           </div>
         </div>
+
+        {/* Voice Recorder for Design Thoughts */}
+        <VoiceRecorder 
+          mode="decision"
+          onNewPoints={handleNewDesignPoints}
+        />
 
         {/* Image Action Buttons */}
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>

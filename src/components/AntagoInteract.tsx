@@ -12,6 +12,8 @@ import ResponseStore from '../utils/responseStore';
 import { saveAnalysis, getSynthesizedPoints } from '../utils/firebase';
 import { splitResponse } from '../utils/textProcessing';
 import { EmbeddingService } from '../services/embeddingService';
+import { VoiceRecorder } from './VoiceRecorder';
+import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 
 interface AntagoInteractProps {
   stickyNotes: string[];          // Array of sticky note contents from the design decisions
@@ -322,6 +324,24 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   }, [shouldRefresh]);
 
+  // Handle new response points from voice recording
+  const handleNewResponsePoints = useCallback(async (points: string[]) => {
+    if (!points.length) return;
+    
+    try {
+      // Create sticky notes in the Analysis-Response frame
+      await TranscriptProcessingService.createDesignProposalStickies(
+        points.map(point => ({ 
+          proposal: point,
+          category: 'response' // This will make the sticky notes blue
+        })),
+        'Analysis-Response'
+      );
+    } catch (error) {
+      console.error('Error processing response points:', error);
+    }
+  }, []);
+
   if (error) {
     return <div className="error-message">{error}</div>;
   }
@@ -334,6 +354,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         <>
           <div style={{ marginBottom: '20px' }}>
             <h2 style={{ margin: '0 0 16px 0' }}>Antagonistic Analysis</h2>
+            
+            {/* Voice Recorder for Responses */}
+            <VoiceRecorder 
+              mode="response"
+              onNewPoints={handleNewResponsePoints}
+            />
             
             <AnalysisControls
               selectedTone={selectedTone}

@@ -227,7 +227,9 @@ function getColorForCategory(category?: string): StickyNoteColor {
       return 'light_green';
     case 'technical':
       return 'light_blue';
+    case 'response':
+      return 'light_blue';
     default:
-      return 'light_pink';
+      return 'light_yellow'; // Default to yellow for design decisions
   }
 } 
