@@ -13,6 +13,7 @@ import { saveAnalysis, getSynthesizedPoints } from '../utils/firebase';
 import { splitResponse } from '../utils/textProcessing';
 import { EmbeddingService } from '../services/embeddingService';
 import { VoiceRecorder } from './VoiceRecorder';
+import { FileUploadTest } from './FileUploadTest';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 
 interface AntagoInteractProps {
@@ -424,6 +425,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             <VoiceRecorder 
               mode="response"
               onNewPoints={handleNewResponsePoints}
+            />
+            
+            {/* Test button for audio file upload */}
+            <FileUploadTest 
+              mode="response"
+              onNewPoints={handleNewResponsePoints}
+              skipParentCallback={true}
             />
             
             <AnalysisControls

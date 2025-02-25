@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { MiroService } from '../services/miroService';
 import { ConversationBox } from './ConversationBox';
@@ -8,6 +8,7 @@ import { MiroConversationModal } from './MiroConversationModal';
 import { ConversationPanel } from './ConversationPanel';
 import { MiroDesignService } from '../services/miro/designService';
 import { VoiceRecorder } from './VoiceRecorder';
+import { FileUploadTest } from './FileUploadTest';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
@@ -366,6 +367,13 @@ export function MainBoard({
         <VoiceRecorder 
           mode="decision"
           onNewPoints={handleNewDesignPoints}
+        />
+        
+        {/* Test button for audio file upload */}
+        <FileUploadTest 
+          mode="decision"
+          onNewPoints={handleNewDesignPoints}
+          skipParentCallback={true}
         />
 
         {/* Image Action Buttons */}
