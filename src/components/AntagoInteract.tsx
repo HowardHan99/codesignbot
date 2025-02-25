@@ -153,36 +153,81 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         synthesizedPoints,
         consensusPoints
       );
+      
+      // OPTIMIZATION 1: Immediately display the response
       setResponses([response]);
       setStoredFullResponses({ normal: response }); // Store normal tone
-
-      // Generate simplified version
-      const simplified = await OpenAIService.simplifyAnalysis(response);
-      setSimplifiedResponses([simplified]);
-      setStoredSimplifiedResponses({ normal: simplified }); // Store normal tone
       
-      // Save to Firebase
-      try {
-        const analysisData = {
-          timestamp: null,
-          designChallenge: designChallenge,
-          decisions: frameStickies,
-          analysis: {
-            full: splitResponse(response),
-            simplified: splitResponse(simplified)
-          },
-          tone: selectedTone || 'normal',
-          consensusPoints: consensusPoints
-        };
-        console.log('Saving analysis with data:', analysisData);
-        await saveAnalysis(analysisData);
-      } catch (error) {
-        console.error('Error saving to Firebase:', error);
+      // Update parent with appropriate responses immediately
+      const splitResponses = splitResponse(response);
+      onResponsesUpdate?.(splitResponses);
+      
+      // OPTIMIZATION 2 & 3: Handle other operations in parallel, only generate simplified if needed
+      // Create a tracking variable for simplified generation
+      const backgroundPromises = [];
+      
+      // Always save to Firebase in the background
+      const savePromise = (async () => {
+        try {
+          const analysisData = {
+            timestamp: null,
+            designChallenge: designChallenge,
+            decisions: frameStickies,
+            analysis: {
+              full: splitResponse(response),
+              // We'll add simplified later if/when it's generated
+              simplified: []
+            },
+            tone: selectedTone || 'normal',
+            consensusPoints: consensusPoints
+          };
+          console.log('Saving analysis with data:', analysisData);
+          await saveAnalysis(analysisData);
+        } catch (error) {
+          console.error('Error saving to Firebase:', error);
+        }
+      })();
+      backgroundPromises.push(savePromise);
+      
+      // Only generate simplified version if we're in simplified mode
+      if (isSimplifiedMode) {
+        const simplifyPromise = (async () => {
+          try {
+            const simplified = await OpenAIService.simplifyAnalysis(response);
+            setSimplifiedResponses([simplified]);
+            setStoredSimplifiedResponses({ normal: simplified });
+            
+            // Update the displayed responses if we're still in simplified mode
+            if (isSimplifiedMode) {
+              onResponsesUpdate?.(splitResponse(simplified));
+            }
+            
+            // Update Firebase with simplified version
+            try {
+              const analysisData = {
+                timestamp: null,
+                designChallenge: designChallenge,
+                decisions: frameStickies,
+                analysis: {
+                  full: splitResponse(response),
+                  simplified: splitResponse(simplified)
+                },
+                tone: selectedTone || 'normal',
+                consensusPoints: consensusPoints
+              };
+              await saveAnalysis(analysisData);
+            } catch (error) {
+              console.error('Error updating Firebase with simplified analysis:', error);
+            }
+          } catch (error) {
+            console.error('Error generating simplified response:', error);
+          }
+        })();
+        backgroundPromises.push(simplifyPromise);
       }
       
-      // Update parent with appropriate responses
-      const splitResponses = splitResponse(isSimplifiedMode ? simplified : response);
-      onResponsesUpdate?.(splitResponses);
+      // Wait for all background promises to resolve
+      await Promise.all(backgroundPromises);
       
       processedRef.current = true;
       onComplete?.();
@@ -201,11 +246,31 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const handleModeToggle = useCallback(() => {
     setIsSimplifiedMode((prev: boolean) => {
       const newMode = !prev;
-      // Update responses if they exist
-      if (responses.length > 0) {
+      
+      // If switching to simplified mode but we don't have simplified responses yet
+      if (newMode && responses.length > 0 && !simplifiedResponses.length) {
+        // Generate simplified version on demand
+        (async () => {
+          try {
+            setIsChangingTone(true);
+            const simplified = await OpenAIService.simplifyAnalysis(responses[0]);
+            setSimplifiedResponses([simplified]);
+            setStoredSimplifiedResponses({ normal: simplified });
+            onResponsesUpdate?.(splitResponse(simplified));
+            setIsChangingTone(false);
+          } catch (error) {
+            console.error('Error generating simplified response:', error);
+            // If we failed to generate simplified version, fall back to full version
+            setIsSimplifiedMode(false);
+            setIsChangingTone(false);
+          }
+        })();
+      } else if (responses.length > 0) {
+        // If we already have the right responses, just update
         const currentResponses = newMode ? simplifiedResponses : responses;
         onResponsesUpdate?.(splitResponse(currentResponses[0]));
       }
+      
       return newMode;
     });
   }, [responses, simplifiedResponses, onResponsesUpdate]);
