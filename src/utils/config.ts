@@ -8,3 +8,54 @@ export const firebaseConfig = {
   appId: "1:121164910498:web:552f246dc0a3f28792ecfb",
   measurementId: "G-YKVCSPS593"
 }; 
+
+// Frame configuration
+export const frameConfig = {
+  names: {
+    designDecision: 'Design-Decision',
+    thinkingDialogue: 'Thinking-Dialogue',
+    analysisResponse: 'Analysis-Response',
+    mainFrame: 'Main-Frame'
+  },
+  defaults: {
+    width: 1200,
+    height: 1600,
+    initialX: 1000,
+    initialY: 0
+  }
+};
+
+// Sticky note configuration
+export const stickyConfig = {
+  dimensions: {
+    width: 300,
+    height: 200,
+    spacing: 20
+  },
+  layout: {
+    itemsPerColumn: 7,
+    topMargin: 150
+  },
+  colors: {
+    decision: {
+      highRelevance: 'light_yellow',
+      mediumRelevance: 'light_green',
+      lowRelevance: 'light_pink'
+    },
+    response: {
+      highRelevance: 'light_blue',
+      mediumRelevance: 'light_green',
+      lowRelevance: 'light_pink'
+    }
+  }
+};
+
+// Relevance scoring configuration
+export const relevanceConfig = {
+  scale: {
+    min: 1,
+    max: 3,
+    defaultThreshold: 2
+  },
+  delayBetweenCreations: 200, // ms
+}; 

@@ -1,0 +1,154 @@
+import { Frame } from '@mirohq/websdk-types';
+import { safeApiCall, logError } from '../../utils/errorHandlingUtils';
+import { delay } from '../../utils/fileProcessingUtils';
+
+/**
+ * Centralized client for Miro API operations with error handling and rate limiting
+ */
+export class MiroApiClient {
+  private static readonly API_DELAY = 100; // ms between API calls to avoid rate limiting
+  private static readonly MAX_RETRIES = 3;
+  private static lastCallTime = 0;
+  
+  /**
+   * Executes a Miro API call with rate limiting and error handling
+   * @param operation The operation name for logging
+   * @param apiCall The function that makes the API call
+   * @param fallbackValue Fallback value if the call fails
+   * @returns The API call result or fallback value
+   */
+  public static async call<T>(
+    operation: string,
+    apiCall: () => Promise<T>,
+    fallbackValue: T | null = null
+  ): Promise<T | null> {
+    // Apply rate limiting
+    await this.applyRateLimit();
+    
+    // Try the API call with retries
+    return await this.callWithRetries(operation, apiCall, fallbackValue);
+  }
+  
+  /**
+   * Apply rate limiting between API calls
+   */
+  private static async applyRateLimit(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastCall = now - this.lastCallTime;
+    
+    if (timeSinceLastCall < this.API_DELAY) {
+      const waitTime = this.API_DELAY - timeSinceLastCall;
+      await delay(waitTime);
+    }
+    
+    this.lastCallTime = Date.now();
+  }
+  
+  /**
+   * Execute an API call with retries
+   */
+  private static async callWithRetries<T>(
+    operation: string,
+    apiCall: () => Promise<T>,
+    fallbackValue: T | null = null
+  ): Promise<T | null> {
+    let attempts = 0;
+    let lastError: any = null;
+    
+    while (attempts < this.MAX_RETRIES) {
+      try {
+        const result = await apiCall();
+        return result;
+      } catch (error) {
+        attempts++;
+        lastError = error;
+        
+        // Log the error but keep trying
+        console.warn(`Miro API call failed (attempt ${attempts}/${this.MAX_RETRIES}): ${operation}`, error);
+        
+        // Wait longer between retries
+        await delay(this.API_DELAY * Math.pow(2, attempts));
+      }
+    }
+    
+    // All retries failed, log the error and return fallback
+    logError(lastError, { attempts }, `Miro API: ${operation}`);
+    return fallbackValue;
+  }
+  
+  /**
+   * Get all frames on the board
+   */
+  public static async getFrames(): Promise<Frame[]> {
+    return await this.call<Frame[]>(
+      'Get frames',
+      async () => await miro.board.get({ type: 'frame' }),
+      []
+    ) || [];
+  }
+  
+  /**
+   * Find a frame by title
+   * @param title The frame title to search for
+   */
+  public static async findFrameByTitle(title: string): Promise<Frame | null> {
+    const frames = await this.getFrames();
+    return frames.find(f => f.title === title) || null;
+  }
+  
+  /**
+   * Create a new frame
+   * @param frameConfig Configuration for the new frame
+   */
+  public static async createFrame(frameConfig: {
+    title: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): Promise<Frame | null> {
+    return await this.call<Frame>(
+      'Create frame',
+      async () => await miro.board.createFrame(frameConfig),
+      null
+    );
+  }
+  
+  /**
+   * Get all sticky notes on the board
+   */
+  public static async getStickyNotes(): Promise<any[]> {
+    return await this.call<any[]>(
+      'Get sticky notes',
+      async () => await miro.board.get({ type: 'sticky_note' }),
+      []
+    ) || [];
+  }
+  
+  /**
+   * Create a sticky note
+   * @param stickyConfig Configuration for the new sticky note
+   */
+  public static async createStickyNote(stickyConfig: {
+    content: string;
+    x: number;
+    y: number;
+    width?: number;
+    style?: any;
+  }): Promise<any | null> {
+    return await this.call<any>(
+      'Create sticky note',
+      async () => await miro.board.createStickyNote(stickyConfig),
+      null
+    );
+  }
+  
+  /**
+   * Gets sticky notes within a frame
+   * @param frameId The frame ID to search within
+   */
+  public static async getStickiesInFrame(frameId: string): Promise<any[]> {
+    const allStickies = await this.getStickyNotes();
+    return allStickies.filter(sticky => sticky.parentId === frameId);
+  }
+} 

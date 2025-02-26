@@ -1,6 +1,8 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { VoiceRecordingService } from '../services/voiceRecordingService';
+import { TranscriptProcessingService } from '../services/transcriptProcessingService';
+import { ApiService } from '../services/apiService';
 
 interface VoiceRecorderProps {
   mode: 'decision' | 'response';  // Mode of recording: design decision or response
@@ -39,11 +41,20 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ mode, onNewPoints 
     };
   }, [isRecording]);
 
+  // Adapter function to convert string transcription to string array for onNewPoints
+  const handleTranscriptionChunk = (transcription: string) => {
+    // Convert single transcription string to array with one item 
+    // for compatibility with onNewPoints
+    if (transcription && transcription.trim()) {
+      onNewPoints([transcription]);
+    }
+  };
+
   const handleStartRecording = async () => {
     try {
       setIsRecording(true);
       setRecordingDuration(0);
-      await VoiceRecordingService.startRecording(onNewPoints);
+      await VoiceRecordingService.startRecording(handleTranscriptionChunk);
     } catch (error) {
       console.error('Failed to start recording:', error);
       setIsRecording(false);
@@ -57,9 +68,26 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ mode, onNewPoints 
       
       const audioBlob = await VoiceRecordingService.stopRecording();
       
-      // Process the recording
-      const result = await VoiceRecordingService.processRecording(audioBlob);
-      console.log('Recording processed:', result);
+      // Process the recording if we have an audio blob
+      if (audioBlob) {
+        // First transcribe the audio blob to text
+        const file = new File([audioBlob], 'recording.webm', { type: 'audio/webm' });
+        const transcriptionResult = await ApiService.transcribeAudio(file);
+        
+        if (transcriptionResult && transcriptionResult.transcription) {
+          // Process the transcription to extract points
+          const processedPoints = await TranscriptProcessingService.processTranscript(
+            transcriptionResult.transcription
+          );
+          
+          // Pass the processed points to the callback
+          if (processedPoints && processedPoints.length > 0) {
+            onNewPoints(processedPoints.map(item => item.proposal));
+          }
+          
+          console.log('Recording processed:', processedPoints);
+        }
+      }
       
       setProcessingRecording(false);
     } catch (error) {
