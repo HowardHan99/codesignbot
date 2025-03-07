@@ -3,17 +3,30 @@ import React, { useState, useEffect } from 'react';
 import { VoiceRecordingService } from '../services/voiceRecordingService';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 import { ApiService } from '../services/apiService';
+import { InclusiveDesignCritiqueService } from '../services/inclusiveDesignCritiqueService';
 
 interface VoiceRecorderProps {
   mode: 'decision' | 'response';  // Mode of recording: design decision or response
   onNewPoints: (points: string[]) => void;  // Callback when new points are processed
+  enableRealTimeCritique?: boolean; // Whether to enable real-time inclusive design critique
 }
 
-export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ mode, onNewPoints }) => {
+export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ 
+  mode, 
+  onNewPoints,
+  enableRealTimeCritique = true // Default to enabled
+}) => {
   const [isRecording, setIsRecording] = useState(false);
   const [processingRecording, setProcessingRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [timer, setTimer] = useState<NodeJS.Timeout | null>(null);
+  const [lastCritiqueTime, setLastCritiqueTime] = useState<number>(0);
+  
+  // Track critiques to avoid duplicates
+  const [recentCritiques, setRecentCritiques] = useState<Set<string>>(new Set());
+  
+  // Minimum time between critique checks to avoid overwhelming the API
+  const CRITIQUE_INTERVAL_MS = 30000; // 30 seconds
 
   // Handle browser compatibility for getUserMedia
   useEffect(() => {
@@ -41,12 +54,47 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ mode, onNewPoints 
     };
   }, [isRecording]);
 
-  // Adapter function to convert string transcription to string array for onNewPoints
-  const handleTranscriptionChunk = (transcription: string) => {
+  // Process transcription chunks and optionally run inclusive design critique
+  const handleTranscriptionChunk = async (transcription: string) => {
     // Convert single transcription string to array with one item 
     // for compatibility with onNewPoints
     if (transcription && transcription.trim()) {
+      // Forward the transcription to the parent component
       onNewPoints([transcription]);
+      
+      // Only check for critiques in decision mode and if enabled
+      if (enableRealTimeCritique && mode === 'decision') {
+        await checkForInclusiveDesignCritiques(transcription);
+      }
+    }
+  };
+  
+  // Check for inclusive design critiques if enough time has passed
+  const checkForInclusiveDesignCritiques = async (transcription: string) => {
+    const now = Date.now();
+    
+    // Only analyze if enough time has passed since last critique
+    if (now - lastCritiqueTime >= CRITIQUE_INTERVAL_MS) {
+      try {
+        // Set the timestamp first to prevent multiple parallel calls
+        setLastCritiqueTime(now);
+        
+        console.log('Checking for inclusive design critiques...');
+        const critiques = await InclusiveDesignCritiqueService.analyzeAndCritique(transcription);
+        
+        // Update recent critiques to avoid duplicates
+        if (critiques.length > 0) {
+          const newCritiques = new Set(recentCritiques);
+          critiques.forEach(critique => newCritiques.add(critique));
+          setRecentCritiques(newCritiques);
+          
+          console.log(`Generated ${critiques.length} inclusive design critiques`);
+        } else {
+          console.log('No inclusive design critiques generated for this chunk');
+        }
+      } catch (error) {
+        console.error('Error generating inclusive design critiques:', error);
+      }
     }
   };
 
@@ -83,6 +131,11 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ mode, onNewPoints 
           // Pass the processed points to the callback
           if (processedPoints && processedPoints.length > 0) {
             onNewPoints(processedPoints.map(item => item.proposal));
+          }
+          
+          // Run inclusive design critique on the full transcript
+          if (enableRealTimeCritique && mode === 'decision') {
+            await InclusiveDesignCritiqueService.analyzeAndCritique(transcriptionResult.transcription);
           }
           
           console.log('Recording processed:', processedPoints);
@@ -130,6 +183,17 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ mode, onNewPoints 
               animation: 'pulse 1.5s infinite'
             }}></span>
             Stop Recording ({formatTime(recordingDuration)})
+            {enableRealTimeCritique && mode === 'decision' && (
+              <span style={{ 
+                fontSize: '10px', 
+                marginLeft: '8px',
+                padding: '2px 6px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(0,0,0,0.1)'
+              }}>
+                Critique Active
+              </span>
+            )}
           </>
         ) : (
           <>

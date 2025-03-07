@@ -15,7 +15,8 @@ export const frameConfig = {
     designDecision: 'Design-Decision',
     thinkingDialogue: 'Thinking-Dialogue',
     analysisResponse: 'Analysis-Response',
-    mainFrame: 'Main-Frame'
+    mainFrame: 'Main-Frame',
+    realTimeResponse: 'Real-time-response'
   },
   defaults: {
     width: 1200,
@@ -46,6 +47,11 @@ export const stickyConfig = {
       highRelevance: 'light_blue',
       mediumRelevance: 'light_green',
       lowRelevance: 'light_pink'
+    },
+    critique: {
+      accessibility: 'light_pink',
+      inclusivity: 'violet',
+      sustainability: 'light_green'
     }
   }
 };
@@ -58,4 +64,18 @@ export const relevanceConfig = {
     defaultThreshold: 2
   },
   delayBetweenCreations: 200, // ms
+}; 
+
+// Inclusive design critique configuration
+export const inclusiveDesignConfig = {
+  evaluationInterval: 30000, // 30 seconds between evaluations
+  principles: [
+    'Consider diverse user needs and abilities',
+    'Avoid over-investment in privileged user groups',
+    'Consider broader community impact',
+    'Address power imbalances',
+    'Use inclusive language',
+    'Avoid assumptions about user capabilities',
+    'Prioritize user well-being over business goals'
+  ]
 }; 
