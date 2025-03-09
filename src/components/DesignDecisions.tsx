@@ -337,19 +337,27 @@ export function MainBoard({
 
   return (
     <>
-      <div style={{ marginBottom: '20px' }}>
+      <div style={{ marginBottom: '0px' }}>
         <div style={{ 
           display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          marginBottom: '16px'
+          flexDirection: 'column',
+          marginBottom: '10px',
+          alignItems: 'flex-start'
         }}>
-          <h2 style={{ margin: 0 }}>Design Decisions</h2>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <h2 style={{ 
+            margin: '0 0 12px 0',
+            textAlign: 'left'
+          }}>Design Decisions</h2>
+          <div style={{ 
+            display: 'flex', 
+            gap: '10px',
+            justifyContent: 'flex-start'
+          }}>
             <button
               onClick={handleRefreshDesignDecisions}
               className="button button-secondary"
               disabled={isRefreshing}
+              style={{ padding: '4px 8px', minWidth: '80px' }}
             >
               {isRefreshing ? 'Refreshing...' : '↻ Refresh'}
             </button>

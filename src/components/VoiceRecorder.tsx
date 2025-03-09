@@ -21,6 +21,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [timer, setTimer] = useState<NodeJS.Timeout | null>(null);
   const [lastCritiqueTime, setLastCritiqueTime] = useState<number>(0);
+  const [critiqueModeEnabled, setCritiqueModeEnabled] = useState<boolean>(enableRealTimeCritique);
   
   // Track critiques to avoid duplicates
   const [recentCritiques, setRecentCritiques] = useState<Set<string>>(new Set());
@@ -34,6 +35,11 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       console.error('Browser does not support voice recording');
     }
   }, []);
+  
+  // Initialize critique mode from props
+  useEffect(() => {
+    setCritiqueModeEnabled(enableRealTimeCritique);
+  }, [enableRealTimeCritique]);
 
   // Update timer every second while recording
   useEffect(() => {
@@ -63,10 +69,15 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       onNewPoints([transcription]);
       
       // Only check for critiques in decision mode and if enabled
-      if (enableRealTimeCritique && mode === 'decision') {
+      if (critiqueModeEnabled && mode === 'decision') {
         await checkForInclusiveDesignCritiques(transcription);
       }
     }
+  };
+  
+  // Toggle critique mode
+  const handleToggleCritiqueMode = () => {
+    setCritiqueModeEnabled(prev => !prev);
   };
   
   // Check for inclusive design critiques if enough time has passed
@@ -134,7 +145,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
           }
           
           // Run inclusive design critique on the full transcript
-          if (enableRealTimeCritique && mode === 'decision') {
+          if (critiqueModeEnabled && mode === 'decision') {
             await InclusiveDesignCritiqueService.analyzeAndCritique(transcriptionResult.transcription);
           }
           
@@ -157,63 +168,146 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   };
 
   return (
-    <div className="voice-recorder" style={{ marginBottom: '16px' }}>
-      <button
-        onClick={isRecording ? handleStopRecording : handleStartRecording}
-        disabled={processingRecording}
-        className={`button ${isRecording ? 'button-danger' : 'button-primary'}`}
-        style={{ 
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '8px',
-          width: '100%'
-        }}
-      >
-        {processingRecording ? (
-          'Processing recording...'
-        ) : isRecording ? (
-          <>
-            <span style={{ 
-              display: 'inline-block',
-              width: '10px',
-              height: '10px',
-              backgroundColor: '#ff4d4f',
-              borderRadius: '50%',
-              animation: 'pulse 1.5s infinite'
-            }}></span>
-            Stop Recording ({formatTime(recordingDuration)})
-            {enableRealTimeCritique && mode === 'decision' && (
+    <div className="voice-recorder">
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        gap: '12px',
+        marginBottom: '16px',
+        backgroundColor: '#f8f9fa',
+        borderRadius: '8px',
+        padding: '12px'
+      }}>
+        <button
+          onClick={isRecording ? handleStopRecording : handleStartRecording}
+          disabled={processingRecording}
+          className={`button ${isRecording ? 'button-danger' : 'button-primary'}`}
+          style={{ 
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            width: '100%',
+            padding: '12px',
+            borderRadius: '6px',
+            border: 'none',
+            background: isRecording ? '#e74c3c' : '#3498db',
+            color: 'white',
+            fontWeight: 600,
+            cursor: processingRecording ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s ease',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          }}
+        >
+          {processingRecording ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{
+                display: 'inline-block',
+                width: '14px',
+                height: '14px',
+                borderRadius: '50%',
+                border: '2px solid #f3f3f3',
+                borderTop: '2px solid #3498db',
+                animation: 'spin 1s linear infinite'
+              }}></span>
+              Processing recording...
+            </div>
+          ) : isRecording ? (
+            <>
               <span style={{ 
-                fontSize: '10px', 
-                marginLeft: '8px',
-                padding: '2px 6px',
-                borderRadius: '10px',
-                backgroundColor: 'rgba(0,0,0,0.1)'
+                display: 'inline-block',
+                width: '14px',
+                height: '14px',
+                backgroundColor: '#fff',
+                borderRadius: '50%',
+                animation: 'pulse 1.5s infinite'
+              }}></span>
+              Stop Recording ({formatTime(recordingDuration)})
+            </>
+          ) : (
+            <>
+              <span style={{ 
+                display: 'inline-block',
+                width: '14px',
+                height: '14px',
+                backgroundColor: '#fff',
+                borderRadius: '50%'
+              }}></span>
+              {mode === 'decision' ? 'Record Design Thoughts' : 'Record Response'}
+            </>
+          )}
+        </button>
+        
+        {mode === 'decision' && (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'space-between',
+            padding: '8px 12px',
+            backgroundColor: 'white',
+            borderRadius: '6px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ 
+                fontSize: '14px',
+                color: '#555',
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
               }}>
-                Critique Active
+                <span style={{ 
+                  color: critiqueModeEnabled ? '#9b59b6' : '#7f8c8d',
+                  fontSize: '16px'
+                }}>🔍</span>
+                Real-time design critique
               </span>
-            )}
-          </>
-        ) : (
-          <>
-            <span style={{ 
-              display: 'inline-block',
-              width: '10px',
-              height: '10px',
-              backgroundColor: '#52c41a',
-              borderRadius: '50%'
-            }}></span>
-            {mode === 'decision' ? 'Record Design Thoughts' : 'Record Response'}
-          </>
+            </div>
+            <label className="toggle-switch" style={{ position: 'relative', display: 'inline-block', width: '46px', height: '24px' }}>
+              <input 
+                type="checkbox" 
+                checked={critiqueModeEnabled}
+                onChange={handleToggleCritiqueMode}
+                style={{ opacity: 0, width: 0, height: 0 }}
+              />
+              <span style={{
+                position: 'absolute',
+                cursor: 'pointer',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: critiqueModeEnabled ? '#9b59b6' : '#ccc',
+                transition: '0.4s',
+                borderRadius: '24px',
+              }}>
+                <span style={{
+                  position: 'absolute',
+                  content: '""',
+                  height: '18px',
+                  width: '18px',
+                  left: critiqueModeEnabled ? '24px' : '3px',
+                  bottom: '3px',
+                  backgroundColor: 'white',
+                  transition: '0.4s',
+                  borderRadius: '50%',
+                }}></span>
+              </span>
+            </label>
+          </div>
         )}
-      </button>
+      </div>
 
       <style jsx>{`
         @keyframes pulse {
           0% { opacity: 1; }
           50% { opacity: 0.4; }
           100% { opacity: 1; }
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
       `}</style>
     </div>
