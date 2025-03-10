@@ -166,6 +166,8 @@ export function MainBoard({
   const [currentResponses, setCurrentResponses] = useState<string[]>([]);
   const [imageContext, setImageContext] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [functionsVisible, setFunctionsVisible] = useState(true);
+  const [toolsVisible, setToolsVisible] = useState(false);
 
   // Function to get the Design-Decision frame ID
   const getDesignFrameId = async () => {
@@ -337,102 +339,323 @@ export function MainBoard({
 
   return (
     <>
-      <div style={{ marginBottom: '0px' }}>
+      {/* Title and Tools Row */}
+      <div style={{ 
+        marginBottom: '2px',
+        display: 'flex', 
+        flexDirection: 'column',
+      }}>
+        <h2 style={{ 
+          margin: '0 0 2px 0', 
+          fontSize: '28px',
+          fontWeight: 600,
+          color: '#333',
+          lineHeight: 1.2,
+          whiteSpace: 'nowrap'
+        }}>
+          Design Decisions
+        </h2>
+
+        {/* Button Row */}
         <div style={{ 
           display: 'flex', 
-          flexDirection: 'column',
-          marginBottom: '10px',
-          alignItems: 'flex-start'
+          gap: '6px',
+          marginBottom: '2px'
         }}>
-          <h2 style={{ 
-            margin: '0 0 12px 0',
-            textAlign: 'left'
-          }}>Design Decisions</h2>
-          <div style={{ 
-            display: 'flex', 
-            gap: '10px',
-            justifyContent: 'flex-start'
-          }}>
-            <button
-              onClick={handleRefreshDesignDecisions}
-              className="button button-secondary"
-              disabled={isRefreshing}
-              style={{ padding: '4px 8px', minWidth: '80px' }}
-            >
-              {isRefreshing ? 'Refreshing...' : '↻ Refresh'}
-            </button>
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="button button-secondary"
-              style={{ padding: '4px 8px', minWidth: '80px' }}
-            >
-              {isExpanded ? 'Collapse' : 'Expand'}
-            </button>
-          </div>
-        </div>
-
-        {/* Voice Recorder for Design Thoughts */}
-        <VoiceRecorder 
-          mode="decision"
-          onNewPoints={handleNewDesignPoints}
-        />
-        
-        {/* Test button for audio file upload */}
-        <FileUploadTest 
-          mode="decision"
-          onNewPoints={handleNewDesignPoints}
-          skipParentCallback={true}
-        />
-
-        {/* Image Action Buttons */}
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
           <button
-            onClick={handleSaveRobotImage}
+            onClick={handleRefreshDesignDecisions}
             className="button button-secondary"
-            disabled={isSavingImage}
+            disabled={isRefreshing}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              padding: '6px 10px',
+              borderRadius: '6px',
+              border: '1px solid #e0e0e0',
+              backgroundColor: '#f8f9fa',
+              color: '#333',
+              fontWeight: 500,
+              fontSize: '14px',
+              flex: 1,
+              cursor: isRefreshing ? 'not-allowed' : 'pointer',
+              maxWidth: '120px'
+            }}
           >
-            {isSavingImage ? 'Saving Images...' : 'Save Images'}
+            <span style={{ fontSize: '14px' }}>↻</span>
+            {isRefreshing ? 'Refreshing' : 'Refresh'}
           </button>
+          
           <button
-            onClick={handleParseRobotImage}
+            onClick={() => setIsExpanded(!isExpanded)}
             className="button button-secondary"
-            disabled={isParsingImage}
+            style={{ 
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '6px 10px', 
+              borderRadius: '6px',
+              border: '1px solid #e0e0e0',
+              backgroundColor: '#f8f9fa',
+              color: '#333',
+              fontWeight: 500,
+              fontSize: '14px',
+              flex: 1,
+              cursor: 'pointer',
+              maxWidth: '120px'
+            }}
           >
-            {isParsingImage ? 'Parsing Images...' : 'Parse Images'}
+            {isExpanded ? 'Collapse' : 'Expand'}
+          </button>
+          
+          <button
+            onClick={() => setToolsVisible(!toolsVisible)}
+            className="button button-secondary"
+            style={{ 
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '6px 10px', 
+              borderRadius: '6px',
+              border: '1px solid #e0e0e0',
+              backgroundColor: toolsVisible ? '#f0f0f0' : '#f8f9fa',
+              color: '#333',
+              fontWeight: 500,
+              fontSize: '14px',
+              flex: 1,
+              cursor: 'pointer',
+              maxWidth: '120px'
+            }}
+          >
+            {toolsVisible ? 'Hide Tools' : 'Show Tools'}
           </button>
         </div>
-        
-        {isExpanded && (
-          designNotes.length === 0 ? (
-            <p>No design decisions found in the "Design-Decision" frame.</p>
-          ) : (
-            <div>
-              <p>Design Decision Structure:</p>
-              <ul style={{ 
-                listStyle: 'none',
-                padding: 0,
-                margin: 0,
-                marginBottom: '20px'
-              }}>
-                {buildDecisionTree(designNotes, designConnections).map((tree: any, index: number) => (
-                  <DecisionTreeNode
-                    key={`tree-${index}`}
-                    node={tree}
-                    level={0}
-                  />
-                ))}
-              </ul>
-            </div>
-          )
-        )}
       </div>
 
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+      {/* Tools Section */}
+      {toolsVisible && (
+        <div style={{
+          marginBottom: '8px',
+          borderRadius: '6px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px'
+        }}>
+          {/* Function Toggle Button */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '6px 10px',
+            backgroundColor: '#f5f5f5',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            border: '1px solid #e0e0e0'
+          }} onClick={() => setFunctionsVisible(!functionsVisible)}>
+            <span style={{ 
+              fontSize: '14px', 
+              fontWeight: 500, 
+              color: '#444',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              <span style={{ fontSize: '16px' }}>🛠️</span>
+              Recording & Analysis Tools
+            </span>
+            <span style={{ fontSize: '14px' }}>
+              {functionsVisible ? '🔼' : '🔽'}
+            </span>
+          </div>
+
+          {/* Tool Components */}
+          {functionsVisible && (
+            <div style={{
+              padding: '8px',
+              borderRadius: '6px',
+              border: '1px solid #e0e0e0',
+              backgroundColor: '#f9f9f9'
+            }}>
+              <div style={{ marginBottom: '8px' }}>
+                <h3 style={{ 
+                  margin: '0 0 6px 0', 
+                  fontSize: '14px', 
+                  color: '#555',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  <span style={{ fontSize: '15px' }}>🎤</span>
+                  Voice Recording
+                </h3>
+                <VoiceRecorder 
+                  mode="decision"
+                  onNewPoints={handleNewDesignPoints}
+                  enableRealTimeCritique={true}
+                />
+              </div>
+              
+              <div style={{ marginBottom: '8px' }}>
+                <h3 style={{ 
+                  margin: '0 0 6px 0', 
+                  fontSize: '14px', 
+                  color: '#555',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  <span style={{ fontSize: '15px' }}>🔊</span>
+                  Audio File Upload
+                </h3>
+                <FileUploadTest 
+                  mode="decision"
+                  onNewPoints={handleNewDesignPoints}
+                  skipParentCallback={true}
+                />
+              </div>
+
+              <div>
+                <h3 style={{ 
+                  margin: '0 0 6px 0', 
+                  fontSize: '14px', 
+                  color: '#555',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  <span style={{ fontSize: '15px' }}>🖼️</span>
+                  Image Actions
+                </h3>
+                <div style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}>
+                  <button
+                    onClick={handleSaveRobotImage}
+                    className="button button-secondary"
+                    disabled={isSavingImage}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #e0e0e0',
+                      backgroundColor: '#ffffff',
+                      color: '#555',
+                      fontWeight: 500,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      cursor: isSavingImage ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    <span style={{ fontSize: '15px' }}>🖼️</span>
+                    {isSavingImage ? 'Saving Images...' : 'Save Images'}
+                  </button>
+                  <button
+                    onClick={handleParseRobotImage}
+                    className="button button-secondary"
+                    disabled={isParsingImage}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #e0e0e0',
+                      backgroundColor: '#ffffff',
+                      color: '#555',
+                      fontWeight: 500,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      cursor: isParsingImage ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    <span style={{ fontSize: '15px' }}>🔍</span>
+                    {isParsingImage ? 'Parsing Images...' : 'Parse Images'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      
+      {/* Decision Tree Section */}
+      {isExpanded && (
+        designNotes.length === 0 ? (
+          <div style={{
+            padding: '10px',
+            textAlign: 'center',
+            backgroundColor: '#f8f9fa',
+            borderRadius: '6px',
+            color: '#666',
+            fontSize: '14px',
+            border: '1px solid #e0e0e0'
+          }}>
+            <p style={{ margin: 0 }}>No design decisions found in the "Design-Decision" frame.</p>
+            <p style={{ margin: '8px 0 0 0', fontSize: '13px' }}>Record your thoughts or upload an audio file to get started.</p>
+          </div>
+        ) : (
+          <div style={{
+            backgroundColor: '#f8f9fa',
+            borderRadius: '6px',
+            padding: '8px',
+            border: '1px solid #e0e0e0'
+          }}>
+            <p style={{ 
+              margin: '0 0 8px 0',
+              fontWeight: 500,
+              color: '#555',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
+              <span style={{ fontSize: '15px' }}>🔍</span>
+              Design Decision Structure
+            </p>
+            <ul style={{ 
+              listStyle: 'none',
+              padding: 0,
+              margin: 0
+            }}>
+              {buildDecisionTree(designNotes, designConnections).map((tree: any, index: number) => (
+                <DecisionTreeNode
+                  key={`tree-${index}`}
+                  node={tree}
+                  level={0}
+                />
+              ))}
+            </ul>
+          </div>
+        )
+      )}
+
+      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
         <button 
           className="button button-primary"
           onClick={handleAnalysisClick}
           disabled={isAnalyzing}
+          style={{
+            padding: '8px 12px',
+            borderRadius: '6px',
+            border: 'none',
+            backgroundColor: '#3498db',
+            color: 'white',
+            fontWeight: 600,
+            cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            transition: 'all 0.2s ease',
+            width: '100%',
+            justifyContent: 'center'
+          }}
         >
+          <span style={{ fontSize: '15px' }}>✨</span>
           {isAnalyzing ? 'Analysis in Progress...' : 
            showAnalysis ? 'Refresh Analysis' : 'Analyze the Design Decisions'}
         </button>
@@ -449,7 +672,7 @@ export function MainBoard({
           <button
             onClick={handleOpenConversation}
             className="button button-primary"
-            style={{ marginTop: '16px' }}
+            style={{ marginTop: '8px' }}
           >
             Respond to Analysis
           </button>

@@ -55,7 +55,7 @@ export const FileUploadTest: React.FC<FileProcessingProps> = ({
   /**
    * Handle button click - either open file picker or stop processing
    */
-  const handleClick = useCallback(() => {
+  const handleStopProcessing = useCallback(() => {
     if (isProcessing) {
       // Request stop when processing
       console.log("Stop requested via click - halting processing");
@@ -299,78 +299,121 @@ export const FileUploadTest: React.FC<FileProcessingProps> = ({
   };
   
   return (
-    <div className="file-upload-test" style={{ marginBottom: '16px' }}>
-      <input 
-        type="file"
-        accept="audio/*"
-        ref={fileInputRef}
-        onChange={handleFileChange}
-        style={{ display: 'none' }}
-      />
-      
-      <button
-        onClick={handleClick}
-        disabled={isProcessing && shouldStop} // Disable when stopping
-        className={`button ${isProcessing ? 'button-danger' : 'button-secondary'}`}
-        style={{ 
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '8px',
-          width: '100%'
-        }}
-      >
-        {shouldStop ? (
-          'Stopping...'
-        ) : isProcessing ? (
-          <>
-            <span style={{ 
-              display: 'inline-block',
-              width: '10px',
-              height: '10px',
-              backgroundColor: '#ff4d4f',
-              borderRadius: '50%',
-              animation: 'pulse 1.5s infinite'
-            }}></span>
-            {`Processing ${fileName} (${progress}%) - Click to stop`}
-          </>
-        ) : (
-          <>
-            <span style={{ 
-              display: 'inline-block',
-              width: '10px',
-              height: '10px',
-              backgroundColor: '#1890ff',
-              borderRadius: '50%'
-            }}></span>
-            Test with audio file ({mode === 'decision' ? 'Design Thoughts' : 'Response'})
-          </>
-        )}
-      </button>
-      
+    <div>
       {errorMessage && (
         <div style={{ 
-          color: '#ff4d4f', 
-          marginTop: '8px',
-          fontSize: '14px' 
+          padding: '8px', 
+          marginBottom: '10px', 
+          backgroundColor: '#fee', 
+          color: '#c33',
+          fontSize: '13px',
+          borderRadius: '4px',
+          border: '1px solid #fcc'
         }}>
-          Error: {errorMessage}
+          {errorMessage}
         </div>
       )}
       
-      <style jsx>{`
-        @keyframes pulse {
-          0% {
-            opacity: 0.5;
-          }
-          50% {
-            opacity: 1;
-          }
-          100% {
-            opacity: 0.5;
-          }
-        }
-      `}</style>
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        gap: '8px'
+      }}>
+        <label 
+          htmlFor="audio-file" 
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            width: '100%',
+            padding: '10px 8px',
+            borderRadius: '8px',
+            border: '1px solid #e0e0e0',
+            backgroundColor: '#fff',
+            color: '#444',
+            fontWeight: 500,
+            fontSize: '14px',
+            cursor: isProcessing ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s ease',
+            textAlign: 'center'
+          }}
+        >
+          <span style={{ fontSize: '16px' }}>🔊</span>
+          Test with audio file {mode === 'decision' ? '(Design Thoughts)' : '(Responses)'}
+        </label>
+        
+        <input
+          type="file"
+          id="audio-file"
+          accept="audio/*"
+          onChange={handleFileChange}
+          disabled={isProcessing}
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+        />
+        
+        {isProcessing && (
+          <div>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              marginBottom: '6px'
+            }}>
+              <div style={{ 
+                fontSize: '13px', 
+                fontWeight: 500, 
+                color: '#444',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: '60%'
+              }}>
+                {fileName || 'Processing file...'}
+              </div>
+              <div style={{ fontSize: '13px', color: '#666' }}>
+                {progress}%
+              </div>
+            </div>
+            
+            <div style={{ 
+              position: 'relative', 
+              height: '6px', 
+              backgroundColor: '#eee',
+              borderRadius: '3px',
+              overflow: 'hidden',
+              marginBottom: '8px'
+            }}>
+              <div style={{ 
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: `${progress}%`,
+                backgroundColor: '#4299e1',
+                transition: 'width 0.3s ease'
+              }}></div>
+            </div>
+            
+            <button 
+              onClick={handleStopProcessing}
+              style={{
+                width: '100%',
+                padding: '6px',
+                borderRadius: '6px',
+                backgroundColor: '#f5f5f5',
+                border: '1px solid #ddd',
+                color: '#666',
+                fontSize: '13px',
+                cursor: 'pointer'
+              }}
+            >
+              Stop Processing
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }; 
