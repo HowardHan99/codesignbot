@@ -79,7 +79,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       MiroService.getDesignChallenge(),
       MiroService.getConsensusPoints()
     ]).then(([challenge, consensus]) => {
-      console.log('Fetched initial consensus points:', consensus);
+      // console.log('Fetched initial consensus points:', consensus);
       setDesignChallenge(challenge);
       setConsensusPoints(consensus);
     });
@@ -92,7 +92,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         const points = await getSynthesizedPoints();
         setSynthesizedPoints(points);
       } catch (error) {
-        console.error('Error fetching synthesized points:', error);
+        // console.error('Error fetching synthesized points:', error);
       }
     };
     fetchSynthesizedPoints();
@@ -102,6 +102,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
    * Process sticky notes to generate analysis
    */
   const processNotes = useCallback(async (forceProcess: boolean = false) => {
+    // If already processed and not forcing reprocess, skip
+    if (processedRef.current && !forceProcess) {
+      return;
+    }
+    processedRef.current = true;
+    
     // Prevent processing if no notes
     if (!stickyNotes.length) {
       return;
@@ -117,8 +123,11 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     setSelectedTone('');
     
     try {
-      console.log('Processing combined notes for analysis');
-      console.log('Current consensus points:', consensusPoints);
+      console.log("🕒 TIMING: Starting antagonistic points generation");
+      const startTime = performance.now();
+      
+      // console.log('Processing combined notes for analysis');
+      // console.log('Current consensus points:', consensusPoints);
       responseStore.clear();
 
       // Get fresh sticky notes from the Design-Decision frame
@@ -147,6 +156,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         ? `${combinedMessage}\n\nRelevant visual context from design sketches:\n${imageContext}`
         : combinedMessage;
       
+      console.log("🕒 TIMING: Preprocessing completed, calling OpenAI at " + (performance.now() - startTime).toFixed(2) + "ms");
+      
       // Generate initial response
       const response = await OpenAIService.generateAnalysis(
         messageWithContext, 
@@ -154,6 +165,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         synthesizedPoints,
         consensusPoints
       );
+      
+      const openaiCompleteTime = performance.now();
+      console.log("🕒 TIMING: OpenAI response received after " + (openaiCompleteTime - startTime).toFixed(2) + "ms");
       
       // OPTIMIZATION 1: Immediately display the response
       setResponses([response]);
@@ -182,66 +196,57 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             tone: selectedTone || 'normal',
             consensusPoints: consensusPoints
           };
-          console.log('Saving analysis with data:', analysisData);
+          // console.log('Saving analysis with data:', analysisData);
           await saveAnalysis(analysisData);
         } catch (error) {
-          console.error('Error saving to Firebase:', error);
+          // console.error('Error saving to Firebase:', error);
         }
       })();
       backgroundPromises.push(savePromise);
       
-      // Only generate simplified version if we're in simplified mode
+      // Generate simplified version immediately if in simplified mode
       if (isSimplifiedMode) {
         const simplifyPromise = (async () => {
           try {
+            setIsChangingTone(true);
+            const startSimplify = performance.now();
             const simplified = await OpenAIService.simplifyAnalysis(response);
+            console.log("🕒 TIMING: Simplified version generated after " + (performance.now() - startSimplify).toFixed(2) + "ms");
+            
             setSimplifiedResponses([simplified]);
             setStoredSimplifiedResponses({ normal: simplified });
             
-            // Update the displayed responses if we're still in simplified mode
             if (isSimplifiedMode) {
               onResponsesUpdate?.(splitResponse(simplified));
             }
-            
-            // Update Firebase with simplified version
-            try {
-              const analysisData = {
-                timestamp: null,
-                designChallenge: designChallenge,
-                decisions: frameStickies,
-                analysis: {
-                  full: splitResponse(response),
-                  simplified: splitResponse(simplified)
-                },
-                tone: selectedTone || 'normal',
-                consensusPoints: consensusPoints
-              };
-              await saveAnalysis(analysisData);
-            } catch (error) {
-              console.error('Error updating Firebase with simplified analysis:', error);
-            }
+            setIsChangingTone(false);
           } catch (error) {
-            console.error('Error generating simplified response:', error);
+            // console.error('Error generating simplified response:', error);
+            setIsChangingTone(false);
           }
         })();
         backgroundPromises.push(simplifyPromise);
       }
       
-      // Wait for all background promises to resolve
+      // Wait for all background tasks to complete
       await Promise.all(backgroundPromises);
       
-      processedRef.current = true;
+      // Clean up
+      setLoading(false);
+      processingRef.current = false;
       onComplete?.();
       
+      const totalTime = performance.now() - startTime;
+      console.log("🕒 TIMING: Total antagonistic points generation completed in " + totalTime.toFixed(2) + "ms");
+      console.log("🕒 TIMING: Breakdown - OpenAI: " + (openaiCompleteTime - startTime).toFixed(2) + "ms, Post-processing: " + (totalTime - (openaiCompleteTime - startTime)).toFixed(2) + "ms");
+      
     } catch (error) {
-      console.error('Error processing sticky notes:', error);
-      setError('Failed to process sticky notes. Please try again.');
-      onComplete?.();
-    } finally {
-      processingRef.current = false;
+      // console.error('Error processing notes:', error);
+      setError('Failed to process notes: ' + (error as Error).message);
       setLoading(false);
+      processingRef.current = false;
     }
-  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints]);
+  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints, stickyNotes]);
 
   // Handle mode toggle
   const handleModeToggle = useCallback(() => {
