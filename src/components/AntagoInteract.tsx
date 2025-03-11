@@ -123,7 +123,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     setSelectedTone('');
     
     try {
-      console.log("🕒 TIMING: Starting antagonistic points generation");
+      console.log("\n🕒 TIMING: Starting antagonistic points generation process");
       const startTime = performance.now();
       
       // console.log('Processing combined notes for analysis');
@@ -131,6 +131,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       responseStore.clear();
 
       // Get fresh sticky notes from the Design-Decision frame
+      console.log("🕒 TIMING: 1. Fetching design decisions from Miro board");
+      const miroStartTime = performance.now();
+      
       const frames = await miro.board.get({ type: 'frame' });
       const designFrame = frames.find(f => f.title === 'Design-Decision');
       
@@ -146,7 +149,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         .filter(sticky => sticky.parentId === designFrame.id)
         .map(sticky => sticky.content || '');
       
+      const miroEndTime = performance.now();
+      console.log(`🕒 TIMING: ├─ Miro data fetching: ${(miroEndTime - miroStartTime).toFixed(2)}ms`);
+      
       // Combine sticky notes into a single message
+      console.log("🕒 TIMING: 2. Formatting data for OpenAI");
+      const formatStartTime = performance.now();
+      
       const combinedMessage = frameStickies.map((note, index) => 
         `Design Decision ${index + 1}: ${note}`
       ).join('\n');
@@ -156,9 +165,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         ? `${combinedMessage}\n\nRelevant visual context from design sketches:\n${imageContext}`
         : combinedMessage;
       
-      console.log("🕒 TIMING: Preprocessing completed, calling OpenAI at " + (performance.now() - startTime).toFixed(2) + "ms");
+      const formatEndTime = performance.now();
+      console.log(`🕒 TIMING: ├─ Data formatting: ${(formatEndTime - formatStartTime).toFixed(2)}ms`);
       
       // Generate initial response
+      console.log("🕒 TIMING: 3. Calling OpenAI API");
+      const openaiStartTime = performance.now();
+      
       const response = await OpenAIService.generateAnalysis(
         messageWithContext, 
         designChallenge,
@@ -166,10 +179,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         consensusPoints
       );
       
-      const openaiCompleteTime = performance.now();
-      console.log("🕒 TIMING: OpenAI response received after " + (openaiCompleteTime - startTime).toFixed(2) + "ms");
+      const openaiEndTime = performance.now();
+      console.log(`🕒 TIMING: ├─ OpenAI API call: ${(openaiEndTime - openaiStartTime).toFixed(2)}ms`);
       
-      // OPTIMIZATION 1: Immediately display the response
+      // OPTIMIZATION 1: Update UI with the response
+      console.log("🕒 TIMING: 4. Updating UI with response");
+      const uiStartTime = performance.now();
+      
       setResponses([response]);
       setStoredFullResponses({ normal: response }); // Store normal tone
       
@@ -177,11 +193,20 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       const splitResponses = splitResponse(response);
       onResponsesUpdate?.(splitResponses);
       
-      // OPTIMIZATION 2 & 3: Handle other operations in parallel, only generate simplified if needed
-      // Create a tracking variable for simplified generation
+      const uiEndTime = performance.now();
+      console.log(`🕒 TIMING: ├─ UI update: ${(uiEndTime - uiStartTime).toFixed(2)}ms`);
+      
+      // OPTIMIZATION 2 & 3: Handle background operations
+      console.log("🕒 TIMING: 5. Starting background operations");
+      const bgStartTime = performance.now();
+      
+      // Create a tracking variable for background operations
       const backgroundPromises = [];
       
       // Always save to Firebase in the background
+      console.log("🕒 TIMING: 5a. Saving to Firebase");
+      const saveStartTime = performance.now();
+      
       const savePromise = (async () => {
         try {
           const analysisData = {
@@ -198,20 +223,24 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           };
           // console.log('Saving analysis with data:', analysisData);
           await saveAnalysis(analysisData);
+          const saveEndTime = performance.now();
+          console.log(`🕒 TIMING: │  ├─ Firebase save: ${(saveEndTime - saveStartTime).toFixed(2)}ms`);
         } catch (error) {
           // console.error('Error saving to Firebase:', error);
+          console.log(`🕒 TIMING: │  ├─ Firebase save failed`);
         }
       })();
       backgroundPromises.push(savePromise);
       
       // Generate simplified version immediately if in simplified mode
       if (isSimplifiedMode) {
+        console.log("🕒 TIMING: 5b. Generating simplified version");
+        const simplifyStartTime = performance.now();
+        
         const simplifyPromise = (async () => {
           try {
             setIsChangingTone(true);
-            const startSimplify = performance.now();
             const simplified = await OpenAIService.simplifyAnalysis(response);
-            console.log("🕒 TIMING: Simplified version generated after " + (performance.now() - startSimplify).toFixed(2) + "ms");
             
             setSimplifiedResponses([simplified]);
             setStoredSimplifiedResponses({ normal: simplified });
@@ -220,8 +249,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               onResponsesUpdate?.(splitResponse(simplified));
             }
             setIsChangingTone(false);
+            
+            const simplifyEndTime = performance.now();
+            console.log(`🕒 TIMING: │  ├─ Simplify generation: ${(simplifyEndTime - simplifyStartTime).toFixed(2)}ms`);
           } catch (error) {
             // console.error('Error generating simplified response:', error);
+            console.log(`🕒 TIMING: │  ├─ Simplify generation failed`);
             setIsChangingTone(false);
           }
         })();
@@ -230,15 +263,29 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       // Wait for all background tasks to complete
       await Promise.all(backgroundPromises);
+      const bgEndTime = performance.now();
+      console.log(`🕒 TIMING: ├─ Background operations: ${(bgEndTime - bgStartTime).toFixed(2)}ms`);
       
       // Clean up
+      console.log("🕒 TIMING: 6. Finishing up");
+      const finishStartTime = performance.now();
+      
       setLoading(false);
       processingRef.current = false;
       onComplete?.();
       
+      const finishEndTime = performance.now();
+      console.log(`🕒 TIMING: ├─ Cleanup: ${(finishEndTime - finishStartTime).toFixed(2)}ms`);
+      
       const totalTime = performance.now() - startTime;
-      console.log("🕒 TIMING: Total antagonistic points generation completed in " + totalTime.toFixed(2) + "ms");
-      console.log("🕒 TIMING: Breakdown - OpenAI: " + (openaiCompleteTime - startTime).toFixed(2) + "ms, Post-processing: " + (totalTime - (openaiCompleteTime - startTime)).toFixed(2) + "ms");
+      console.log("\n🕒 TIMING: COMPLETE BREAKDOWN");
+      console.log(`🕒 TIMING: ├─ 1. Miro data fetching: ${(miroEndTime - miroStartTime).toFixed(2)}ms (${((miroEndTime - miroStartTime) / totalTime * 100).toFixed(1)}%)`);
+      console.log(`🕒 TIMING: ├─ 2. Data formatting: ${(formatEndTime - formatStartTime).toFixed(2)}ms (${((formatEndTime - formatStartTime) / totalTime * 100).toFixed(1)}%)`);
+      console.log(`🕒 TIMING: ├─ 3. OpenAI API call: ${(openaiEndTime - openaiStartTime).toFixed(2)}ms (${((openaiEndTime - openaiStartTime) / totalTime * 100).toFixed(1)}%)`);
+      console.log(`🕒 TIMING: ├─ 4. UI update: ${(uiEndTime - uiStartTime).toFixed(2)}ms (${((uiEndTime - uiStartTime) / totalTime * 100).toFixed(1)}%)`);
+      console.log(`🕒 TIMING: ├─ 5. Background operations: ${(bgEndTime - bgStartTime).toFixed(2)}ms (${((bgEndTime - bgStartTime) / totalTime * 100).toFixed(1)}%)`);
+      console.log(`🕒 TIMING: └─ 6. Cleanup: ${(finishEndTime - finishStartTime).toFixed(2)}ms (${((finishEndTime - finishStartTime) / totalTime * 100).toFixed(1)}%)`);
+      console.log(`🕒 TIMING: Total antagonistic points generation: ${totalTime.toFixed(2)}ms (100%)`);
       
     } catch (error) {
       // console.error('Error processing notes:', error);

@@ -2,7 +2,6 @@ import { ConfigurationService } from './configurationService';
 import { ApiService } from './apiService';
 import { safeApiCall, logError } from '../utils/errorHandlingUtils';
 import { OpenAIRequestParams } from './openaiCacheService';
-
 /**
  * Type for relevance categories
  */

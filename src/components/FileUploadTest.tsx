@@ -321,14 +321,14 @@ export const FileUploadTest: React.FC<FileProcessingProps> = ({
       }}>
         <label 
           htmlFor="audio-file" 
+          onClick={() => !isProcessing && fileInputRef.current?.click()}
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
+            gap: '8px',
             width: '100%',
-            padding: '10px 8px',
-            borderRadius: '8px',
+            padding: '8px 10px',
+            borderRadius: '6px',
             border: '1px solid #e0e0e0',
             backgroundColor: '#fff',
             color: '#444',
@@ -336,10 +336,10 @@ export const FileUploadTest: React.FC<FileProcessingProps> = ({
             fontSize: '14px',
             cursor: isProcessing ? 'not-allowed' : 'pointer',
             transition: 'all 0.2s ease',
-            textAlign: 'center'
+            justifyContent: 'flex-start'
           }}
         >
-          <span style={{ fontSize: '16px' }}>🔊</span>
+          <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🔊</span>
           Test with audio file {mode === 'decision' ? '(Design Thoughts)' : '(Responses)'}
         </label>
         
