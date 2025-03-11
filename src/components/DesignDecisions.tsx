@@ -10,6 +10,7 @@ import { MiroDesignService } from '../services/miro/designService';
 import { VoiceRecorder } from './VoiceRecorder';
 import { FileUploadTest } from './FileUploadTest';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
+import { DesignerRolePlayService } from '../services/designerRolePlayService';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
@@ -162,6 +163,7 @@ export function MainBoard({
   const [isExpanded, setIsExpanded] = useState(true);
   const [isSavingImage, setIsSavingImage] = useState(false);
   const [isParsingImage, setIsParsingImage] = useState(false);
+  const [isRolePlayingDesigner, setIsRolePlayingDesigner] = useState(false);
   const [designChallenge, setDesignChallenge] = useState<string>('');
   const [currentResponses, setCurrentResponses] = useState<string[]>([]);
   const [imageContext, setImageContext] = useState<string>('');
@@ -332,6 +334,45 @@ export function MainBoard({
     }
   }, [designFrameId, getDesignFrameId, handleRefreshDesignDecisions]);
 
+  // New function to handle designer role play
+  const handleDesignerRolePlay = async () => {
+    if (isRolePlayingDesigner) {
+      console.log('[DESIGNER ROLE PLAY UI] Button clicked but already role playing, ignoring');
+      return;
+    }
+    
+    console.log('[DESIGNER ROLE PLAY UI] Role play designer button clicked');
+    const startTime = Date.now();
+    
+    try {
+      setIsRolePlayingDesigner(true);
+      console.log('[DESIGNER ROLE PLAY UI] Starting designer role play simulation');
+      
+      await DesignerRolePlayService.simulateDesigner();
+      console.log('[DESIGNER ROLE PLAY UI] Designer role play simulation completed successfully');
+      
+      // Refresh design decisions after role play
+      console.log('[DESIGNER ROLE PLAY UI] Refreshing design decisions');
+      await handleRefreshDesignDecisions();
+      console.log('[DESIGNER ROLE PLAY UI] Design decisions refreshed');
+      
+      const duration = Date.now() - startTime;
+      console.log(`[DESIGNER ROLE PLAY UI] Complete designer role play process finished in ${duration}ms`);
+      
+      // Show success notification
+      miro.board.notifications.showInfo('Designer role play completed successfully!');
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      console.error(`[DESIGNER ROLE PLAY UI] Error role playing designer after ${duration}ms:`, error);
+      
+      // Show error to user
+      miro.board.notifications.showError('Failed to role play designer. Please try again.');
+    } finally {
+      setIsRolePlayingDesigner(false);
+      console.log('[DESIGNER ROLE PLAY UI] Reset role playing state');
+    }
+  };
+
   // Initial frame ID fetch
   useEffect(() => {
     getDesignFrameId();
@@ -459,9 +500,9 @@ export function MainBoard({
               color: '#444',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px'
+              gap: '8px'
             }}>
-              <span style={{ fontSize: '16px' }}>🛠️</span>
+              <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🛠️</span>
               Recording & Analysis Tools
             </span>
             <span style={{ fontSize: '14px' }}>
@@ -485,9 +526,9 @@ export function MainBoard({
                   fontWeight: 500,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px'
+                  gap: '8px'
                 }}>
-                  <span style={{ fontSize: '15px' }}>🎤</span>
+                  <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🎤</span>
                   Voice Recording
                 </h3>
                 <VoiceRecorder 
@@ -505,9 +546,9 @@ export function MainBoard({
                   fontWeight: 500,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px'
+                  gap: '8px'
                 }}>
-                  <span style={{ fontSize: '15px' }}>🔊</span>
+                  <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🔊</span>
                   Audio File Upload
                 </h3>
                 <FileUploadTest 
@@ -517,7 +558,15 @@ export function MainBoard({
                 />
               </div>
 
-              <div>
+              <div style={{ 
+                margin: '0 0 6px 0', 
+                fontSize: '14px', 
+                color: '#555',
+                fontWeight: 500,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}>
                 <h3 style={{ 
                   margin: '0 0 6px 0', 
                   fontSize: '14px', 
@@ -525,55 +574,100 @@ export function MainBoard({
                   fontWeight: 500,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px'
+                  gap: '8px'
                 }}>
-                  <span style={{ fontSize: '15px' }}>🖼️</span>
+                  <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🖼️</span>
                   Image Actions
                 </h3>
                 <div style={{ 
                   display: 'flex', 
-                  flexDirection: 'column',
-                  gap: '6px'
+                  flexDirection: 'row',
+                  gap: '8px'
                 }}>
                   <button
                     onClick={handleSaveRobotImage}
                     className="button button-secondary"
                     disabled={isSavingImage}
                     style={{
-                      padding: '6px 10px',
+                      padding: '8px 10px',
                       borderRadius: '6px',
                       border: '1px solid #e0e0e0',
                       backgroundColor: '#ffffff',
                       color: '#555',
                       fontWeight: 500,
+                      fontSize: '14px',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '4px',
-                      cursor: isSavingImage ? 'not-allowed' : 'pointer'
+                      gap: '8px',
+                      cursor: isSavingImage ? 'not-allowed' : 'pointer',
+                      flex: '1',
+                      justifyContent: 'flex-start'
                     }}
                   >
-                    <span style={{ fontSize: '15px' }}>🖼️</span>
-                    {isSavingImage ? 'Saving Images...' : 'Save Images'}
+                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🖼️</span>
+                    {isSavingImage ? 'Saving...' : 'Save Images'}
                   </button>
                   <button
                     onClick={handleParseRobotImage}
                     className="button button-secondary"
                     disabled={isParsingImage}
                     style={{
-                      padding: '6px 10px',
+                      padding: '8px 10px',
                       borderRadius: '6px',
                       border: '1px solid #e0e0e0',
                       backgroundColor: '#ffffff',
                       color: '#555',
                       fontWeight: 500,
+                      fontSize: '14px',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '4px',
-                      cursor: isParsingImage ? 'not-allowed' : 'pointer'
+                      gap: '8px',
+                      cursor: isParsingImage ? 'not-allowed' : 'pointer',
+                      flex: '1',
+                      justifyContent: 'flex-start'
                     }}
                   >
-                    <span style={{ fontSize: '15px' }}>🔍</span>
-                    {isParsingImage ? 'Parsing Images...' : 'Parse Images'}
+                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🔍</span>
+                    {isParsingImage ? 'Parsing...' : 'Parse Images'}
+                  </button>
+                </div>
+
+                {/* New section for Designer Role Play */}
+                <div style={{ marginBottom: '8px' }}>
+                  <h3 style={{ 
+                    margin: '0 0 6px 0', 
+                    fontSize: '14px', 
+                    color: '#555',
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>👩‍🎨</span>
+                    Designer Role Play
+                  </h3>
+                  <button
+                    onClick={handleDesignerRolePlay}
+                    className="button button-secondary"
+                    disabled={isRolePlayingDesigner}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #e0e0e0',
+                      backgroundColor: '#ffffff',
+                      color: '#555',
+                      fontWeight: 500,
+                      fontSize: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: isRolePlayingDesigner ? 'not-allowed' : 'pointer',
+                      width: '100%',
+                      justifyContent: 'flex-start'
+                    }}
+                  >
+                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🧠</span>
+                    {isRolePlayingDesigner ? 'Designing...' : 'Role Play Designer'}
                   </button>
                 </div>
               </div>
@@ -611,9 +705,9 @@ export function MainBoard({
               fontSize: '14px',
               display: 'flex',
               alignItems: 'center',
-              gap: '4px'
+              gap: '8px'
             }}>
-              <span style={{ fontSize: '15px' }}>🔍</span>
+              <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🔍</span>
               Design Decision Structure
             </p>
             <ul style={{ 
