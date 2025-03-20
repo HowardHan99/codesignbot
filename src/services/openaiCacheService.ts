@@ -34,12 +34,8 @@ export class OpenAICacheService {
   
   /**
    * Generate a cache key for a request
-   * @param params The OpenAI request parameters
-   * @returns A string key
    */
   private static generateCacheKey(params: OpenAIRequestParams): string {
-    // Create a standardized stringified version of the params
-    // Sort keys to ensure consistent order
     const normalized = {
       systemPrompt: params.systemPrompt,
       userPrompt: params.userPrompt,
@@ -53,38 +49,29 @@ export class OpenAICacheService {
   
   /**
    * Get a cached response if available
-   * @param params The OpenAI request parameters
-   * @returns The cached response or null if not found
    */
   public static getCachedResponse(params: OpenAIRequestParams): OpenAIResponse | null {
     const key = this.generateCacheKey(params);
     const entry = this.cache.get(key);
     
-    // If no entry or it has expired, return null
     if (!entry || entry.expiresAt < Date.now()) {
       if (entry) {
-        // Remove expired entry
         this.cache.delete(key);
       }
       return null;
     }
     
-    console.log('OpenAI cache hit');
     return entry.response;
   }
   
   /**
    * Cache a response
-   * @param params The OpenAI request parameters
-   * @param response The response to cache
-   * @param ttlMs Optional time-to-live in milliseconds
    */
   public static cacheResponse(
     params: OpenAIRequestParams, 
     response: OpenAIResponse,
     ttlMs: number = this.DEFAULT_TTL_MS
   ): void {
-    // Manage cache size - if we're at capacity, remove oldest entry
     if (this.cache.size >= this.MAX_CACHE_SIZE) {
       let oldestKey: string | null = null;
       let oldestTime = Infinity;
@@ -110,13 +97,10 @@ export class OpenAICacheService {
       timestamp: now,
       expiresAt: now + ttlMs
     });
-    
-    console.log('OpenAI response cached');
   }
   
   /**
    * Clear the entire cache or specific entries
-   * @param params Optional specific parameters to clear
    */
   public static clearCache(params?: OpenAIRequestParams): void {
     if (params) {
@@ -129,22 +113,16 @@ export class OpenAICacheService {
   
   /**
    * Get a response, either from cache or by making a new API call
-   * @param params The OpenAI request parameters
-   * @param ttlMs Optional time-to-live for caching
-   * @returns The API response
    */
   public static async getResponse(
     params: OpenAIRequestParams,
     ttlMs: number = this.DEFAULT_TTL_MS
   ): Promise<OpenAIResponse> {
-    // Check cache first
     const cachedResponse = this.getCachedResponse(params);
     if (cachedResponse) {
       return cachedResponse;
     }
     
-    // Make the API call
-    console.log('OpenAI cache miss, making API call');
     const response = await fetch('/api/openaiwrap', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -157,12 +135,10 @@ export class OpenAICacheService {
     
     const result = await response.json();
     
-    // Add timestamp if not present
     if (!result.timestamp) {
       result.timestamp = Date.now();
     }
     
-    // Cache the response
     this.cacheResponse(params, result, ttlMs);
     
     return result;

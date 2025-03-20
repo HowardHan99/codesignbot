@@ -170,6 +170,7 @@ export function MainBoard({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [functionsVisible, setFunctionsVisible] = useState(true);
   const [toolsVisible, setToolsVisible] = useState(false);
+  const [shouldRefreshAnalysis, setShouldRefreshAnalysis] = useState(false);
 
   // Function to get the Design-Decision frame ID
   const getDesignFrameId = async () => {
@@ -218,13 +219,36 @@ export function MainBoard({
 
   // Handle refresh button click
   const handleRefreshDesignDecisions = async () => {
+    if (isRefreshing) return; // Prevent multiple simultaneous refreshes
+    
     try {
       setIsRefreshing(true);
+      
+      // Get current data for comparison
+      const currentNotes = designNotes.map(note => note.content);
+      const currentConnections = designConnections.map(conn => `${conn.from}-${conn.to}`);
+      
+      // Fetch new data
       const { notes, connections } = await getCurrentDesignData();
-      setDesignNotes(notes);
-      setDesignConnections(connections);
+      
+      // Compare new data with current data
+      const newNotes = notes.map(note => note.content);
+      const newConnections = connections.map(conn => `${conn.from}-${conn.to}`);
+      
+      const hasChanges = 
+        JSON.stringify(currentNotes) !== JSON.stringify(newNotes) ||
+        JSON.stringify(currentConnections) !== JSON.stringify(newConnections);
+      
+      if (hasChanges) {
+        setDesignNotes(notes);
+        setDesignConnections(connections);
+        miro.board.notifications.showInfo('Design decisions refreshed successfully.');
+      } else {
+        miro.board.notifications.showInfo('No changes detected in design decisions.');
+      }
     } catch (error) {
       console.error('Error refreshing design decisions:', error);
+      miro.board.notifications.showError('Failed to refresh design decisions. Please try again.');
     } finally {
       setIsRefreshing(false);
     }
@@ -236,18 +260,24 @@ export function MainBoard({
 
     try {
       onAnalysisClick();
-      await handleRefreshDesignDecisions();
+      
+      // Get fresh design data
+      const { notes, connections } = await getCurrentDesignData();
+      setDesignNotes(notes);
+      setDesignConnections(connections);
 
       // Get fresh design challenge
       const challenge = await MiroDesignService.getDesignChallenge();
       setDesignChallenge(challenge);
 
-      // Clear previous responses if showing analysis
+      // Clear previous responses and force analysis refresh
       if (showAnalysis) {
         setCurrentResponses([]);
+        setShouldRefreshAnalysis(true);
       }
     } catch (error) {
       console.error('Error during analysis:', error);
+      miro.board.notifications.showError('Failed to refresh analysis. Please try again.');
       onAnalysisComplete();
     }
   }, [isAnalyzing, showAnalysis, onAnalysisClick, onAnalysisComplete]);
@@ -759,9 +789,13 @@ export function MainBoard({
         <>
           <AntagoInteract 
             stickyNotes={designNotes.map(note => note.content)}
-            onComplete={onAnalysisComplete}
+            onComplete={() => {
+              onAnalysisComplete();
+              setShouldRefreshAnalysis(false);
+            }}
             onResponsesUpdate={handleResponsesUpdate}
             imageContext={imageContext}
+            shouldRefresh={shouldRefreshAnalysis}
           />
           <button
             onClick={handleOpenConversation}

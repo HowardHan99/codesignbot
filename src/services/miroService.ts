@@ -2,6 +2,12 @@ import { MiroFrameService } from './miro/frameService';
 import { MiroImageService } from './miro/imageService';
 import { MiroDesignService } from './miro/designService';
 
+interface ProcessedDesignPoint {
+  proposal: string;
+  explanation?: string;
+  category?: string;
+}
+
 /**
  * Main service class for Miro operations
  * Acts as a facade for more specific services
@@ -107,6 +113,68 @@ export class MiroService {
       console.log(`Added ${points.length} consensus points`);
     } catch (error) {
       console.error('Error adding consensus points:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Creates sticky notes from design points in a specified frame
+   */
+  public static async createStickiesFromPoints(
+    points: ProcessedDesignPoint[],
+    frameName: string
+  ): Promise<void> {
+    try {
+      // Find or create the target frame
+      let frame = await MiroFrameService.findFrameByTitle(frameName);
+      
+      if (!frame) {
+        frame = await MiroFrameService.createFrame(
+          frameName,
+          0,
+          0,
+          800,
+          Math.max(400, points.length * 220)
+        );
+      }
+
+      const STICKY_WIDTH = 300;
+      const STICKY_HEIGHT = 200;
+      const SPACING = 20;
+      
+      // Create sticky notes with proper formatting and spacing
+      for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        
+        // Calculate position
+        const x = frame.x - frame.width/2 + SPACING + STICKY_WIDTH/2;
+        const y = frame.y - frame.height/2 + SPACING + (i * (STICKY_HEIGHT + SPACING)) + STICKY_HEIGHT/2;
+        
+        // Create sticky with retry mechanism
+        let retries = 0;
+        while (retries < 3) {
+          try {
+            await miro.board.createStickyNote({
+              content: point.proposal,
+              x,
+              y,
+              width: STICKY_WIDTH,
+              style: {
+                fillColor: 'light_yellow'
+              }
+            });
+            break;
+          } catch (error) {
+            retries++;
+            if (retries === 3) throw error;
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+        
+        // Add delay between sticky notes
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } catch (error) {
       throw error;
     }
   }

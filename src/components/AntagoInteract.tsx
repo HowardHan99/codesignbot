@@ -101,37 +101,24 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   /**
    * Process sticky notes to generate analysis
    */
-  const processNotes = useCallback(async (forceProcess: boolean = false) => {
-    // If already processed and not forcing reprocess, skip
+  const processNotes = useCallback(async (notes: string[], forceProcess: boolean = false) => {
+    // Don't process if already processed and not forcing
     if (processedRef.current && !forceProcess) {
       return;
     }
+
+    // Don't process if no notes or already processing
+    if (notes.length === 0 || processingRef.current) {
+      return;
+    }
+
     processedRef.current = true;
-    
-    // Prevent processing if no notes
-    if (!stickyNotes.length) {
-      return;
-    }
-
-    // Prevent concurrent processing
-    if (processingRef.current) {
-      return;
-    }
-
     processingRef.current = true;
     setLoading(true);
     setSelectedTone('');
     
     try {
-      console.log("\n🕒 TIMING: Starting antagonistic points generation process");
       const startTime = performance.now();
-      
-      // console.log('Processing combined notes for analysis');
-      // console.log('Current consensus points:', consensusPoints);
-      responseStore.clear();
-
-      // Get fresh sticky notes from the Design-Decision frame
-      console.log("🕒 TIMING: 1. Fetching design decisions from Miro board");
       const miroStartTime = performance.now();
       
       const frames = await miro.board.get({ type: 'frame' });
@@ -150,10 +137,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         .map(sticky => sticky.content || '');
       
       const miroEndTime = performance.now();
-      console.log(`🕒 TIMING: ├─ Miro data fetching: ${(miroEndTime - miroStartTime).toFixed(2)}ms`);
       
-      // Combine sticky notes into a single message
-      console.log("🕒 TIMING: 2. Formatting data for OpenAI");
+      // Format data for OpenAI
       const formatStartTime = performance.now();
       
       const combinedMessage = frameStickies.map((note, index) => 
@@ -166,10 +151,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         : combinedMessage;
       
       const formatEndTime = performance.now();
-      console.log(`🕒 TIMING: ├─ Data formatting: ${(formatEndTime - formatStartTime).toFixed(2)}ms`);
       
       // Generate initial response
-      console.log("🕒 TIMING: 3. Calling OpenAI API");
       const openaiStartTime = performance.now();
       
       const response = await OpenAIService.generateAnalysis(
@@ -180,10 +163,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       );
       
       const openaiEndTime = performance.now();
-      console.log(`🕒 TIMING: ├─ OpenAI API call: ${(openaiEndTime - openaiStartTime).toFixed(2)}ms`);
       
-      // OPTIMIZATION 1: Update UI with the response
-      console.log("🕒 TIMING: 4. Updating UI with response");
+      // Update UI with the response
       const uiStartTime = performance.now();
       
       setResponses([response]);
@@ -194,17 +175,14 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       onResponsesUpdate?.(splitResponses);
       
       const uiEndTime = performance.now();
-      console.log(`🕒 TIMING: ├─ UI update: ${(uiEndTime - uiStartTime).toFixed(2)}ms`);
       
-      // OPTIMIZATION 2 & 3: Handle background operations
-      console.log("🕒 TIMING: 5. Starting background operations");
+      // Handle background operations
       const bgStartTime = performance.now();
       
       // Create a tracking variable for background operations
       const backgroundPromises = [];
       
       // Always save to Firebase in the background
-      console.log("🕒 TIMING: 5a. Saving to Firebase");
       const saveStartTime = performance.now();
       
       const savePromise = (async () => {
@@ -215,26 +193,20 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             decisions: frameStickies,
             analysis: {
               full: splitResponse(response),
-              // We'll add simplified later if/when it's generated
               simplified: []
             },
             tone: selectedTone || 'normal',
             consensusPoints: consensusPoints
           };
-          // console.log('Saving analysis with data:', analysisData);
           await saveAnalysis(analysisData);
-          const saveEndTime = performance.now();
-          console.log(`🕒 TIMING: │  ├─ Firebase save: ${(saveEndTime - saveStartTime).toFixed(2)}ms`);
         } catch (error) {
-          // console.error('Error saving to Firebase:', error);
-          console.log(`🕒 TIMING: │  ├─ Firebase save failed`);
+          // Error handled silently
         }
       })();
       backgroundPromises.push(savePromise);
       
       // Generate simplified version immediately if in simplified mode
       if (isSimplifiedMode) {
-        console.log("🕒 TIMING: 5b. Generating simplified version");
         const simplifyStartTime = performance.now();
         
         const simplifyPromise = (async () => {
@@ -249,12 +221,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               onResponsesUpdate?.(splitResponse(simplified));
             }
             setIsChangingTone(false);
-            
-            const simplifyEndTime = performance.now();
-            console.log(`🕒 TIMING: │  ├─ Simplify generation: ${(simplifyEndTime - simplifyStartTime).toFixed(2)}ms`);
           } catch (error) {
-            // console.error('Error generating simplified response:', error);
-            console.log(`🕒 TIMING: │  ├─ Simplify generation failed`);
             setIsChangingTone(false);
           }
         })();
@@ -263,32 +230,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       // Wait for all background tasks to complete
       await Promise.all(backgroundPromises);
-      const bgEndTime = performance.now();
-      console.log(`🕒 TIMING: ├─ Background operations: ${(bgEndTime - bgStartTime).toFixed(2)}ms`);
       
       // Clean up
-      console.log("🕒 TIMING: 6. Finishing up");
-      const finishStartTime = performance.now();
-      
       setLoading(false);
       processingRef.current = false;
       onComplete?.();
       
-      const finishEndTime = performance.now();
-      console.log(`🕒 TIMING: ├─ Cleanup: ${(finishEndTime - finishStartTime).toFixed(2)}ms`);
-      
-      const totalTime = performance.now() - startTime;
-      console.log("\n🕒 TIMING: COMPLETE BREAKDOWN");
-      console.log(`🕒 TIMING: ├─ 1. Miro data fetching: ${(miroEndTime - miroStartTime).toFixed(2)}ms (${((miroEndTime - miroStartTime) / totalTime * 100).toFixed(1)}%)`);
-      console.log(`🕒 TIMING: ├─ 2. Data formatting: ${(formatEndTime - formatStartTime).toFixed(2)}ms (${((formatEndTime - formatStartTime) / totalTime * 100).toFixed(1)}%)`);
-      console.log(`🕒 TIMING: ├─ 3. OpenAI API call: ${(openaiEndTime - openaiStartTime).toFixed(2)}ms (${((openaiEndTime - openaiStartTime) / totalTime * 100).toFixed(1)}%)`);
-      console.log(`🕒 TIMING: ├─ 4. UI update: ${(uiEndTime - uiStartTime).toFixed(2)}ms (${((uiEndTime - uiStartTime) / totalTime * 100).toFixed(1)}%)`);
-      console.log(`🕒 TIMING: ├─ 5. Background operations: ${(bgEndTime - bgStartTime).toFixed(2)}ms (${((bgEndTime - bgStartTime) / totalTime * 100).toFixed(1)}%)`);
-      console.log(`🕒 TIMING: └─ 6. Cleanup: ${(finishEndTime - finishStartTime).toFixed(2)}ms (${((finishEndTime - finishStartTime) / totalTime * 100).toFixed(1)}%)`);
-      console.log(`🕒 TIMING: Total antagonistic points generation: ${totalTime.toFixed(2)}ms (100%)`);
-      
     } catch (error) {
-      // console.error('Error processing notes:', error);
       setError('Failed to process notes: ' + (error as Error).message);
       setLoading(false);
       processingRef.current = false;
@@ -382,14 +330,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, storedFullResponses, storedSimplifiedResponses]);
 
-  // Process notes on refresh or initial mount
+  // Process notes when they change or when shouldRefresh is true
   useEffect(() => {
-    const shouldProcess = stickyNotes.length > 0 && (!processedRef.current || shouldRefresh);
-    if (shouldProcess) {
-      processedRef.current = false;
-      processNotes();
+    if (stickyNotes.length > 0) {
+      processNotes(stickyNotes, shouldRefresh || false)
+        .catch(console.error);
     }
-  }, [shouldRefresh, stickyNotes, processNotes]);
+  }, [stickyNotes, shouldRefresh, processNotes]);
 
   // Store responses in local storage
   useEffect(() => {
