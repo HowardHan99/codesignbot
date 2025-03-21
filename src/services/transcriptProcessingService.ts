@@ -1,10 +1,9 @@
 import { OpenAIService } from './openaiService';
-
-interface ProcessedDesignPoint {
-  proposal: string;      // The main design proposal
-  explanation?: string;  // Optional explanation or rationale
-  category?: string;     // Optional categorization (e.g., "UI", "UX", "Technical")
-}
+import { ConfigurationService } from './configurationService';
+import { MiroFrameService } from './miro/frameService';
+import { Frame, StickyNote } from '@mirohq/websdk-types';
+import { MiroService } from './miroService';
+import { ProcessedDesignPoint } from '../types/common';
 
 type StickyNoteColor = 'light_yellow' | 'light_green' | 'light_blue' | 'light_pink';
 
@@ -137,84 +136,8 @@ export class TranscriptProcessingService {
     proposals: ProcessedDesignPoint[],
     frameTitle: string = 'ProposalDialogue'
   ): Promise<void> {
-    try {
-      console.log('Creating sticky notes:', {
-        proposalCount: proposals.length,
-        frameTitle
-      });
-
-      // Find or create the frame
-      const frames = await miro.board.get({ type: 'frame' });
-      let frame = frames.find(f => f.title === frameTitle);
-      
-      console.log('Frame status:', {
-        found: !!frame,
-        frameTitle
-      });
-
-      if (!frame) {
-        console.log('Creating new frame...');
-        frame = await miro.board.createFrame({
-          title: frameTitle,
-          x: 0,
-          y: 0,
-          width: 800,
-          height: Math.max(400, proposals.length * 220)
-        });
-        console.log('New frame created');
-      }
-
-      const STICKY_WIDTH = 300;
-      const STICKY_HEIGHT = 200;
-      const SPACING = 20;
-
-      // Create sticky notes with proper formatting and spacing
-      for (let i = 0; i < proposals.length; i++) {
-        const proposal = proposals[i];
-        console.log(`Creating sticky note ${i + 1}/${proposals.length}:`, {
-          content: proposal.proposal.substring(0, 50) + '...',
-          category: proposal.category
-        });
-        
-        // Format content
-        const content = `${proposal.proposal}`;
-        
-        // Calculate position
-        const x = frame.x - frame.width/2 + SPACING + STICKY_WIDTH/2;
-        const y = frame.y - frame.height/2 + SPACING + (i * (STICKY_HEIGHT + SPACING)) + STICKY_HEIGHT/2;
-
-        // Create sticky with retry mechanism
-        let retries = 0;
-        while (retries < 3) {
-          try {
-            await miro.board.createStickyNote({
-              content,
-              x,
-              y,
-              width: STICKY_WIDTH,
-              style: {
-                fillColor: getColorForCategory(proposal.category) as StickyNoteColor
-              }
-            });
-            console.log(`Sticky note ${i + 1} created successfully`);
-            break;
-          } catch (error) {
-            retries++;
-            console.error(`Error creating sticky note (attempt ${retries}/3):`, error);
-            if (retries === 3) throw error;
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-        }
-
-        // Add delay between sticky notes
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-
-      console.log('All sticky notes created successfully');
-    } catch (error) {
-      console.error('Error creating sticky notes:', error);
-      throw error;
-    }
+    // Use the MiroService to create sticky notes in a grid layout
+    await MiroService.createStickiesFromPoints(proposals, frameTitle);
   }
 }
 

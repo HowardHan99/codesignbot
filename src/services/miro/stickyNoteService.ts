@@ -121,7 +121,7 @@ export class StickyNoteService {
     const relevanceConfig = ConfigurationService.getRelevanceConfig();
     
     const { width: STICKY_WIDTH, height: STICKY_HEIGHT, spacing: SPACING } = stickyConfig.dimensions;
-    const { itemsPerColumn: ITEMS_PER_COL, topMargin: TOP_MARGIN } = stickyConfig.layout;
+    const { itemsPerColumn: ITEMS_PER_COL, topMargin: TOP_MARGIN, leftMargin: LEFT_MARGIN } = stickyConfig.layout;
     
     // Frame dimensions
     const frameLeft = frame.x - frame.width/2;
@@ -129,7 +129,8 @@ export class StickyNoteService {
     const frameWidth = frame.width;
     
     // Calculate section width (frame divided into 3 equal sections)
-    const sectionWidth = frameWidth / relevanceConfig.scale.max;
+    const effectiveWidth = frameWidth - (LEFT_MARGIN * 2);
+    const sectionWidth = effectiveWidth / relevanceConfig.scale.max;
     
     // Determine which section this sticky belongs to
     const sectionIndex = score - 1; // Convert score to zero-based index
@@ -139,7 +140,7 @@ export class StickyNoteService {
     const row = totalSoFar % ITEMS_PER_COL;
     
     // Calculate the base x position for this score's section
-    const sectionBaseX = frameLeft + (sectionIndex * sectionWidth) + (sectionWidth / 2);
+    const sectionBaseX = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth) + (sectionWidth / 2);
     
     // Calculate final position
     const x = sectionBaseX - (STICKY_WIDTH / 2) + (col * (STICKY_WIDTH + SPACING));

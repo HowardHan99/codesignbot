@@ -1,6 +1,7 @@
 import { MiroFrameService } from './miro/frameService';
 import { MiroImageService } from './miro/imageService';
 import { MiroDesignService } from './miro/designService';
+import { ConfigurationService } from './configurationService';
 
 interface ProcessedDesignPoint {
   proposal: string;
@@ -58,6 +59,11 @@ export class MiroService {
    */
   public static async addConsensusPoints(points: string[]): Promise<void> {
     try {
+      // Get configuration for sticky notes
+      const { dimensions, layout } = ConfigurationService.getStickyConfig();
+      const { width: STICKY_WIDTH, height: STICKY_HEIGHT, spacing: SPACING } = dimensions;
+      const { itemsPerColumn, topMargin, leftMargin } = layout;
+      
       // Find or create the Consensus frame
       let consensusFrame = await MiroFrameService.findFrameByTitle('Consensus');
       
@@ -71,19 +77,31 @@ export class MiroService {
         );
       }
 
-      // Calculate positions for sticky notes in a grid layout
-      const STICKY_WIDTH = 200;
-      const SPACING = 20;
-      const COLUMNS = 2;
+      // Calculate needed frame dimensions
+      const columns = Math.ceil(points.length / itemsPerColumn);
+      const rows = Math.min(points.length, itemsPerColumn);
+      const frameWidth = Math.max(400, columns * (STICKY_WIDTH + SPACING) + leftMargin * 2);
+      const frameHeight = Math.max(500, rows * (STICKY_HEIGHT + SPACING) + topMargin + SPACING);
+      
+      // Update frame if needed
+      if (consensusFrame.width < frameWidth || consensusFrame.height < frameHeight) {
+        consensusFrame = await MiroFrameService.createFrame(
+          'Consensus',
+          consensusFrame.x,
+          consensusFrame.y,
+          Math.max(consensusFrame.width, frameWidth),
+          Math.max(consensusFrame.height, frameHeight)
+        );
+      }
       
       // Create sticky notes for each point
       for (let i = 0; i < points.length; i++) {
-        const column = i % COLUMNS;
-        const row = Math.floor(i / COLUMNS);
+        const column = i % 2;
+        const row = Math.floor(i / 2);
         
         // Calculate position relative to frame
-        const x = consensusFrame.x - (consensusFrame.width/2) + SPACING + (column * (STICKY_WIDTH + SPACING)) + STICKY_WIDTH/2;
-        const y = consensusFrame.y - (consensusFrame.height/2) + SPACING + (row * (STICKY_WIDTH + SPACING)) + STICKY_WIDTH/2;
+        const x = consensusFrame.x - (consensusFrame.width/2) + leftMargin + (column * (STICKY_WIDTH + SPACING)) + STICKY_WIDTH/2;
+        const y = consensusFrame.y - (consensusFrame.height/2) + topMargin + (row * (STICKY_HEIGHT + SPACING)) + STICKY_HEIGHT/2;
         
         // Create sticky note
         await miro.board.createStickyNote({
@@ -96,18 +114,8 @@ export class MiroService {
           }
         });
 
-        // Update frame height if needed
-        const neededHeight = (Math.ceil(points.length / COLUMNS) * (STICKY_WIDTH + SPACING)) + SPACING;
-        if (neededHeight > consensusFrame.height) {
-          // Create new frame with updated height
-          consensusFrame = await MiroFrameService.createFrame(
-            'Consensus',
-            consensusFrame.x,
-            consensusFrame.y,
-            consensusFrame.width,
-            neededHeight
-          );
-        }
+        // Add delay between sticky notes
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
       console.log(`Added ${points.length} consensus points`);
@@ -125,6 +133,17 @@ export class MiroService {
     frameName: string
   ): Promise<void> {
     try {
+      // Get configuration for sticky notes
+      const { dimensions, layout } = ConfigurationService.getStickyConfig();
+      const { width: STICKY_WIDTH, height: STICKY_HEIGHT, spacing: SPACING } = dimensions;
+      const { itemsPerColumn, topMargin, leftMargin } = layout;
+      
+      // Calculate needed dimensions
+      const columns = Math.ceil(points.length / itemsPerColumn);
+      const rows = Math.min(points.length, itemsPerColumn);
+      const frameWidth = Math.max(800, columns * (STICKY_WIDTH + SPACING) + leftMargin * 2);
+      const frameHeight = Math.max(400, rows * (STICKY_HEIGHT + SPACING) + topMargin + SPACING);
+      
       // Find or create the target frame
       let frame = await MiroFrameService.findFrameByTitle(frameName);
       
@@ -133,22 +152,31 @@ export class MiroService {
           frameName,
           0,
           0,
-          800,
-          Math.max(400, points.length * 220)
+          frameWidth,
+          frameHeight
         );
+      } else if (frame.width < frameWidth || frame.height < frameHeight) {
+        // Create a new frame with larger dimensions
+        const newFrame = await MiroFrameService.createFrame(
+          frameName,
+          frame.x,
+          frame.y,
+          Math.max(frame.width, frameWidth),
+          Math.max(frame.height, frameHeight)
+        );
+        frame = newFrame;
       }
-
-      const STICKY_WIDTH = 300;
-      const STICKY_HEIGHT = 200;
-      const SPACING = 20;
       
       // Create sticky notes with proper formatting and spacing
       for (let i = 0; i < points.length; i++) {
         const point = points[i];
         
-        // Calculate position
-        const x = frame.x - frame.width/2 + SPACING + STICKY_WIDTH/2;
-        const y = frame.y - frame.height/2 + SPACING + (i * (STICKY_HEIGHT + SPACING)) + STICKY_HEIGHT/2;
+        // Calculate position in a grid layout
+        const column = Math.floor(i / itemsPerColumn);
+        const row = i % itemsPerColumn;
+        
+        const x = frame.x - frame.width/2 + leftMargin + (column * (STICKY_WIDTH + SPACING)) + STICKY_WIDTH/2;
+        const y = frame.y - frame.height/2 + topMargin + (row * (STICKY_HEIGHT + SPACING)) + STICKY_HEIGHT/2;
         
         // Create sticky with retry mechanism
         let retries = 0;

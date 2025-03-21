@@ -31,7 +31,7 @@ NEXT_PUBLIC_MIRO_BOARD_ID="your_board_id"
 ## Board Requirements
 
 Your Miro board should have the following frames:
-- `Design-Decision`: For design decision sticky notes
+- `Design-Proposal`: For design decision sticky notes
 - `Analysis-Response`: For analysis responses
 - `Sketch-Reference`: For design sketches and images
 

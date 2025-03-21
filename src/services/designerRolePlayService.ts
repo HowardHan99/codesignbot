@@ -15,7 +15,7 @@ interface DesignerThinkingProcess {
 export class DesignerRolePlayService {
   private static isProcessing: boolean = false;
   private static readonly THINKING_FRAME_NAME = 'Thinking-Dialogue';
-  private static readonly DECISION_FRAME_NAME = 'Design-Decision';
+  private static readonly DECISION_FRAME_NAME = 'Design-Proposal';
   
   /**
    * Makes a request to the OpenAI API endpoint for designer role play
@@ -97,7 +97,7 @@ export class DesignerRolePlayService {
   }
 
   /**
-   * Creates sticky notes in the Design-Decision frame for the final decisions
+   * Creates sticky notes in the Design-Proposal frame for the final decisions
    */
   private static async addDecisionsToDesignFrame(decisions: string[]): Promise<void> {
     try {

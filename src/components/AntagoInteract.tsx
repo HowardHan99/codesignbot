@@ -122,27 +122,27 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       const miroStartTime = performance.now();
       
       const frames = await miro.board.get({ type: 'frame' });
-      const designFrame = frames.find(f => f.title === 'Design-Decision');
+      const designFrame = frames.find(f => f.title === 'Design-Proposal');
       
       if (!designFrame) {
-        throw new Error('Design-Decision frame not found');
+        throw new Error('Design-Proposal frame not found');
       }
 
-      // Get all sticky notes on the board
-      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      // Get sticky notes
+      const stickyNotes = await miro.board.get({ type: 'sticky_note' });
       
-      // Filter sticky notes that belong to the Design-Decision frame
-      const frameStickies = allStickies
-        .filter(sticky => sticky.parentId === designFrame.id)
-        .map(sticky => sticky.content || '');
+      // Filter sticky notes that belong to the Design-Proposal frame
+      const designStickyNotes = stickyNotes.filter(
+        note => note.parentId === designFrame.id
+      );
       
       const miroEndTime = performance.now();
       
       // Format data for OpenAI
       const formatStartTime = performance.now();
       
-      const combinedMessage = frameStickies.map((note, index) => 
-        `Design Decision ${index + 1}: ${note}`
+      const combinedMessage = designStickyNotes.map((note, index) => 
+        `Design Decision ${index + 1}: ${note.content || ''}`
       ).join('\n');
 
       // Add image context if available
@@ -190,7 +190,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           const analysisData = {
             timestamp: null,
             designChallenge: designChallenge,
-            decisions: frameStickies,
+            decisions: designStickyNotes.map(note => note.content || ''),
             analysis: {
               full: splitResponse(response),
               simplified: []

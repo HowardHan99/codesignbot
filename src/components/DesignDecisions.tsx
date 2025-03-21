@@ -11,6 +11,7 @@ import { VoiceRecorder } from './VoiceRecorder';
 import { FileUploadTest } from './FileUploadTest';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 import { DesignerRolePlayService } from '../services/designerRolePlayService';
+import { DesignThemeService } from '../services/designThemeService';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
@@ -171,12 +172,13 @@ export function MainBoard({
   const [functionsVisible, setFunctionsVisible] = useState(true);
   const [toolsVisible, setToolsVisible] = useState(false);
   const [shouldRefreshAnalysis, setShouldRefreshAnalysis] = useState(false);
+  const [isGeneratingThemes, setIsGeneratingThemes] = useState<boolean>(false);
 
-  // Function to get the Design-Decision frame ID
+  // Function to get the Design-Proposal frame ID
   const getDesignFrameId = async () => {
     try {
       const frames = await miro.board.get({ type: 'frame' });
-      const designFrame = frames.find(f => f.title === 'Design-Decision');
+      const designFrame = frames.find(f => f.title === 'Design-Proposal');
       
       if (designFrame) {
         setDesignFrameId(designFrame.id);
@@ -184,7 +186,7 @@ export function MainBoard({
       }
       return null;
     } catch (err) {
-      console.error('Error getting Design-Decision frame:', err);
+      console.error('Error getting Design-Proposal frame:', err);
       return null;
     }
   };
@@ -351,10 +353,10 @@ export function MainBoard({
         frameId = await getDesignFrameId();
       }
       
-      // Process each point and create sticky notes in the Design-Decision frame
+      // Process each point and create sticky notes in the Design-Proposal frame
       await TranscriptProcessingService.createDesignProposalStickies(
         points.map(point => ({ proposal: point })),
-        'Design-Decision'
+        'Design-Proposal'
       );
       
       // Refresh the design decisions after adding new notes
@@ -400,6 +402,40 @@ export function MainBoard({
     } finally {
       setIsRolePlayingDesigner(false);
       console.log('[DESIGNER ROLE PLAY UI] Reset role playing state');
+    }
+  };
+
+  // New function to handle design theme generation
+  const handleGenerateThemes = async () => {
+    if (isGeneratingThemes) {
+      console.log('[DESIGN THEMES UI] Button clicked but already generating themes, ignoring');
+      return;
+    }
+    
+    console.log('[DESIGN THEMES UI] Generate themes button clicked');
+    const startTime = Date.now();
+    
+    try {
+      setIsGeneratingThemes(true);
+      console.log('[DESIGN THEMES UI] Starting theme generation');
+      
+      await DesignThemeService.generateAndVisualizeThemes();
+      console.log('[DESIGN THEMES UI] Theme generation completed successfully');
+      
+      const duration = Date.now() - startTime;
+      console.log(`[DESIGN THEMES UI] Complete theme generation process finished in ${duration}ms`);
+      
+      // Show success notification
+      miro.board.notifications.showInfo('Design themes generated successfully!');
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      console.error(`[DESIGN THEMES UI] Error generating themes after ${duration}ms:`, error);
+      
+      // Show error to user
+      miro.board.notifications.showError('Failed to generate design themes. Please try again.');
+    } finally {
+      setIsGeneratingThemes(false);
+      console.log('[DESIGN THEMES UI] Reset theme generation state');
     }
   };
 
@@ -700,6 +736,45 @@ export function MainBoard({
                     {isRolePlayingDesigner ? 'Designing...' : 'Role Play Designer'}
                   </button>
                 </div>
+
+                {/* New Design Themes Section */}
+                <div style={{ marginBottom: '8px' }}>
+                  <h3 style={{ 
+                    margin: '0 0 6px 0', 
+                    fontSize: '14px', 
+                    color: '#555',
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🎨</span>
+                    Design Themes & Groups
+                  </h3>
+                  <button
+                    onClick={handleGenerateThemes}
+                    className="button button-secondary"
+                    disabled={isGeneratingThemes}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #e0e0e0',
+                      backgroundColor: '#ffffff',
+                      color: '#555',
+                      fontWeight: 500,
+                      fontSize: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: isGeneratingThemes ? 'not-allowed' : 'pointer',
+                      width: '100%',
+                      justifyContent: 'flex-start'
+                    }}
+                  >
+                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🔍</span>
+                    {isGeneratingThemes ? 'Generating Themes...' : 'Generate Design Themes'}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -718,7 +793,7 @@ export function MainBoard({
             fontSize: '14px',
             border: '1px solid #e0e0e0'
           }}>
-            <p style={{ margin: 0 }}>No design decisions found in the "Design-Decision" frame.</p>
+            <p style={{ margin: 0 }}>No design decisions found in the "Design-Proposal" frame.</p>
             <p style={{ margin: '8px 0 0 0', fontSize: '13px' }}>Record your thoughts or upload an audio file to get started.</p>
           </div>
         ) : (

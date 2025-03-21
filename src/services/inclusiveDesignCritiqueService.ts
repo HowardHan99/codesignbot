@@ -46,32 +46,34 @@ export class InclusiveDesignCritiqueService {
   }
   
   /**
-   * Get current design decisions for context
+   * Get current design decisions
    */
   private static async getDesignDecisions(): Promise<string[]> {
-    const now = Date.now();
-    
-    // Use cached decisions if fresh enough
-    if (this.cachedDesignDecisions.length > 0 && (now - this.lastFetchTime < this.CACHE_TTL)) {
+    try {
+      // Check if we have valid cached decisions
+      const now = Date.now();
+      if (now - this.lastFetchTime < this.CACHE_TTL && this.cachedDesignDecisions.length > 0) {
+        return this.cachedDesignDecisions;
+      }
+      
+      // Get design decisions from the Design-Proposal frame
+      const frameStickyNotes = await MiroApiClient.findFrameByTitle('Design-Proposal')
+        .then(frame => frame ? MiroApiClient.getStickiesInFrame(frame.id) : []);
+      
+      // Extract content from sticky notes
+      const decisions = frameStickyNotes
+        .map(note => note.content || '')
+        .filter(content => content.trim().length > 0);
+      
+      // Cache the results
+      this.cachedDesignDecisions = decisions;
+      this.lastFetchTime = now;
+      
+      return decisions;
+    } catch (error) {
+      console.error('Error getting design decisions:', error);
       return this.cachedDesignDecisions;
     }
-    
-    // Get design decisions from the Design-Decision frame
-    const frameConfig = ConfigurationService.getFrameConfig();
-    const designDecisionFrame = frameConfig.names.designDecision;
-    
-    const decisions = await safeApiCall<string[]>(
-      async () => await StickyNoteService.getStickiesFromNamedFrame(designDecisionFrame),
-      [],
-      'Get Design Decisions',
-      { frameName: designDecisionFrame }
-    ) || [];
-    
-    // Update cache
-    this.cachedDesignDecisions = decisions;
-    this.lastFetchTime = now;
-    
-    return decisions;
   }
   
   /**

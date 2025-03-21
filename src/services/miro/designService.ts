@@ -193,6 +193,8 @@ export class MiroDesignService {
       await miro.board.ui.on('connector:created', async (event) => {
         const connector = event.connector;
         
+        // Make sure the connector has the expected structure
+        // This matches the SDK structure, not our MiroConnector interface
         if (!connector.start?.item || !connector.end?.item) return;
         
         // Get the connected items
@@ -241,19 +243,23 @@ export class MiroDesignService {
 
       // Process each connector
       for (const connector of connectors) {
-        if (!connector.start?.item || !connector.end?.item) continue;
-        
-        const startItem = await miro.board.getById(connector.start.item);
-        const endItem = await miro.board.getById(connector.end.item);
-
-        if (startItem.type === 'sticky_note' && endItem.type === 'sticky_note') {
-          const startSticky = startItem as StickyNote;
-          const endSticky = endItem as StickyNote;
+        // Check if it's a SDK Connector or our custom MiroConnector
+        if ('start' in connector && 'end' in connector) {
+          // It's a SDK Connector
+          if (!connector.start?.item || !connector.end?.item) continue;
           
-          connections.push({
-            from: startSticky.content,
-            to: endSticky.content
-          });
+          const startItem = await miro.board.getById(connector.start.item);
+          const endItem = await miro.board.getById(connector.end.item);
+
+          if (startItem.type === 'sticky_note' && endItem.type === 'sticky_note') {
+            const startSticky = startItem as StickyNote;
+            const endSticky = endItem as StickyNote;
+            
+            connections.push({
+              from: startSticky.content,
+              to: endSticky.content
+            });
+          }
         }
       }
 
@@ -268,29 +274,27 @@ export class MiroDesignService {
    * Analyzes design decisions based on sticky note connections
    */
   public static async analyzeDesignDecisions(): Promise<Array<{section: string, connections: Array<{from: string, to: string}>}>> {
+    const sections: Array<{section: string, connections: Array<{from: string, to: string}>}> = [];
+    const boardId = (await miro.board.getInfo()).id;
+    
     try {
-      // Get all connectors using the Miro SDK
-      const connectors = await miro.board.get({ type: 'connector' }) as Connector[];
-      console.log('Found connectors:', connectors.length);
-
       // Get all sticky notes on the board
-      const allStickies = await miro.board.get({ type: 'sticky_note' }) as StickyNote[];
-      console.log('Found sticky notes:', allStickies.length);
-      
-      const stickiesMap = new Map<string, StickyNote>();
+      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      const stickiesMap = new Map();
       allStickies.forEach(sticky => stickiesMap.set(sticky.id, sticky));
-
-      // Get the Design-Decision frame
-      const designFrame = await MiroFrameService.findFrameByTitle('Design-Decision');
+      
+      // Get the Design-Proposal frame
+      const designFrame = await MiroFrameService.findFrameByTitle('Design-Proposal');
+      
       if (!designFrame) {
-        console.log('Design-Decision frame not found');
+        console.log('Design-Proposal frame not found');
         return [];
       }
-      console.log('Found Design-Decision frame:', designFrame.id);
-
-      // Get stickies in the Design-Decision frame
+      console.log('Found Design-Proposal frame:', designFrame.id);
+ 
+      // Get stickies in the Design-Proposal frame
       const designStickies = await MiroFrameService.getStickiesInFrame(designFrame);
-      console.log('Found stickies in Design-Decision frame:', designStickies.length);
+      console.log('Found stickies in Design-Proposal frame:', designStickies.length);
       
       const designStickyIds = new Set(designStickies.map(sticky => sticky.id));
 
@@ -302,20 +306,27 @@ export class MiroDesignService {
           .trim();
       };
 
-      // Filter connections that involve stickies in the Design-Decision frame
+      // Get all connectors
+      const connectors = await this.getAllConnectors(boardId);
+      console.log('Found connectors:', connectors.length);
+
+      // Filter connections that involve stickies in the Design-Proposal frame
       const designConnections: Array<{from: string, to: string}> = [];
       
       for (const connector of connectors) {
-        if (!connector.start?.item || !connector.end?.item) continue;
+        // Using the correct properties from MiroConnector interface
+        const startItemId = connector.startItem.id;
+        const endItemId = connector.endItem.id;
         
-        const startItem = await miro.board.getById(connector.start.item);
-        const endItem = await miro.board.getById(connector.end.item);
+        // Get the items by ID
+        const startItem = await miro.board.getById(startItemId);
+        const endItem = await miro.board.getById(endItemId);
         
         if (startItem.type === 'sticky_note' && endItem.type === 'sticky_note') {
           const startSticky = startItem as StickyNote;
           const endSticky = endItem as StickyNote;
           
-          // Check if either sticky is in the Design-Decision frame
+          // Check if either sticky is in the Design-Proposal frame
           if (designStickyIds.has(startSticky.id) || designStickyIds.has(endSticky.id)) {
             designConnections.push({
               from: cleanContent(startSticky.content),
@@ -325,19 +336,12 @@ export class MiroDesignService {
         }
       }
 
-      console.log('Design connections:', {
-        total: designConnections.length,
-        connections: designConnections.map(conn => ({
-          from: conn.from,
-          to: conn.to
-        }))
-      });
-      
-      return [{
+      sections.push({
         section: 'Design Decisions',
         connections: designConnections
-      }];
+      });
 
+      return sections;
     } catch (error) {
       console.error('Error analyzing design decisions:', error);
       return [];

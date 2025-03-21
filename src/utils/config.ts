@@ -12,7 +12,7 @@ export const firebaseConfig = {
 // Frame configuration
 export const frameConfig = {
   names: {
-    designDecision: 'Design-Decision',
+    designDecision: 'Design-Proposal',
     thinkingDialogue: 'Thinking-Dialogue',
     analysisResponse: 'Analysis-Response',
     mainFrame: 'Main-Frame',
@@ -31,11 +31,12 @@ export const stickyConfig = {
   dimensions: {
     width: 300,
     height: 200,
-    spacing: 20
+    spacing: 50
   },
   layout: {
     itemsPerColumn: 7,
-    topMargin: 150
+    topMargin: 200,
+    leftMargin: 100
   },
   colors: {
     decision: {
