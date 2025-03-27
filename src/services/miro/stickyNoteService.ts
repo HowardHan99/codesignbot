@@ -2,6 +2,9 @@ import { Frame } from '@mirohq/websdk-types';
 import { ConfigurationService } from '../configurationService';
 import { MiroApiClient } from './miroApiClient';
 import { safeApiCall } from '../../utils/errorHandlingUtils';
+import { ProcessedDesignPoint, ProcessedPointWithRelevance } from '../../types/common';
+import { RelevanceService } from '../relevanceService';
+import { delay } from '../../utils/fileProcessingUtils';
 
 /**
  * Type for sticky note color categories
@@ -314,5 +317,111 @@ export class StickyNoteService {
       'Get Stickies From Frame',
       { frameName }
     ) || [];
+  }
+  
+  /**
+   * Unified method to create sticky notes from processed points
+   * @param frameName Name of the frame to create sticky notes in
+   * @param processedPoints Array of processed design points
+   * @param mode The mode ('decision' or 'response')
+   * @param designDecisions Optional array of design decisions for relevance calculation
+   * @param relevanceThreshold Optional threshold for relevance calculation
+   */
+  public static async createStickyNotesFromPoints(
+    frameName: string,
+    processedPoints: ProcessedDesignPoint[],
+    mode: 'decision' | 'response',
+    designDecisions?: string[],
+    relevanceThreshold?: number
+  ): Promise<void> {
+    try {
+      if (!processedPoints || processedPoints.length === 0) {
+        console.log(`No points to create sticky notes from`);
+        return;
+      }
+      
+      console.log(`📌 Creating ${processedPoints.length} sticky notes in ${frameName} frame`);
+      
+      // Get or create the frame
+      const frame = await this.ensureFrameExists(frameName);
+      
+      if (!frame) {
+        console.error(`Failed to get or create frame: ${frameName}`);
+        return;
+      }
+      
+      // Get relevance configuration
+      const relevanceConfig = ConfigurationService.getRelevanceConfig();
+      const threshold = relevanceThreshold || relevanceConfig.scale.defaultThreshold;
+      
+      // Initialize counter array for tracking stickies by score
+      const countsByScore = this.getInitialCounters();
+      
+      // Process for relevance if design decisions are provided
+      let pointsWithRelevance: ProcessedPointWithRelevance[] = [];
+      
+      // If the points already have relevance scores (ProcessedPointWithRelevance type)
+      if (processedPoints.length > 0 && 'relevanceScore' in processedPoints[0]) {
+        pointsWithRelevance = processedPoints as ProcessedPointWithRelevance[];
+      } 
+      // Otherwise, evaluate relevance if design decisions are provided
+      else if (designDecisions && designDecisions.length > 0) {
+        // Evaluate relevance of each point
+        for (const point of processedPoints) {
+          const { category, score } = await RelevanceService.evaluateRelevance(
+            point.proposal, 
+            designDecisions,
+            threshold
+          );
+          
+          pointsWithRelevance.push({
+            ...point,
+            relevance: category,
+            relevanceScore: score
+          });
+        }
+      } 
+      // If no design decisions provided, assign default maximum relevance score
+      else {
+        const defaultScore = relevanceConfig.scale.max;
+        pointsWithRelevance = processedPoints.map(point => ({
+          ...point,
+          relevance: 'relevant',
+          relevanceScore: defaultScore
+        }));
+      }
+      
+      // Create sticky notes for points
+      for (let i = 0; i < pointsWithRelevance.length; i++) {
+        const point = pointsWithRelevance[i];
+        
+        try {
+          console.log(`Creating sticky note for: "${point.proposal.substring(0, 40)}..." (score: ${point.relevanceScore})`);
+          
+          // Use the StickyNoteService to create the sticky note in the frame
+          const stickyNote = await this.createStickyWithRelevance(
+            frame,
+            point.proposal,
+            point.relevanceScore,
+            mode,
+            countsByScore
+          );
+          
+          // Increment the counter for this score
+          countsByScore[point.relevanceScore - 1]++;
+          
+          // Add a delay between creations to avoid rate limiting
+          const delayTime = ConfigurationService.getRelevanceConfig().delayBetweenCreations;
+          await delay(delayTime);
+        } catch (error) {
+          console.error(`Error creating sticky note:`, error);
+        }
+      }
+      
+      console.log(`✅ Created ${pointsWithRelevance.length} sticky notes in "${frameName}" frame`);
+    } catch (error) {
+      console.error('Error creating sticky notes from points:', error);
+      throw error;
+    }
   }
 } 

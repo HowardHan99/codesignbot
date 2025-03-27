@@ -91,7 +91,17 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
         if (processedPoints && processedPoints.length > 0) {
           console.log(`[DEBUG] Creating sticky notes for ${processedPoints.length} processed points from chunk`);
           // Create sticky notes in the Thinking-Dialogue frame
-          await createStickyNotesForChunk(processedPoints);
+          
+          // Get cached design decisions for relevance calculation
+          const designDecisions = await InclusiveDesignCritiqueService.getDesignDecisions();
+          
+          // Use the unified method to create sticky notes
+          await StickyNoteService.createStickyNotesFromPoints(
+            "Thinking-Dialogue",
+            processedPoints,
+            'decision',
+            designDecisions
+          );
         } else {
           console.log(`[DEBUG] No processedPoints to create sticky notes from`);
         }
@@ -110,76 +120,20 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   };
   
   // Helper function to create sticky notes for a chunk
+  // This function is no longer needed as we're using the unified method
+  // However, we'll keep the signature in case it's called elsewhere
   const createStickyNotesForChunk = async (processedPoints: ProcessedDesignPoint[]) => {
     try {
-      // Always use "Thinking-Dialogue" frame for chunks
-      const frameName = "Thinking-Dialogue";
-      console.log(`📌 Creating ${processedPoints.length} sticky notes in ${frameName} frame`);
-      
-      // Get or create the frame
-      const frame = await StickyNoteService.ensureFrameExists(frameName);
-      
-      if (!frame) {
-        console.error(`Failed to get or create frame: ${frameName}`);
-        return;
-      }
-      
-      // Use cached design decisions from InclusiveDesignCritiqueService if available
-      // This avoids refetching the same data repeatedly
+      // Get cached design decisions for relevance calculation
       const designDecisions = await InclusiveDesignCritiqueService.getDesignDecisions();
       
-      // Get relevance configuration
-      const relevanceConfig = ConfigurationService.getRelevanceConfig();
-      const threshold = relevanceConfig.scale.defaultThreshold;
-      
-      // Initialize counter array for tracking stickies by score
-      const countsByScore = StickyNoteService.getInitialCounters();
-      
-      // Evaluate relevance of each point
-      const pointsWithRelevance: ProcessedPointWithRelevance[] = [];
-      for (const point of processedPoints) {
-        const { category, score } = await RelevanceService.evaluateRelevance(
-          point.proposal, 
-          designDecisions,
-          threshold
-        );
-        
-        pointsWithRelevance.push({
-          ...point,
-          relevance: category,
-          relevanceScore: score
-        });
-      }
-      
-      // Create sticky notes for points
-      for (let i = 0; i < pointsWithRelevance.length; i++) {
-        const point = pointsWithRelevance[i];
-        
-        try {
-          console.log(`Creating sticky note for: "${point.proposal.substring(0, 40)}..." (score: ${point.relevanceScore})`);
-          
-          // Use the StickyNoteService to create the sticky note in the frame
-          // This handles all the color selection, positioning, and parent frame setting
-          const stickyNote = await StickyNoteService.createStickyWithRelevance(
-            frame,
-            point.proposal,
-            point.relevanceScore,
-            'decision', // Always use 'decision' mode for sticky notes
-            countsByScore
-          );
-          
-          // Increment the counter for this score
-          countsByScore[point.relevanceScore - 1]++;
-          
-          // Add a delay between creations to avoid rate limiting
-          const delayTime = ConfigurationService.getRelevanceConfig().delayBetweenCreations;
-          await delay(delayTime);
-        } catch (error) {
-          console.error(`Error creating sticky note:`, error);
-        }
-      }
-      
-      console.log(`✅ Created ${pointsWithRelevance.length} sticky notes in "${frameName}" frame`);
+      // Use the unified method to create sticky notes
+      await StickyNoteService.createStickyNotesFromPoints(
+        "Thinking-Dialogue",
+        processedPoints,
+        'decision',
+        designDecisions
+      );
     } catch (error) {
       console.error('Error creating sticky notes for chunk:', error);
     }
@@ -276,67 +230,16 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
               // Clear any previous errors on success
               setRecordingError(null);
               
-              // ========== NEW CODE BEGINS: DIRECTLY CREATE STICKY NOTES ==========
-              // Always use "Thinking-Dialogue" frame, regardless of mode
-              const frameName = "Thinking-Dialogue";
-              console.log(`Using fixed frame: "${frameName}" for recordings`);
-              
-              // Get or create the frame
-              const frame = await StickyNoteService.ensureFrameExists(frameName);
-              
-              // Use cached design decisions if available
+              // Get cached design decisions for relevance calculation
               const designDecisions = await InclusiveDesignCritiqueService.getDesignDecisions();
-              console.log(`Retrieved ${designDecisions.length} design decisions (using cached data if available)`);
               
-              // Get relevance configuration
-              const relevanceConfig = ConfigurationService.getRelevanceConfig();
-              const threshold = relevanceConfig.scale.defaultThreshold;
-              
-              // Initialize counter array for tracking stickies by score
-              const countsByScore = StickyNoteService.getInitialCounters();
-              
-              // Evaluate relevance of each point
-              const pointsWithRelevance: ProcessedPointWithRelevance[] = [];
-              for (const point of processedPoints) {
-                const { category, score } = await RelevanceService.evaluateRelevance(
-                  point.proposal, 
-                  designDecisions,
-                  threshold
-                );
-                
-                pointsWithRelevance.push({
-                  ...point,
-                  relevance: category,
-                  relevanceScore: score
-                });
-              }
-              
-              // Create sticky notes for points
-              for (let i = 0; i < pointsWithRelevance.length; i++) {
-                const point = pointsWithRelevance[i];
-                
-                try {
-                  // Create sticky note - hardcode mode as 'decision' to match uploaded media pipeline
-                  await StickyNoteService.createStickyWithRelevance(
-                    frame,
-                    point.proposal,
-                    point.relevanceScore,
-                    'decision', // Always use 'decision' mode for sticky notes to match pipeline
-                    countsByScore
-                  );
-                  
-                  // Increment the counter for this score
-                  countsByScore[point.relevanceScore - 1]++;
-                  
-                  console.log(`Created score ${point.relevanceScore} sticky note in Thinking-Dialogue frame`);
-                  
-                  // Add a delay between creations to avoid rate limiting
-                  await delay(ConfigurationService.getRelevanceConfig().delayBetweenCreations);
-                } catch (error) {
-                  console.error(`Error creating sticky note:`, error);
-                }
-              }
-              // ========== NEW CODE ENDS ==========
+              // Use the unified method to create sticky notes
+              await StickyNoteService.createStickyNotesFromPoints(
+                "Thinking-Dialogue",
+                processedPoints,
+                'decision',
+                designDecisions
+              );
             } else {
               setRecordingError('No meaningful content detected in the recording. Please try again with more detailed speech.');
             }

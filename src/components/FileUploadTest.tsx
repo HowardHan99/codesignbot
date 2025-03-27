@@ -3,6 +3,7 @@ import { TranscriptProcessingService } from '../services/transcriptProcessingSer
 import { StickyNoteService } from '../services/miro/stickyNoteService';
 import { RelevanceService } from '../services/relevanceService';
 import { ConfigurationService } from '../services/configurationService';
+import { InclusiveDesignCritiqueService } from '../services/inclusiveDesignCritiqueService';
 import { 
   FileProcessingProps, 
   ProcessedPointWithRelevance 
@@ -131,10 +132,8 @@ export const FileUploadTest: React.FC<FileProcessingProps> = ({
     const frame = await StickyNoteService.ensureFrameExists(frameName);
 
     // Fetch current design decisions for relevance evaluation
-    const designDecisions = await StickyNoteService.getStickiesFromNamedFrame(
-      ConfigurationService.getFrameConfig().names.designDecision
-    );
-    console.log(`Fetched ${designDecisions.length} design decisions for relevance comparison`);
+    const designDecisions = await InclusiveDesignCritiqueService.getDesignDecisions();
+    console.log(`Fetched ${designDecisions.length} design decisions for relevance comparison (using cached when available)`);
     
     // Initialize counter array for tracking stickies by score
     const countsByScore = StickyNoteService.getInitialCounters();
@@ -264,37 +263,30 @@ export const FileUploadTest: React.FC<FileProcessingProps> = ({
     frame: any,
     countsByScore: number[]
   ) => {
-    for (let j = 0; j < points.length; j++) {
-      // Check if stop requested during sticky creation
-      if (stopRequestedRef.current) {
-        console.log(`Stop requested during sticky creation, aborting`);
-        break;
-      }
+    // Check if stop requested before creating any sticky notes
+    if (stopRequestedRef.current) {
+      console.log(`Stop requested before creating sticky notes, aborting`);
+      return;
+    }
+    
+    try {
+      // Use the unified method to create sticky notes
+      // Since the points already have relevance scores, we don't need to pass designDecisions
+      await StickyNoteService.createStickyNotesFromPoints(
+        frame.title,
+        points,
+        mode
+      );
       
-      const point = points[j];
-      const { proposal, relevanceScore } = point;
-      
-      try {
-        // Create sticky note
-        await StickyNoteService.createStickyWithRelevance(
-          frame,
-          proposal,
-          relevanceScore,
-          mode,
-          countsByScore
-        );
-        
-        // Increment the counter for this score
-        const scoreIndex = relevanceScore - 1;
+      // Update counters
+      for (const point of points) {
+        const scoreIndex = point.relevanceScore - 1;
         countsByScore[scoreIndex]++;
-        
-        console.log(`Created score ${relevanceScore} sticky note in ${frame.title} frame area`);
-        
-        // Add a delay between creations
-        await delay(ConfigurationService.getRelevanceConfig().delayBetweenCreations);
-      } catch (error) {
-        console.error(`Error creating sticky note:`, error);
       }
+      
+      console.log(`Created ${points.length} sticky notes in ${frame.title} frame`);
+    } catch (error) {
+      console.error(`Error creating sticky notes:`, error);
     }
   };
   
