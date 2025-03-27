@@ -127,10 +127,14 @@ export class MiroService {
 
   /**
    * Creates sticky notes from design points in a specified frame
+   * @param points The design points to create sticky notes for
+   * @param frameName The name of the frame to create sticky notes in
+   * @param existingConnections Optional array of connections to create between sticky notes
    */
   public static async createStickiesFromPoints(
     points: ProcessedDesignPoint[],
-    frameName: string
+    frameName: string,
+    existingConnections?: Array<{from: string, to: string}>
   ): Promise<void> {
     try {
       // Get configuration for sticky notes
@@ -168,6 +172,8 @@ export class MiroService {
       }
       
       // Create sticky notes with proper formatting and spacing
+      const createdStickies = new Map<string, any>(); // Map proposal text to sticky for connections
+      
       for (let i = 0; i < points.length; i++) {
         const point = points[i];
         
@@ -180,17 +186,24 @@ export class MiroService {
         
         // Create sticky with retry mechanism
         let retries = 0;
+        let stickyNote = null;
+        
         while (retries < 3) {
           try {
-            await miro.board.createStickyNote({
+            stickyNote = await miro.board.createStickyNote({
               content: point.proposal,
               x,
               y,
               width: STICKY_WIDTH,
               style: {
-                fillColor: 'light_yellow'
+                fillColor: point.category === 'response' ? 'light_green' 
+                          : point.category === 'designer-thinking' ? 'light_blue'
+                          : 'light_yellow'
               }
             });
+            
+            // Save the sticky for connection creation
+            createdStickies.set(point.proposal, stickyNote);
             break;
           } catch (error) {
             retries++;
@@ -201,6 +214,41 @@ export class MiroService {
         
         // Add delay between sticky notes
         await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      // Create connections if provided
+      if (existingConnections && existingConnections.length > 0) {
+        console.log(`Creating ${existingConnections.length} connections between sticky notes`);
+        
+        for (const connection of existingConnections) {
+          const fromSticky = createdStickies.get(connection.from);
+          const toSticky = createdStickies.get(connection.to);
+          
+          if (fromSticky && toSticky) {
+            try {
+              await miro.board.createConnector({
+                start: {
+                  item: fromSticky.id,
+                  position: { x: 0.5, y: 1 } // Bottom of the sticky
+                },
+                end: {
+                  item: toSticky.id,
+                  position: { x: 0.5, y: 0 } // Top of the sticky
+                },
+                style: {
+                  strokeColor: '#4262ff',
+                  strokeWidth: 2,
+                  strokeStyle: 'normal'
+                }
+              });
+              
+              // Add delay between connector creations
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (error) {
+              console.error('Error creating connector:', error);
+            }
+          }
+        }
       }
     } catch (error) {
       throw error;

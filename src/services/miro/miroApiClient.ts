@@ -136,9 +136,25 @@ export class MiroApiClient {
     width?: number;
     style?: any;
   }): Promise<any | null> {
+    console.log(`[DEBUG] MiroApiClient.createStickyNote called with:
+    content: ${stickyConfig.content.substring(0, 50)}...
+    position: x=${stickyConfig.x}, y=${stickyConfig.y}
+    width: ${stickyConfig.width}
+    style: ${JSON.stringify(stickyConfig.style)}`);
+    
     return await this.call<any>(
       'Create sticky note',
-      async () => await miro.board.createStickyNote(stickyConfig),
+      async () => {
+        console.log(`[DEBUG] Calling miro.board.createStickyNote API`);
+        try {
+          const sticky = await miro.board.createStickyNote(stickyConfig);
+          console.log(`[DEBUG] Miro API createStickyNote successful, id: ${sticky?.id}`);
+          return sticky;
+        } catch (error) {
+          console.error(`[DEBUG] Miro API createStickyNote failed:`, error);
+          throw error;
+        }
+      },
       null
     );
   }

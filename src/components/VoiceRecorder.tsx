@@ -4,6 +4,11 @@ import { VoiceRecordingService } from '../services/voiceRecordingService';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 import { ApiService } from '../services/apiService';
 import { InclusiveDesignCritiqueService } from '../services/inclusiveDesignCritiqueService';
+import { StickyNoteService } from '../services/miro/stickyNoteService';
+import { RelevanceService } from '../services/relevanceService';
+import { ConfigurationService } from '../services/configurationService';
+import { ProcessedDesignPoint, ProcessedPointWithRelevance } from '../types/common';
+import { delay } from '../utils/fileProcessingUtils';
 
 interface VoiceRecorderProps {
   mode: 'decision' | 'response';  // Mode of recording: design decision or response
@@ -23,6 +28,9 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const [lastCritiqueTime, setLastCritiqueTime] = useState<number>(0);
   const [critiqueModeEnabled, setCritiqueModeEnabled] = useState<boolean>(enableRealTimeCritique);
   
+  // Add error state
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  
   // Track critiques to avoid duplicates
   const [recentCritiques, setRecentCritiques] = useState<Set<string>>(new Set());
   
@@ -33,6 +41,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   useEffect(() => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       console.error('Browser does not support voice recording');
+      setRecordingError('Your browser does not support voice recording. Please try a modern browser like Chrome or Firefox.');
     }
   }, []);
   
@@ -62,16 +71,117 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
 
   // Process transcription chunks and optionally run inclusive design critique
   const handleTranscriptionChunk = async (transcription: string) => {
+    // Clear any previous errors
+    setRecordingError(null);
+    
+    console.log(`[DEBUG] handleTranscriptionChunk received: ${transcription.substring(0, 50)}...`);
+    
     // Convert single transcription string to array with one item 
     // for compatibility with onNewPoints
     if (transcription && transcription.trim()) {
-      // Forward the transcription to the parent component
-      onNewPoints([transcription]);
-      
-      // Only check for critiques in decision mode and if enabled
-      if (critiqueModeEnabled && mode === 'decision') {
-        await checkForInclusiveDesignCritiques(transcription);
+      try {
+        // Forward the transcription to the parent component
+        onNewPoints([transcription]);
+        
+        console.log(`[DEBUG] Processing chunk through TranscriptProcessingService`);
+        // Process the chunk into design points, but don't send them to Design-Proposal
+        const processedPoints = await TranscriptProcessingService.processTranscript(transcription);
+        console.log(`[DEBUG] TranscriptProcessingService returned ${processedPoints.length} points`);
+        
+        if (processedPoints && processedPoints.length > 0) {
+          console.log(`[DEBUG] Creating sticky notes for ${processedPoints.length} processed points from chunk`);
+          // Create sticky notes in the Thinking-Dialogue frame
+          await createStickyNotesForChunk(processedPoints);
+        } else {
+          console.log(`[DEBUG] No processedPoints to create sticky notes from`);
+        }
+        
+        // Only check for critiques in decision mode and if enabled
+        if (critiqueModeEnabled && mode === 'decision') {
+          await checkForInclusiveDesignCritiques(transcription);
+        }
+      } catch (error) {
+        console.error('Error processing transcription chunk:', error);
+        setRecordingError('Failed to process speech. Please try again.');
       }
+    } else {
+      console.log(`[DEBUG] Empty transcription chunk received, skipping processing`);
+    }
+  };
+  
+  // Helper function to create sticky notes for a chunk
+  const createStickyNotesForChunk = async (processedPoints: ProcessedDesignPoint[]) => {
+    try {
+      // Always use "Thinking-Dialogue" frame for chunks
+      const frameName = "Thinking-Dialogue";
+      console.log(`📌 Creating ${processedPoints.length} sticky notes in ${frameName} frame`);
+      
+      // Get or create the frame
+      const frame = await StickyNoteService.ensureFrameExists(frameName);
+      
+      if (!frame) {
+        console.error(`Failed to get or create frame: ${frameName}`);
+        return;
+      }
+      
+      // Use cached design decisions from InclusiveDesignCritiqueService if available
+      // This avoids refetching the same data repeatedly
+      const designDecisions = await InclusiveDesignCritiqueService.getDesignDecisions();
+      
+      // Get relevance configuration
+      const relevanceConfig = ConfigurationService.getRelevanceConfig();
+      const threshold = relevanceConfig.scale.defaultThreshold;
+      
+      // Initialize counter array for tracking stickies by score
+      const countsByScore = StickyNoteService.getInitialCounters();
+      
+      // Evaluate relevance of each point
+      const pointsWithRelevance: ProcessedPointWithRelevance[] = [];
+      for (const point of processedPoints) {
+        const { category, score } = await RelevanceService.evaluateRelevance(
+          point.proposal, 
+          designDecisions,
+          threshold
+        );
+        
+        pointsWithRelevance.push({
+          ...point,
+          relevance: category,
+          relevanceScore: score
+        });
+      }
+      
+      // Create sticky notes for points
+      for (let i = 0; i < pointsWithRelevance.length; i++) {
+        const point = pointsWithRelevance[i];
+        
+        try {
+          console.log(`Creating sticky note for: "${point.proposal.substring(0, 40)}..." (score: ${point.relevanceScore})`);
+          
+          // Use the StickyNoteService to create the sticky note in the frame
+          // This handles all the color selection, positioning, and parent frame setting
+          const stickyNote = await StickyNoteService.createStickyWithRelevance(
+            frame,
+            point.proposal,
+            point.relevanceScore,
+            'decision', // Always use 'decision' mode for sticky notes
+            countsByScore
+          );
+          
+          // Increment the counter for this score
+          countsByScore[point.relevanceScore - 1]++;
+          
+          // Add a delay between creations to avoid rate limiting
+          const delayTime = ConfigurationService.getRelevanceConfig().delayBetweenCreations;
+          await delay(delayTime);
+        } catch (error) {
+          console.error(`Error creating sticky note:`, error);
+        }
+      }
+      
+      console.log(`✅ Created ${pointsWithRelevance.length} sticky notes in "${frameName}" frame`);
+    } catch (error) {
+      console.error('Error creating sticky notes for chunk:', error);
     }
   };
   
@@ -110,6 +220,9 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   };
 
   const handleStartRecording = async () => {
+    // Clear any previous errors
+    setRecordingError(null);
+    
     try {
       setIsRecording(true);
       setRecordingDuration(0);
@@ -117,6 +230,15 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
     } catch (error) {
       console.error('Failed to start recording:', error);
       setIsRecording(false);
+      
+      // Set appropriate error message based on the error
+      if (error instanceof DOMException && error.name === 'NotAllowedError') {
+        setRecordingError('Microphone access denied. Please allow microphone access and try again.');
+      } else if (error instanceof DOMException && error.name === 'NotFoundError') {
+        setRecordingError('No microphone found. Please connect a microphone and try again.');
+      } else {
+        setRecordingError('Failed to start recording. Please check your microphone and try again.');
+      }
     }
   };
 
@@ -128,35 +250,120 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       const audioBlob = await VoiceRecordingService.stopRecording();
       
       // Process the recording if we have an audio blob
-      if (audioBlob) {
-        // First transcribe the audio blob to text
-        const file = new File([audioBlob], 'recording.webm', { type: 'audio/webm' });
-        const transcriptionResult = await ApiService.transcribeAudio(file);
+      if (audioBlob && audioBlob.size > 0) {
+        console.log(`Processing audio recording: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
         
-        if (transcriptionResult && transcriptionResult.transcription) {
-          // Process the transcription to extract points
-          const processedPoints = await TranscriptProcessingService.processTranscript(
-            transcriptionResult.transcription
+        try {
+          // First transcribe the audio blob to text
+          const file = new File(
+            [audioBlob], 
+            `recording.${audioBlob.type.split('/')[1] || 'webm'}`, 
+            { type: audioBlob.type }
           );
           
-          // Pass the processed points to the callback
-          if (processedPoints && processedPoints.length > 0) {
-            onNewPoints(processedPoints.map(item => item.proposal));
-          }
+          const transcriptionResult = await ApiService.transcribeAudio(file);
           
-          // Run inclusive design critique on the full transcript
-          if (critiqueModeEnabled && mode === 'decision') {
-            await InclusiveDesignCritiqueService.analyzeAndCritique(transcriptionResult.transcription);
+          if (transcriptionResult && transcriptionResult.transcription) {
+            // Process the transcription to extract points
+            const processedPoints = await TranscriptProcessingService.processTranscript(
+              transcriptionResult.transcription
+            );
+            
+            // Pass the processed points to the callback
+            if (processedPoints && processedPoints.length > 0) {
+              onNewPoints(processedPoints.map(item => item.proposal));
+              
+              // Clear any previous errors on success
+              setRecordingError(null);
+              
+              // ========== NEW CODE BEGINS: DIRECTLY CREATE STICKY NOTES ==========
+              // Always use "Thinking-Dialogue" frame, regardless of mode
+              const frameName = "Thinking-Dialogue";
+              console.log(`Using fixed frame: "${frameName}" for recordings`);
+              
+              // Get or create the frame
+              const frame = await StickyNoteService.ensureFrameExists(frameName);
+              
+              // Use cached design decisions if available
+              const designDecisions = await InclusiveDesignCritiqueService.getDesignDecisions();
+              console.log(`Retrieved ${designDecisions.length} design decisions (using cached data if available)`);
+              
+              // Get relevance configuration
+              const relevanceConfig = ConfigurationService.getRelevanceConfig();
+              const threshold = relevanceConfig.scale.defaultThreshold;
+              
+              // Initialize counter array for tracking stickies by score
+              const countsByScore = StickyNoteService.getInitialCounters();
+              
+              // Evaluate relevance of each point
+              const pointsWithRelevance: ProcessedPointWithRelevance[] = [];
+              for (const point of processedPoints) {
+                const { category, score } = await RelevanceService.evaluateRelevance(
+                  point.proposal, 
+                  designDecisions,
+                  threshold
+                );
+                
+                pointsWithRelevance.push({
+                  ...point,
+                  relevance: category,
+                  relevanceScore: score
+                });
+              }
+              
+              // Create sticky notes for points
+              for (let i = 0; i < pointsWithRelevance.length; i++) {
+                const point = pointsWithRelevance[i];
+                
+                try {
+                  // Create sticky note - hardcode mode as 'decision' to match uploaded media pipeline
+                  await StickyNoteService.createStickyWithRelevance(
+                    frame,
+                    point.proposal,
+                    point.relevanceScore,
+                    'decision', // Always use 'decision' mode for sticky notes to match pipeline
+                    countsByScore
+                  );
+                  
+                  // Increment the counter for this score
+                  countsByScore[point.relevanceScore - 1]++;
+                  
+                  console.log(`Created score ${point.relevanceScore} sticky note in Thinking-Dialogue frame`);
+                  
+                  // Add a delay between creations to avoid rate limiting
+                  await delay(ConfigurationService.getRelevanceConfig().delayBetweenCreations);
+                } catch (error) {
+                  console.error(`Error creating sticky note:`, error);
+                }
+              }
+              // ========== NEW CODE ENDS ==========
+            } else {
+              setRecordingError('No meaningful content detected in the recording. Please try again with more detailed speech.');
+            }
+            
+            // Run inclusive design critique on the full transcript
+            if (critiqueModeEnabled && mode === 'decision') {
+              await InclusiveDesignCritiqueService.analyzeAndCritique(transcriptionResult.transcription);
+            }
+            
+            console.log('Recording processed:', processedPoints);
+          } else {
+            setRecordingError('Could not transcribe audio. Please try speaking more clearly or check your microphone.');
           }
-          
-          console.log('Recording processed:', processedPoints);
+        } catch (error) {
+          console.error('Failed to process recording:', error);
+          setRecordingError('Failed to process recording. Please try again.');
         }
+      } else {
+        console.error('No audio data received or empty audio blob');
+        setRecordingError('No audio was recorded. Please try again and make sure your microphone is working.');
       }
       
       setProcessingRecording(false);
     } catch (error) {
       console.error('Failed to stop recording:', error);
       setProcessingRecording(false);
+      setRecordingError('Failed to complete the recording process. Please try again.');
     }
   };
 
@@ -189,7 +396,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
           cursor: processingRecording ? 'not-allowed' : 'pointer',
           transition: 'all 0.2s ease',
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-          marginBottom: mode === 'decision' ? '10px' : '0'
+          marginBottom: (mode === 'decision' || recordingError) ? '10px' : '0'
         }}
       >
         {processingRecording ? (
@@ -233,6 +440,24 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
           </>
         )}
       </button>
+      
+      {/* Error message */}
+      {recordingError && (
+        <div style={{
+          padding: '8px 12px',
+          backgroundColor: '#FEECF0',
+          color: '#CC0F35',
+          borderRadius: '4px',
+          fontSize: '14px',
+          marginBottom: '10px',
+          borderLeft: '3px solid #CC0F35'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>⚠️</span>
+            <span>{recordingError}</span>
+          </div>
+        </div>
+      )}
         
       {mode === 'decision' && (
         <div style={{ 

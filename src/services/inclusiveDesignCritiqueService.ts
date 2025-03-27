@@ -20,7 +20,7 @@ export class InclusiveDesignCritiqueService {
   private static readonly CACHE_TTL = 60000; // 1 minute
   
   /**
-   * Analyze transcript against inclusive design principles and send critiques if needed
+   * Analyze a transcript for inclusive design principles and create critique sticky notes if issues found
    * @param transcript The transcript to analyze
    * @returns Promise resolving to any generated critiques
    */
@@ -31,13 +31,13 @@ export class InclusiveDesignCritiqueService {
     
     console.log('Analyzing transcript for inclusive design critique:', transcript.substring(0, 50) + '...');
     
-    // Get current design decisions
+    // Get current design decisions for context, but don't modify them
     const designDecisions = await this.getDesignDecisions();
     
     // Evaluate transcript against inclusive design principles
     const critiques = await this.evaluateTranscript(transcript, designDecisions);
     
-    // If we have critiques, send them to the Miro board
+    // If we have critiques, send them to the Miro board in the Real-Time-Response frame ONLY
     if (critiques.length > 0) {
       await this.sendCritiquesToBoard(critiques);
     }
@@ -47,14 +47,18 @@ export class InclusiveDesignCritiqueService {
   
   /**
    * Get current design decisions
+   * Now public so it can be reused by other components that need access to cached design decisions
    */
-  private static async getDesignDecisions(): Promise<string[]> {
+  public static async getDesignDecisions(): Promise<string[]> {
     try {
       // Check if we have valid cached decisions
       const now = Date.now();
       if (now - this.lastFetchTime < this.CACHE_TTL && this.cachedDesignDecisions.length > 0) {
+        console.log(`[DEBUG] Using cached design decisions (${this.cachedDesignDecisions.length} items, cache age: ${(now - this.lastFetchTime)/1000}s)`);
         return this.cachedDesignDecisions;
       }
+      
+      console.log(`[DEBUG] Cache expired or empty, fetching fresh design decisions`);
       
       // Get design decisions from the Design-Proposal frame
       const frameStickyNotes = await MiroApiClient.findFrameByTitle('Design-Proposal')
@@ -64,6 +68,8 @@ export class InclusiveDesignCritiqueService {
       const decisions = frameStickyNotes
         .map(note => note.content || '')
         .filter(content => content.trim().length > 0);
+      
+      console.log(`[DEBUG] Fetched ${decisions.length} design decisions`);
       
       // Cache the results
       this.cachedDesignDecisions = decisions;

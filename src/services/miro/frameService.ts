@@ -37,8 +37,23 @@ export class MiroFrameService {
    * Gets sticky notes within a frame's boundaries
    */
   public static async getStickiesInFrame(frame: Frame): Promise<any[]> {
+    console.log(`Getting sticky notes in frame: ${frame.title} (${frame.id})`);
+    
+    // First try using parentId
     const allStickies = await miro.board.get({ type: 'sticky_note' });
-    return allStickies.filter(sticky => sticky.parentId === frame.id);
+    const stickyNotesByParentId = allStickies.filter(sticky => sticky.parentId === frame.id);
+    
+    console.log(`Found ${stickyNotesByParentId.length} sticky notes by parentId in frame ${frame.title}`);
+    
+    // If we didn't find any by parentId, try using coordinates
+    if (stickyNotesByParentId.length === 0) {
+      const stickyNotesByCoords = await this.getItemsInFrameBounds(frame);
+      console.log(`Found ${stickyNotesByCoords.length} sticky notes by coordinates in frame ${frame.title}`);
+      
+      return stickyNotesByCoords;
+    }
+    
+    return stickyNotesByParentId;
   }
 
   /**
@@ -256,6 +271,65 @@ export class MiroFrameService {
     } catch (error) {
       console.error('Error creating restricted frame:', error);
       return null;
+    }
+  }
+
+  /**
+   * Gets frame content including sticky notes and connectors between them
+   * @param frame The frame to get content for
+   * @returns Object containing sticky notes and connections
+   */
+  public static async getFrameContentWithConnections(frame: Frame): Promise<{
+    stickies: any[],
+    connections: {from: string, to: string}[]
+  }> {
+    try {
+      console.log(`Getting content with connections for frame: ${frame.title} (${frame.id})`);
+      
+      // Get sticky notes in the frame
+      const stickies = await this.getStickiesInFrame(frame);
+      
+      // Create a set of sticky IDs for checking connections
+      const stickyIds = new Set(stickies.map(sticky => sticky.id));
+      
+      // Get all connectors on the board
+      const connectors = await miro.board.get({ type: 'connector' });
+      console.log(`Found ${connectors.length} total connectors on the board`);
+      
+      // Filter connectors that connect stickies in this frame
+      const frameConnections: {from: string, to: string}[] = [];
+      
+      for (const connector of connectors) {
+        // Skip if it doesn't have start and end items
+        if (!connector.start?.item || !connector.end?.item) continue;
+        
+        const startItemId = connector.start.item;
+        const endItemId = connector.end.item;
+        
+        // Only include connections where both stickies are in this frame
+        if (stickyIds.has(startItemId) && stickyIds.has(endItemId)) {
+          // Get the content of connected stickies
+          const startSticky = stickies.find(s => s.id === startItemId);
+          const endSticky = stickies.find(s => s.id === endItemId);
+          
+          if (startSticky && endSticky) {
+            frameConnections.push({
+              from: startSticky.content.replace(/<\/?p>/g, '').trim(),
+              to: endSticky.content.replace(/<\/?p>/g, '').trim()
+            });
+          }
+        }
+      }
+      
+      console.log(`Found ${frameConnections.length} connections between stickies in frame ${frame.title}`);
+      
+      return { 
+        stickies, 
+        connections: frameConnections 
+      };
+    } catch (error) {
+      console.error(`Error getting content with connections for frame ${frame.title}:`, error);
+      return { stickies: [], connections: [] };
     }
   }
 } 

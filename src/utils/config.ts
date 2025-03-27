@@ -35,7 +35,7 @@ export const stickyConfig = {
   },
   layout: {
     itemsPerColumn: 7,
-    topMargin: 200,
+    topMargin: 100,
     leftMargin: 100
   },
   colors: {

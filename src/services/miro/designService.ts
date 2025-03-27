@@ -278,10 +278,7 @@ export class MiroDesignService {
     const boardId = (await miro.board.getInfo()).id;
     
     try {
-      // Get all sticky notes on the board
-      const allStickies = await miro.board.get({ type: 'sticky_note' });
-      const stickiesMap = new Map();
-      allStickies.forEach(sticky => stickiesMap.set(sticky.id, sticky));
+      console.log('Starting to analyze design decisions and connections...');
       
       // Get the Design-Proposal frame
       const designFrame = await MiroFrameService.findFrameByTitle('Design-Proposal');
@@ -296,6 +293,11 @@ export class MiroDesignService {
       const designStickies = await MiroFrameService.getStickiesInFrame(designFrame);
       console.log('Found stickies in Design-Proposal frame:', designStickies.length);
       
+      // Create a map of stickies by ID for quick lookup
+      const stickiesMap = new Map<string, StickyNote>();
+      designStickies.forEach(sticky => stickiesMap.set(sticky.id, sticky));
+      
+      // Create a set of sticky IDs for quick lookups
       const designStickyIds = new Set(designStickies.map(sticky => sticky.id));
 
       // Helper function to clean HTML tags
@@ -306,36 +308,69 @@ export class MiroDesignService {
           .trim();
       };
 
-      // Get all connectors
+      // Get all connectors on the board using direct API for better performance
       const connectors = await this.getAllConnectors(boardId);
       console.log('Found connectors:', connectors.length);
+
+      // Batch fetch items instead of individual API calls
+      const itemIds = new Set<string>();
+      for (const connector of connectors) {
+        itemIds.add(connector.startItem.id);
+        itemIds.add(connector.endItem.id);
+      }
+      
+      // Filter IDs to only fetch those we don't already have
+      const idsToFetch = Array.from(itemIds).filter(id => !stickiesMap.has(id));
+      console.log(`Need to fetch ${idsToFetch.length} additional items for connections`);
+      
+      // Batch fetch items in groups of 25 to avoid API limits
+      const BATCH_SIZE = 25;
+      const additionalItems = new Map<string, any>();
+      
+      for (let i = 0; i < idsToFetch.length; i += BATCH_SIZE) {
+        const batch = idsToFetch.slice(i, i + BATCH_SIZE);
+        const fetchedItems = await Promise.all(batch.map(id => miro.board.getById(id)));
+        
+        fetchedItems.forEach((item, index) => {
+          additionalItems.set(batch[index], item);
+        });
+        
+        // Add a small delay between batches
+        if (i + BATCH_SIZE < idsToFetch.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
 
       // Filter connections that involve stickies in the Design-Proposal frame
       const designConnections: Array<{from: string, to: string}> = [];
       
       for (const connector of connectors) {
-        // Using the correct properties from MiroConnector interface
         const startItemId = connector.startItem.id;
         const endItemId = connector.endItem.id;
         
-        // Get the items by ID
-        const startItem = await miro.board.getById(startItemId);
-        const endItem = await miro.board.getById(endItemId);
+        // Get the items - either from our original stickies map or the additional fetched items
+        const startItem = stickiesMap.get(startItemId) || additionalItems.get(startItemId);
+        const endItem = stickiesMap.get(endItemId) || additionalItems.get(endItemId);
         
+        if (!startItem || !endItem) continue;
+        
+        // Skip if neither item is in our Design-Proposal frame
+        if (!designStickyIds.has(startItemId) && !designStickyIds.has(endItemId)) {
+          continue;
+        }
+        
+        // Only add connections if both items are sticky notes
         if (startItem.type === 'sticky_note' && endItem.type === 'sticky_note') {
-          const startSticky = startItem as StickyNote;
-          const endSticky = endItem as StickyNote;
-          
-          // Check if either sticky is in the Design-Proposal frame
-          if (designStickyIds.has(startSticky.id) || designStickyIds.has(endSticky.id)) {
-            designConnections.push({
-              from: cleanContent(startSticky.content),
-              to: cleanContent(endSticky.content)
-            });
-          }
+          designConnections.push({
+            from: cleanContent(startItem.content),
+            to: cleanContent(endItem.content)
+          });
         }
       }
 
+      console.log(`Found ${designConnections.length} connections involving Design-Proposal stickies`);
+      
+      // Return with section name and connections
       sections.push({
         section: 'Design Decisions',
         connections: designConnections

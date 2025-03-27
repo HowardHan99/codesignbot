@@ -15,7 +15,7 @@ export class VoiceRecordingService {
   };
   
   private static chunkProcessingCallback: ((transcription: string) => void) | null = null;
-  private static recordingInterval: number = 30000; // 30 seconds
+  private static recordingInterval: number = 20000; // 20 seconds
   
   /**
    * Start recording with progressive processing
@@ -28,7 +28,9 @@ export class VoiceRecordingService {
     customInterval?: number
   ): Promise<boolean> {
     this.chunkProcessingCallback = onTranscriptionChunk || null;
-    this.recordingInterval = customInterval || 30000;
+    this.recordingInterval = customInterval || 20000;
+    
+    console.log(`Recording started with ${this.recordingInterval/1000}s chunks`);
     
     // Update status
     this.updateStatus({
@@ -44,7 +46,12 @@ export class VoiceRecordingService {
         // Start recording using our client
         await AudioRecordingClient.startRecording({
           chunkInterval: this.recordingInterval,
-          onDataAvailable: this.handleAudioChunk.bind(this)
+          // Instead of using handleAudioChunk, just let AudioRecordingClient handle the chunks
+          // They will be processed in the interval anyway
+          onDataAvailable: (chunk) => {
+            console.log(`Audio chunk received: ${chunk.size} bytes`);
+            // No action needed here - chunks are stored internally in AudioRecordingClient
+          }
         });
         
         // Setup progressive processing if callback provided
@@ -75,22 +82,35 @@ export class VoiceRecordingService {
   }
   
   /**
-   * Handle new audio chunks as they become available
+   * Update processing status
+   * @param update Partial update to the status
    */
-  private static async handleAudioChunk(chunk: Blob): Promise<void> {
-    if (this.processingStatus.shouldStop) {
-      await this.stopRecording();
-      return;
-    }
-    
-    console.log(`Audio chunk received: ${chunk.size} bytes`);
+  private static updateStatus(update: Partial<ProcessingStatus>): void {
+    this.processingStatus = {
+      ...this.processingStatus,
+      ...update
+    };
+  }
+  
+  /**
+   * Update the progress value
+   * @param progress New progress value
+   */
+  private static updateProgress(progress: number): void {
+    this.updateStatus({
+      progress: Math.min(Math.max(0, progress), 100)
+    });
   }
   
   /**
    * Process audio chunks for transcription
    */
   private static async processAudioChunks(chunks: Blob[]): Promise<void> {
-    if (chunks.length === 0 || this.processingStatus.shouldStop) return;
+    console.log(`Processing ${chunks.length} audio chunks`);
+    
+    if (chunks.length === 0 || this.processingStatus.shouldStop) {
+      return;
+    }
     
     try {
       // Create a single blob from all chunks
@@ -101,6 +121,7 @@ export class VoiceRecordingService {
       
       // Process the transcription if we have a callback
       if (this.chunkProcessingCallback && result.transcription) {
+        console.log(`🎤 Transcription chunk received (${result.transcription.length} chars)`);
         this.chunkProcessingCallback(result.transcription);
       }
       
@@ -116,6 +137,8 @@ export class VoiceRecordingService {
    * @returns Promise resolving to the final audio blob or null
    */
   public static async stopRecording(): Promise<Blob | null> {
+    console.log(`Stopping recording`);
+    
     // Mark as stopping
     this.updateStatus({
       ...this.processingStatus,
@@ -151,40 +174,9 @@ export class VoiceRecordingService {
   }
   
   /**
-   * Check if recording is active
-   */
-  public static isRecording(): boolean {
-    return AudioRecordingClient.isRecording();
-  }
-  
-  /**
-   * Update the processing status
-   */
-  private static updateStatus(newStatus: Partial<ProcessingStatus>): void {
-    this.processingStatus = {
-      ...this.processingStatus,
-      ...newStatus
-    };
-  }
-  
-  /**
-   * Update just the progress value
-   */
-  private static updateProgress(progress: number): void {
-    this.processingStatus.progress = Math.min(100, Math.max(0, progress));
-  }
-  
-  /**
-   * Get the current processing status
+   * Get current processing status
    */
   public static getStatus(): ProcessingStatus {
-    return {...this.processingStatus};
-  }
-  
-  /**
-   * Request to stop recording
-   */
-  public static requestStop(): void {
-    this.processingStatus.shouldStop = true;
+    return { ...this.processingStatus };
   }
 } 

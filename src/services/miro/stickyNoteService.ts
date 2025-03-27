@@ -27,51 +27,91 @@ export class StickyNoteService {
     mode: 'decision' | 'response',
     totalsByScore: number[]
   ): Promise<any> {
-    const relevanceConfig = ConfigurationService.getRelevanceConfig();
-    
-    // Use safe API call for error handling
-    return await safeApiCall(
-      async () => {
-        // Validate score is within range
-        const validScore = Math.max(
-          relevanceConfig.scale.min,
-          Math.min(relevanceConfig.scale.max, score)
-        );
+    try {
+      // Validate score is in range
+      const relevanceConfig = ConfigurationService.getRelevanceConfig();
+      const { min, max } = relevanceConfig.scale;
+      if (score < min || score > max) {
+        console.error(`Invalid relevance score: ${score}, using default: ${min}`);
+        score = min;
+      }
+      
+      // Get the sticky note color based on score and mode
+      const color = this.getStickyColorForModeAndScore(mode, score);
+      
+      // Calculate position
+      const position = this.calculateStickyPosition(frame, totalsByScore[score - 1], score);
+      
+      // Get sticky dimensions from config
+      const { width, height } = ConfigurationService.getStickyConfig().dimensions;
+      
+      // =========================================================================
+      // IMPORTANT: Sticky Note Positioning for Frame Assignment
+      // =========================================================================
+      // In Miro, sticky notes are automatically assigned to a frame based on their
+      // position coordinates. To ensure a sticky appears in the desired frame:
+      // 1. It MUST be positioned within the frame's bounds
+      // 2. There is NO API to directly set the parentId
+      // 3. Attempting to update parentId after creation does NOT work
+      // 4. The sticky note must be created with coordinates inside the frame
+      // =========================================================================
+      
+      // Calculate the frame bounds
+      const frameLeft = frame.x - frame.width/2;
+      const frameTop = frame.y - frame.height/2;
+      const frameRight = frame.x + frame.width/2;
+      const frameBottom = frame.y + frame.height/2;
+      
+      // Ensure the position is within the frame bounds with margin
+      // This is CRITICAL for proper frame assignment
+      const margin = 10; // Margin from frame edge
+      const adjustedX = Math.max(
+        frameLeft + width/2 + margin, 
+        Math.min(frameRight - width/2 - margin, position.x)
+      );
+      const adjustedY = Math.max(
+        frameTop + height/2 + margin,
+        Math.min(frameBottom - height/2 - margin, position.y)
+      );
+      
+      // Verify the point is inside the frame (for debugging)
+      const isInFrame = 
+        adjustedX > frameLeft && 
+        adjustedX < frameRight && 
+        adjustedY > frameTop && 
+        adjustedY < frameBottom;
+      
+      if (!isInFrame) {
+        console.error(`CRITICAL ERROR: Position (${adjustedX}, ${adjustedY}) is outside frame bounds!`);
+        return null;
+      }
+      
+      // Create the sticky note
+      const sticky = await MiroApiClient.createStickyNote({
+        content,
+        x: adjustedX,
+        y: adjustedY,
+        width: width,
+        style: {
+          fillColor: color
+        }
+      });
+      
+      if (sticky) {
+        // Verify correct frame assignment
+        if (sticky.parentId !== frame.id) {
+          console.error(`WARNING: Sticky note created with incorrect parentId: ${sticky.parentId} instead of ${frame.id}`);
+        }
         
-        // Get the score index (0-based) for our counters
-        const scoreIndex = validScore - 1;
-        
-        // Calculate position based on score
-        const position = this.calculateStickyPosition(
-          frame,
-          totalsByScore[scoreIndex], 
-          validScore
-        );
-        
-        // Determine color based on mode and score
-        const color = this.getStickyColorForModeAndScore(mode, validScore);
-        
-        // Add relevance score to content
-        const stickyContent = `${content}\n\n[Relevance: ${validScore}/${relevanceConfig.scale.max}]`;
-        
-        // Create sticky note at the calculated position within frame bounds
-        const stickyNote = await MiroApiClient.createStickyNote({
-          content: stickyContent,
-          x: position.x,
-          y: position.y,
-          width: ConfigurationService.getStickyConfig().dimensions.width,
-          style: {
-            fillColor: color
-          }
-        });
-        
-        // Return the created sticky note
-        return stickyNote;
-      },
-      null,
-      'Create Sticky Note',
-      { mode, score, frameId: frame.id }
-    );
+        return sticky;
+      } else {
+        console.error(`Failed to create sticky note - null response from API`);
+        return null;
+      }
+    } catch (error) {
+      console.error(`Error creating sticky note:`, error);
+      throw error;
+    }
   }
   
   /**
@@ -127,8 +167,9 @@ export class StickyNoteService {
     const frameLeft = frame.x - frame.width/2;
     const frameTop = frame.y - frame.height/2;
     const frameWidth = frame.width;
+    const frameHeight = frame.height;
     
-    // Calculate section width (frame divided into 3 equal sections)
+    // Calculate section width (frame divided into N equal sections based on score range)
     const effectiveWidth = frameWidth - (LEFT_MARGIN * 2);
     const sectionWidth = effectiveWidth / relevanceConfig.scale.max;
     
@@ -142,9 +183,35 @@ export class StickyNoteService {
     // Calculate the base x position for this score's section
     const sectionBaseX = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth) + (sectionWidth / 2);
     
-    // Calculate final position
-    const x = sectionBaseX - (STICKY_WIDTH / 2) + (col * (STICKY_WIDTH + SPACING));
-    const y = frameTop + TOP_MARGIN + (row * (STICKY_HEIGHT + SPACING));
+    // FIXED POSITIONING ALGORITHM:
+    // 1. Make sure we start well within the frame with proper margins
+    // 2. Ensure columns/rows don't overflow the frame dimensions
+    
+    // Calculate preliminary positions
+    let x = sectionBaseX + (col * (STICKY_WIDTH + SPACING));
+    let y = frameTop + TOP_MARGIN + (row * (STICKY_HEIGHT + SPACING));
+    
+    // Safety checks to ensure we stay within frame bounds
+    const rightBound = frameLeft + frameWidth - STICKY_WIDTH/2 - 20;
+    const bottomBound = frameTop + frameHeight - STICKY_HEIGHT/2 - 20;
+    
+    // If we'd overflow to the right, create a new row
+    if (x > rightBound) {
+      // Reset to left side and move down one row
+      x = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth/2);
+      y += STICKY_HEIGHT + SPACING;
+    }
+    
+    // If we'd overflow the bottom, start a new column from the top
+    if (y > bottomBound) {
+      y = frameTop + TOP_MARGIN;
+      x += STICKY_WIDTH + SPACING;
+    }
+    
+    // Final safety bounds check - ensure minimum margins from edges
+    const margin = 30; // Safe margin from frame edge
+    x = Math.max(frameLeft + STICKY_WIDTH/2 + margin, Math.min(frameLeft + frameWidth - STICKY_WIDTH/2 - margin, x));
+    y = Math.max(frameTop + STICKY_HEIGHT/2 + margin, Math.min(frameTop + frameHeight - STICKY_HEIGHT/2 - margin, y));
     
     return { x, y };
   }

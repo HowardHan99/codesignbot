@@ -12,6 +12,7 @@ import { FileUploadTest } from './FileUploadTest';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 import { DesignerRolePlayService } from '../services/designerRolePlayService';
 import { DesignThemeService } from '../services/designThemeService';
+import { MiroFrameService } from '../services/miro/frameService';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
@@ -41,9 +42,24 @@ const UPDATE_INTERVAL = 30000; // 30 seconds between forced updates
 
 // Add this helper function before the MainBoard component
 const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
+  console.log('Building decision tree from:', { 
+    notes: notes.length, 
+    connections: connections.length 
+  });
+  
   // Create a map of notes by their content for easy lookup
   const noteMap = new Map<string, StickyNote>();
-  notes.forEach(note => noteMap.set(note.content.replace(/<\/?p>/g, ''), note));
+  notes.forEach(note => {
+    // Clean content to make matching more reliable
+    const cleanContent = note.content.replace(/<\/?p>/g, '').trim();
+    // If duplicate content exists, keep the one with shorter ID (usually older notes)
+    if (!noteMap.has(cleanContent) || noteMap.get(cleanContent)!.id.length > note.id.length) {
+      noteMap.set(cleanContent, note);
+    }
+  });
+
+  // Log all note content for debugging
+  console.log('Notes in tree:', Array.from(noteMap.keys()));
 
   // Create a map to track children for each note
   const childrenMap = new Map<string, Set<string>>();
@@ -51,16 +67,21 @@ const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
   const parentMap = new Map<string, Set<string>>();
 
   // Initialize maps
-  notes.forEach(note => {
-    const content = note.content.replace(/<\/?p>/g, '');
+  Array.from(noteMap.keys()).forEach(content => {
     childrenMap.set(content, new Set());
     parentMap.set(content, new Set());
   });
 
-  // Build the relationship maps
+  // Build the relationship maps from connections
   connections.forEach(connection => {
     const fromContent = connection.from;
     const toContent = connection.to;
+    
+    // Skip if we don't have either note in our map
+    if (!noteMap.has(fromContent) || !noteMap.has(toContent)) {
+      console.log('Connection refers to notes not in the map:', { from: fromContent, to: toContent });
+      return;
+    }
     
     // Add child relationship
     const children = childrenMap.get(fromContent);
@@ -75,13 +96,24 @@ const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
     }
   });
 
+  // Log relationship maps for debugging
+  console.log('Relationship data:', {
+    notes: noteMap.size,
+    connections: connections.length,
+    childrenCount: Array.from(childrenMap.entries()).map(([k, v]) => ({ note: k, children: v.size })),
+    parentCount: Array.from(parentMap.entries()).map(([k, v]) => ({ note: k, parents: v.size })),
+  });
+
   // Find root nodes (nodes with no parents)
   const rootNodes = Array.from(noteMap.keys())
     .filter(content => !parentMap.get(content)?.size);
+  
+  console.log('Root nodes:', rootNodes);
 
   // Recursive function to build the tree structure
   const buildTree = (content: string, visited = new Set<string>()): any => {
     if (visited.has(content)) {
+      console.log('Circular reference detected:', content);
       return null; // Prevent circular references
     }
     visited.add(content);
@@ -98,7 +130,19 @@ const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
   };
 
   // Build trees starting from root nodes
-  return rootNodes.map(root => buildTree(root));
+  const trees = rootNodes.map(root => buildTree(root));
+  
+  // If no root nodes found, use all notes as separate trees
+  if (trees.length === 0 && noteMap.size > 0) {
+    console.log('No root nodes found, using all notes as separate trees');
+    return Array.from(noteMap.keys()).map(content => ({
+      content,
+      id: noteMap.get(content)?.id,
+      children: undefined
+    }));
+  }
+  
+  return trees;
 };
 
 // Add this component before the MainBoard component
@@ -196,21 +240,29 @@ export function MainBoard({
     try {
       const frameId = await getDesignFrameId();
       if (!frameId) {
+        console.log('Design-Proposal frame not found');
         return { notes: [], connections: [] };
       }
 
-      // Get all sticky notes on the board
-      const allStickies = await miro.board.get({ type: 'sticky_note' });
-      const frameStickies = allStickies.filter(sticky => sticky.parentId === frameId);
+      // Get the frame by ID
+      const frames = await miro.board.get({ type: 'frame' });
+      const designFrame = frames.find(f => f.id === frameId);
       
-      const notes = frameStickies.map(item => ({
+      if (!designFrame) {
+        console.log('Design-Proposal frame not found even though we have the ID');
+        return { notes: [], connections: [] };
+      }
+
+      // Use the new method to get frame content with connections
+      const { stickies, connections } = await MiroFrameService.getFrameContentWithConnections(designFrame);
+      
+      // Format the data for our component
+      const notes = stickies.map(item => ({
         id: item.id,
         content: item.content || ''
       }));
-
-      // Get connections between sticky notes
-      const analysis = await MiroDesignService.analyzeDesignDecisions();
-      const connections = analysis[0]?.connections || [];
+      
+      console.log(`Retrieved ${notes.length} design notes and ${connections.length} connections`);
 
       return { notes, connections };
     } catch (err) {

@@ -8,6 +8,34 @@ export class AudioRecordingClient {
   private static processingInterval: NodeJS.Timeout | null = null;
   private static readonly DEFAULT_CHUNK_INTERVAL = 30000; // 30 seconds
   private static readonly MAX_RETRIES = 3;
+  private static mimeType: string = 'audio/webm'; // Default MIME type
+  
+  /**
+   * Get supported MIME type for audio recording
+   * @returns The best supported MIME type
+   */
+  private static getSupportedMimeType(): string {
+    // List of MIME types to try, in order of preference
+    const mimeTypes = [
+      'audio/webm;codecs=opus',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+      'audio/webm',
+      'audio/ogg'
+    ];
+    
+    // Check which MIME types are supported
+    for (const type of mimeTypes) {
+      if (MediaRecorder.isTypeSupported(type)) {
+        console.log(`Using supported MIME type: ${type}`);
+        return type;
+      }
+    }
+    
+    // Fallback to default
+    console.warn('No preferred MIME types supported, using default');
+    return 'audio/webm';
+  }
   
   /**
    * Initialize and start recording
@@ -26,25 +54,42 @@ export class AudioRecordingClient {
       this.audioChunks = [];
       
       // Request user media
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log(`Requesting microphone access...`);
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
       this.audioStream = stream;
       
-      // Create media recorder
-      this.mediaRecorder = new MediaRecorder(stream);
+      // Get supported MIME type
+      this.mimeType = this.getSupportedMimeType();
+      
+      // Create media recorder with supported MIME type
+      this.mediaRecorder = new MediaRecorder(stream, {
+        mimeType: this.mimeType
+      });
+      
+      // Start recording with chunks
+      const chunkInterval = options.chunkInterval || this.DEFAULT_CHUNK_INTERVAL;
+      console.log(`Started recording with ${chunkInterval/1000}s chunks`);
       
       // Set up data handler
       this.mediaRecorder.ondataavailable = (event) => {
-        this.audioChunks.push(event.data);
-        if (options.onDataAvailable) {
-          options.onDataAvailable(event.data);
+        if (event.data && event.data.size > 0) {
+          this.audioChunks.push(event.data);
+          console.log(`📊 Recording chunk captured: ${(event.data.size/1024).toFixed(1)}KB`);
+          if (options.onDataAvailable) {
+            options.onDataAvailable(event.data);
+          }
         }
       };
       
       // Start recording with chunks
-      const chunkInterval = options.chunkInterval || this.DEFAULT_CHUNK_INTERVAL;
       this.mediaRecorder.start(chunkInterval);
       
-      console.log('Audio recording started');
       return stream;
     } catch (error) {
       console.error('Error starting audio recording:', error);
@@ -67,11 +112,12 @@ export class AudioRecordingClient {
       }
       
       this.mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+        // Use the actual MIME type that was used for recording
+        const audioBlob = new Blob(this.audioChunks, { type: this.mimeType });
         if (closeStream) {
           this.cleanupResources();
         }
-        console.log('Audio recording stopped, size:', audioBlob.size);
+        console.log(`Recording stopped, final size: ${(audioBlob.size/1024).toFixed(1)}KB`);
         resolve(audioBlob);
       };
       
@@ -104,8 +150,10 @@ export class AudioRecordingClient {
       clearInterval(this.processingInterval);
     }
     
+    console.log(`Starting chunk processing every ${intervalMs/1000}s`);
     this.processingInterval = setInterval(async () => {
       if (this.audioChunks.length > 0) {
+        console.log(`Processing ${this.audioChunks.length} audio chunks...`);
         const currentChunks = [...this.audioChunks];
         this.audioChunks = []; // Clear for new chunks
         try {
@@ -115,8 +163,6 @@ export class AudioRecordingClient {
         }
       }
     }, intervalMs);
-    
-    console.log(`Audio processing interval started: ${intervalMs}ms`);
   }
   
   /**
@@ -126,7 +172,7 @@ export class AudioRecordingClient {
     if (this.processingInterval) {
       clearInterval(this.processingInterval);
       this.processingInterval = null;
-      console.log('Audio processing interval stopped');
+      console.log('Audio processing stopped');
     }
   }
   
@@ -159,12 +205,17 @@ export class AudioRecordingClient {
     while (attempts < this.MAX_RETRIES) {
       try {
         const formData = new FormData();
-        const file = new File([audioBlob], 'audio.webm', { 
-          type: audioBlob.type || 'audio/webm' 
+        
+        // Get the extension based on MIME type
+        const fileExtension = this.getFileExtensionFromMimeType(audioBlob.type);
+        const fileName = `audio.${fileExtension}`;
+        
+        const file = new File([audioBlob], fileName, { 
+          type: audioBlob.type || this.mimeType 
         });
         formData.append('audio', file);
         
-        console.log(`Sending audio to transcription API (${audioBlob.size} bytes)`);
+        console.log(`Sending ${(audioBlob.size/1024).toFixed(1)}KB audio for transcription...`);
         
         const response = await fetch('/api/transcribe', {
           method: 'POST',
@@ -172,11 +223,12 @@ export class AudioRecordingClient {
         });
         
         if (!response.ok) {
-          throw new Error(`Transcription failed: ${response.statusText}`);
+          const errorText = await response.text();
+          throw new Error(`Transcription failed: ${response.status} ${response.statusText} - ${errorText}`);
         }
         
         const result = await response.json();
-        console.log(`Transcription successful: ${result.transcription.length} chars`);
+        console.log(`✅ Transcription received: ${result.transcription.length} characters`);
         
         return result;
       } catch (error) {
@@ -193,5 +245,28 @@ export class AudioRecordingClient {
     }
     
     throw new Error('Transcription failed after multiple attempts');
+  }
+  
+  /**
+   * Get file extension from MIME type
+   */
+  private static getFileExtensionFromMimeType(mimeType: string): string {
+    switch (mimeType) {
+      case 'audio/mp4':
+        return 'mp4';
+      case 'audio/mp3':
+        return 'mp3';
+      case 'audio/mpeg':
+        return 'mp3';
+      case 'audio/ogg':
+      case 'audio/ogg;codecs=opus':
+        return 'ogg';
+      case 'audio/wav':
+        return 'wav';
+      case 'audio/webm':
+      case 'audio/webm;codecs=opus':
+      default:
+        return 'webm';
+    }
   }
 } 
