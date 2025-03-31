@@ -40,6 +40,12 @@ export class DesignThemeService {
 
   private static isProcessing: boolean = false;
 
+  // Flag to enable/disable test sticky notes - DISABLED by default
+  private static testStickyNotesEnabled: boolean = false;
+  
+  // Map to store theme positions for future sticky note placement
+  private static themePositions: Map<string, {x: number, y: number, themeIndex: number}> = new Map();
+
   /**
    * Generate themes from design proposals and thinking dialogue
    */
@@ -114,40 +120,30 @@ export class DesignThemeService {
     thinkingDialogue: string[]
   ): Promise<DesignTheme[]> {
     try {
-      const systemPrompt = `You are a design expert specializing in identifying themes, patterns, and groupings in design content.
+      // Simplified prompt that focuses only on theme names
+      const systemPrompt = `You are a design expert specializing in identifying themes and patterns in design content.
       
-Your task is to analyze design proposals and dialogue to identify 4-6 key themes or groups. These might include:
+Your task is to analyze design proposals and dialogue to identify 4 key themes or groups. These might include:
 - Functional groups (features with similar purposes)
 - Design priorities (visual elements, UX flow concerns, etc.)
 - User-centered categories (addressing specific user needs)
 - Technical implementation themes
 
-For each theme, provide:
+For each theme, provide ONLY:
 1. A short, descriptive name (1-3 words)
-2. A concise description explaining what unifies content in this theme (1-2 sentences)
-3. References to the specific design points that belong in this theme (use exact quotes or clear references)
 
 EXTREMELY IMPORTANT:
 1. Your response MUST be a valid JSON array of objects.
-2. The JSON array MUST start with '[' and end with ']'.
-3. Each object in the array MUST have these exact keys: "name", "description", "relatedPoints".
-4. The "relatedPoints" value MUST be an array of strings.
-5. Do not include any text outside the JSON array.
-6. Do not include markdown formatting (like \`\`\`json).
-7. Do not include comments in the JSON.
+2. Each object MUST have ONLY a "name" property (remove description and relatedPoints).
+3. You MUST provide exactly 4 themes.
+4. Do not include any text outside the JSON array.
 
 Example of CORRECT response format:
 [
-  {
-    "name": "Theme name",
-    "description": "Theme description",
-    "relatedPoints": ["Point 1", "Point 2", "Point 3"]
-  },
-  {
-    "name": "Another theme",
-    "description": "Another description",
-    "relatedPoints": ["Point A", "Point B"]
-  }
+  { "name": "Accessibility and Inclusivity" },
+  { "name": "User Experience" },
+  { "name": "Technical Integration" },
+  { "name": "Visual Design" }
 ]`;
 
       const userPrompt = `Design Proposals:\n${designProposals.map(p => `- ${p}`).join('\n')}\n\nThinking Dialogue:\n${thinkingDialogue.map(d => `- ${d}`).join('\n')}`;
@@ -183,62 +179,42 @@ Example of CORRECT response format:
         const jsonContent = this.extractJsonFromMarkdown(result.response);
         console.log('Extracted JSON content:', jsonContent.substring(0, 100) + '...');
         
-        // Additional validation to ensure it's array-like
-        if (!jsonContent.trim().startsWith('[')) {
-          console.error('Expected JSON array but received something else:', jsonContent.substring(0, 50));
-          // Try to wrap content in array if it might be a single object
-          if (jsonContent.trim().startsWith('{')) {
-            console.log('Attempting to wrap object in array');
-            const parsed = JSON.parse(`[${jsonContent}]`);
-            themes = parsed.map((theme: any, index: number) => ({
-              ...theme,
-              color: this.THEME_COLORS[index % this.THEME_COLORS.length]
-            }));
-          } else {
-            // Try manual fallback parsing
-            console.log('Attempting to parse using manual extraction');
-            // This is a last resort - try to find theme objects
-            const nameMatches = jsonContent.match(/"name"\s*:\s*"([^"]*)"/g);
-            const descMatches = jsonContent.match(/"description"\s*:\s*"([^"]*)"/g);
-            const pointsMatches = jsonContent.match(/"relatedPoints"\s*:\s*\[(.*?)\]/g);
-            
-            if (nameMatches && nameMatches.length && descMatches && pointsMatches) {
-              themes = nameMatches.map((_, index) => {
-                const name = nameMatches[index]?.match(/"name"\s*:\s*"([^"]*)"/)?.[1] || 'Unknown Theme';
-                const description = descMatches[index]?.match(/"description"\s*:\s*"([^"]*)"/)?.[1] || 'No description available';
-                const pointsMatch = pointsMatches[index]?.match(/"relatedPoints"\s*:\s*\[(.*?)\]/)?.[1] || '';
-                const points = pointsMatch.split(',').map(p => p.replace(/"/g, '').trim()).filter(p => p);
-                
-                return {
-                  name,
-                  description,
-                  relatedPoints: points.length ? points : ['No points available'],
-                  color: this.THEME_COLORS[index % this.THEME_COLORS.length]
-                };
-              });
-            }
-          }
-          
-          if (!themes.length) {
-            throw new Error('Could not parse response as a valid array of themes');
-          }
+        // Parse the JSON content
+        let parsed: any[] = [];
+        
+        if (jsonContent.trim().startsWith('[')) {
+          parsed = JSON.parse(jsonContent);
+        } else if (jsonContent.trim().startsWith('{')) {
+          parsed = [JSON.parse(jsonContent)];
         } else {
-          // Normal parsing path for array
-          const parsed = JSON.parse(jsonContent);
-          if (!Array.isArray(parsed)) {
-            console.error('Parsed content is not an array:', typeof parsed);
-            throw new Error('Response was parsed but is not an array');
-          }
-          themes = parsed.map((theme: any, index: number) => ({
-            ...theme,
-            color: this.THEME_COLORS[index % this.THEME_COLORS.length]
-          }));
+          throw new Error('Invalid JSON format: content must start with [ or {');
         }
         
-        console.log(`Successfully parsed ${themes.length} themes`);
+        // Map the parsed themes with colors and empty descriptions/relatedPoints
+        themes = parsed.map((theme: any, index: number) => ({
+          name: theme.name || `Theme ${index + 1}`,
+          description: "", // Empty description since we don't need it
+          relatedPoints: [], // Empty relatedPoints since we don't need them
+          color: this.THEME_COLORS[index % this.THEME_COLORS.length]
+        }));
+        
+        // Ensure we have exactly 4 themes
+        while (themes.length < 4) {
+          themes.push({
+            name: `Theme ${themes.length + 1}`,
+            description: "",
+            relatedPoints: [],
+            color: this.THEME_COLORS[themes.length % this.THEME_COLORS.length]
+          });
+        }
+        
+        // Limit to 4 themes if we have more
+        themes = themes.slice(0, 4);
+        
+        console.log(`Successfully prepared ${themes.length} themes`);
       } catch (error) {
         console.error('Error parsing themes:', error);
-        throw new Error('Failed to parse theme analysis');
+        throw new Error('Failed to parse theme data. Please check the API response format.');
       }
 
       return themes;
@@ -306,9 +282,283 @@ Example of CORRECT response format:
   }
 
   /**
-   * Visualize themes on the Miro board
+   * Ensure the theme frame exists, creating it if necessary
    */
-  public static async visualizeThemes(themes: DesignTheme[]): Promise<void> {
+  private static async ensureThemeFrame(): Promise<Frame> {
+    try {
+      // First, try to find existing frame
+      const existingFrames = await miro.board.get({ type: 'frame' });
+      
+      // Look for our specific theme frame by name
+      const themeFrame = existingFrames.find(frame => frame.title === this.THEME_FRAME_NAME);
+      
+      if (themeFrame) {
+        console.log(`Found existing theme frame: ${themeFrame.id}`);
+        
+        // Clear frame contents if it exists
+        const items = await miro.board.get({ type: ['sticky_note', 'text', 'shape'] });
+        const frameItems = items.filter(item => item.parentId === themeFrame.id);
+        
+        // Remove items one by one
+        for (const item of frameItems) {
+          await miro.board.remove(item);
+        }
+        
+        return themeFrame;
+      }
+      
+      // Frame not found, create new frame
+      console.log('Theme frame not found, creating new frame');
+      
+      // Get the current viewport
+      const viewport = await miro.board.viewport.get();
+      
+      // Define a fixed size for theme visualization - increased height to prevent overflow
+      const frameWidth = 1200;  // Wide enough for 4 themes
+      const frameHeight = 800;  // Taller to accommodate sticky notes without overflow
+      
+      // Create at the center of current viewport for visibility
+      const frameX = viewport.x + viewport.width / 2;
+      const frameY = viewport.y + viewport.height / 2;
+      
+      console.log(`Creating theme frame at position: x=${frameX}, y=${frameY}, width=${frameWidth}, height=${frameHeight}`);
+      
+      // Create the frame
+      const newFrame = await miro.board.createFrame({
+        title: this.THEME_FRAME_NAME,
+        x: frameX,
+        y: frameY,
+        width: frameWidth,
+        height: frameHeight,
+        style: {
+          fillColor: '#ffffff'
+        }
+      });
+      
+      console.log(`Created new theme frame: ${newFrame.id}`);
+      
+      // Important technique: Create then delete then create a sticky note inside the frame
+      // This ensures the frame is properly registered in Miro's system
+      const tempSticky = await miro.board.createStickyNote({
+        content: "Temporary note - will be removed",
+        x: frameX,
+        y: frameY,
+        width: 200,
+        style: {
+          fillColor: 'light_yellow'
+        }
+      });
+      console.log(`Created temporary sticky note: ${tempSticky.id}`);
+      
+      // Wait a moment for Miro to process the frame and sticky note
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Remove the temporary sticky note
+      await miro.board.remove(tempSticky);
+      console.log(`Removed temporary sticky note`);
+      
+      // Wait a moment for Miro to process the frame
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      return newFrame;
+    } catch (error) {
+      console.error('Error ensuring theme frame:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get a valid sticky note color from theme color
+   */
+  private static getStickyColorFromTheme(themeColor: string): 'light_yellow' | 'light_green' | 'light_blue' | 'light_pink' | 'violet' {
+    switch (themeColor) {
+      case 'light_yellow': return 'light_yellow';
+      case 'light_green': return 'light_green';
+      case 'light_blue': return 'light_blue';
+      case 'light_pink': return 'light_pink';
+      case 'violet': return 'violet';
+      case 'light_gray': return 'light_yellow'; // fallback for light_gray
+      default: return 'light_yellow'; // default fallback
+    }
+  }
+
+  /**
+   * Get hex color value from theme color name
+   */
+  private static getHexColor(colorName: string): string {
+    return this.COLOR_HEX_MAP[colorName] || '#808080'; // Default to gray if color not found
+  }
+
+  /**
+   * Enable or disable test sticky notes
+   * @param enabled Whether test sticky notes should be enabled
+   */
+  public static setTestStickyNotesEnabled(enabled: boolean): void {
+    this.testStickyNotesEnabled = enabled;
+  }
+  
+  /**
+   * Get positions for sticky notes under themes
+   * Returns a map of theme names to positions
+   */
+  public static getThemePositions(): Map<string, {x: number, y: number, themeIndex: number}> {
+    return this.themePositions;
+  }
+  
+  /**
+   * Calculate position for sticky notes under a theme
+   */
+  public static calculateStickyNotePosition(frame: Frame, themeIndex: number): {x: number, y: number} {
+    // POSITIONING BREAKDOWN:
+    console.log(`[DEBUG] Frame dimensions: width=${frame.width}, height=${frame.height}`);
+    
+    // 1. VERTICAL POSITIONING
+    const rows = 4; // Four rows, one for each theme
+    const row = themeIndex % rows;
+    const rowHeight = frame.height / rows;
+    
+    // Instead of calculating relative to the theme bar, let's use direct row positioning
+    // Divide each row into two parts: top part for theme bar (30%), bottom part for sticky notes (70%)
+    const rowTopEdge = frame.y - frame.height/2 + (row * rowHeight);
+    const rowBottomEdge = rowTopEdge + rowHeight;
+    
+    // Position the sticky notes 60% down the row height - this guarantees no overlap
+    // This puts them well below the theme bar regardless of the theme bar's exact position
+    const stickyY = rowTopEdge + (rowHeight * 0.6);
+    
+    console.log(`[DEBUG] Row ${row}: top=${rowTopEdge}, bottom=${rowBottomEdge}`);
+    console.log(`[DEBUG] Sticky Y position at 60% of row: ${stickyY}`);
+    
+    // 2. HORIZONTAL POSITIONING
+    //DON'T CHANGE THIS 200 - IT'S THE CORRECT POSITION FOR THE STICKY NOTES
+    const LEFT_MARGIN = 200;
+    const frameLeftEdge = frame.x - frame.width/2;
+    const stickyX = frameLeftEdge + LEFT_MARGIN;
+    
+    return {
+      x: stickyX,
+      y: stickyY
+    };
+  }
+  
+  /**
+   * Create a test sticky note under a theme
+   */
+  private static async createTestStickyNote(frame: Frame, theme: DesignTheme, themeIndex: number): Promise<void> {
+    try {
+      // Calculate position for the sticky note
+      const position = this.calculateStickyNotePosition(frame, themeIndex);
+      
+      console.log(`[DEBUG] Test sticky note for "${theme.name}" at: x=${position.x}, y=${position.y}`);
+      console.log(`[DEBUG] Distance from frame top: ${position.y - (frame.y - frame.height/2)}px`);
+      
+      // We no longer need to store the position here since it's stored in createThemeGroup
+      // this.themePositions.set(theme.name, {
+      //   x: position.x,
+      //   y: position.y,
+      //   themeIndex: themeIndex
+      // });
+      
+      const content = `Test note for: ${theme.name}`;
+      
+      // Use standard size from config (300px)
+      const STICKY_WIDTH = 300; // Standard size
+      
+      // Create the sticky note
+      const sticky = await miro.board.createStickyNote({
+        content: content,
+        x: position.x,
+        y: position.y,
+        width: STICKY_WIDTH,
+        style: {
+          fillColor: this.getStickyColorFromTheme(theme.color),
+          textAlign: 'center',
+          textAlignVertical: 'middle'
+        }
+      });
+      
+      console.log(`[DEBUG] Created test sticky: ${sticky.id}`);
+      
+      // Wait for Miro to process
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } catch (error) {
+      console.error(`[ERROR] Failed to create test sticky note for "${theme.name}":`, error);
+    }
+  }
+  
+  /**
+   * Place sticky notes under themes
+   */
+  public static async placeStickyNotesUnderTheme(themeName: string, stickyContents: string[]): Promise<void> {
+    const position = this.themePositions.get(themeName);
+    if (!position) {
+      console.error(`No position found for theme: ${themeName}`);
+      return;
+    }
+    
+    // Use standard sticky note dimensions from config
+    const STICKY_WIDTH = 300; // Standard size 
+    const STICKY_SPACING = 50; // Standard spacing
+    
+    // Get the theme's color
+    const theme = await this.getThemeByName(themeName);
+    const color = theme ? theme.color : 'light_yellow';
+    
+    console.log(`[DEBUG] Placing ${stickyContents.length} stickies under "${themeName}" at (${position.x}, ${position.y})`);
+    
+    // Create each sticky note with proper spacing
+    for (let i = 0; i < stickyContents.length; i++) {
+      const offsetX = i * (STICKY_WIDTH + STICKY_SPACING); 
+      
+      try {
+        const sticky = await miro.board.createStickyNote({
+          content: stickyContents[i],
+          x: position.x + offsetX,
+          y: position.y,
+          width: STICKY_WIDTH,
+          style: {
+            fillColor: this.getStickyColorFromTheme(color)
+          }
+        });
+        
+        console.log(`[DEBUG] Created sticky: ${sticky.id} at x=${position.x + offsetX}, y=${position.y}`);
+      } catch (error) {
+        console.error(`[ERROR] Failed to create sticky note: "${stickyContents[i].substring(0, 30)}..."`);
+      }
+      
+      // Small delay between sticky notes
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+  
+  /**
+   * Helper to get a theme by name
+   */
+  private static async getThemeByName(themeName: string): Promise<DesignTheme | null> {
+    try {
+      // Use cached themes if available, or generate new ones
+      let themes = await this.generateDesignThemes();
+      return themes.find(t => t.name === themeName) || null;
+    } catch (error) {
+      console.error(`Error finding theme by name: ${themeName}`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * Visualize themes on the Miro board
+   * @param themes Array of themes to visualize
+   * @param createTestStickies Optional flag to create test sticky notes
+   */
+  public static async visualizeThemes(themes: DesignTheme[], createTestStickies: boolean = true): Promise<void> {
+    // Reset theme positions map
+    this.themePositions.clear();
+    
+    // Set test sticky notes flag - default to true for debugging
+    this.testStickyNotesEnabled = createTestStickies;
+    
+    console.log(`[DEBUG] Test sticky notes ${this.testStickyNotesEnabled ? 'ENABLED' : 'DISABLED'}`);
+    
     try {
       console.log(`Visualizing ${themes.length} themes in '${this.THEME_FRAME_NAME}' frame...`);
       
@@ -349,8 +599,41 @@ Example of CORRECT response format:
       // Zoom to frame
       await miro.board.viewport.zoomTo(themeFrame);
       console.log('Visualization complete');
+      
+      // Log all theme positions for debugging
+      console.log('[DEBUG] Final theme positions map:');
+      this.themePositions.forEach((pos, name) => {
+        console.log(`  "${name}": x=${pos.x}, y=${pos.y}, index=${pos.themeIndex}`);
+      });
     } catch (error) {
       console.error('Error visualizing themes:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Generate themes and visualize them on the board
+   * @param createTestStickies Optional flag to create test sticky notes
+   */
+  public static async generateAndVisualizeThemes(createTestStickies: boolean = true): Promise<void> {
+    try {
+      console.log(`[DEBUG] Starting generation with test stickies ${createTestStickies ? 'ENABLED' : 'DISABLED'}`);
+      console.log(`[DEBUG] Current testStickyNotesEnabled value: ${this.testStickyNotesEnabled}`);
+      
+      console.log('Generating design themes...');
+      const themes = await this.generateDesignThemes();
+      
+      console.log(`Generated ${themes.length} design themes`);
+      await this.visualizeThemes(themes, createTestStickies);
+      
+      console.log('Design themes visualized successfully');
+      console.log(`[DEBUG] Final testStickyNotesEnabled value: ${this.testStickyNotesEnabled}`);
+      console.log(`[DEBUG] Final theme positions:`, 
+        Array.from(this.themePositions.entries()).map(([name, pos]) => 
+          `${name}: (${pos.x}, ${pos.y})`)
+      );
+    } catch (error) {
+      console.error('Error generating and visualizing themes:', error);
       throw error;
     }
   }
@@ -364,16 +647,22 @@ Example of CORRECT response format:
     
     const rowHeight = frame.height / rows;
     
-    // Calculate position inside the frame
-    const y = frame.y - frame.height/2 + (row * rowHeight) + rowHeight/2;
+    // Calculate position inside the frame - at 25% of the row height
+    const rowTopEdge = frame.y - frame.height/2 + (row * rowHeight);
+    //DON'T CHANGE THIS 0.05 - IT'S THE CORRECT POSITION FOR THE THEME BAR
+    const themeY = rowTopEdge + (rowHeight * 0.05);
+    
+    // Log frame details for debugging
+    console.log(`[DEBUG] Frame details: id=${frame.id}, width=${frame.width}, height=${frame.height}`);
+    console.log(`[DEBUG] Row ${row}: top=${rowTopEdge}, theme Y=${themeY}, height=${rowHeight}`);
     
     // Create a full-width shape (horizontal bar)
     await miro.board.createShape({
       type: 'shape',
       x: frame.x, // Center of the frame
-      y: y,
+      y: themeY,
       width: Math.max(frame.width - 40, 100), // Almost full width, with small margins, min 100px
-      height: Math.min(40, rowHeight * 0.7), // Fixed height or relative to row height if too small
+      height: 40, // Fixed height for consistency
       style: {
         fillColor: this.getHexColor(theme.color),
         borderColor: this.getHexColor('gray'),
@@ -386,7 +675,7 @@ Example of CORRECT response format:
     await miro.board.createText({
       content: theme.name,
       x: frame.x, // Center of the frame
-      y: y,
+      y: themeY,
       width: Math.max(frame.width - 60, 80), // Slightly narrower than shape, min 80px
       style: {
         textAlign: 'center',
@@ -394,76 +683,57 @@ Example of CORRECT response format:
       }
     });
     
+    // Always calculate and store position for future sticky notes, 
+    // regardless of whether we create test notes or not
+    const position = this.calculateStickyNotePosition(frame, index);
+    
+    // Store this position for future reference
+    this.themePositions.set(theme.name, {
+      x: position.x,
+      y: position.y,
+      themeIndex: index
+    });
+    
+    console.log(`[DEBUG] Position marked for theme "${theme.name}": x=${position.x}, y=${position.y}`);
+    
+    // Create placeholder sticky note only if test mode is enabled
+    if (this.testStickyNotesEnabled) {
+      console.log(`[DEBUG] Creating test sticky note for theme: ${theme.name}`);
+      await this.createTestStickyNote(frame, theme, index);
+    } else {
+      console.log(`[DEBUG] Test sticky notes disabled. Position marked but no sticky created for: ${theme.name}`);
+      
+      // Add a small position marker for debugging purposes without creating full sticky notes
+      await miro.board.createShape({
+        type: 'shape',
+        x: position.x,
+        y: position.y,
+        width: 10, // Small dot
+        height: 10,
+        shape: 'circle', // Specify circle shape
+        style: {
+          fillColor: this.getHexColor(theme.color),
+          borderColor: '#000000',
+          borderWidth: 1,
+          borderStyle: 'normal',
+          borderOpacity: 0.5
+        }
+      });
+      
+      // Add a tiny label to indicate this is a position marker
+      await miro.board.createText({
+        content: `${theme.name} notes position`,
+        x: position.x + 80, // Offset to the right of marker
+        y: position.y,
+        width: 120,
+        style: {
+          textAlign: 'left',
+          fontSize: 8
+        }
+      });
+    }
+    
     // Give Miro a moment to process
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-
-  /**
-   * Ensure themes frame exists
-   */
-  private static async ensureThemeFrame(): Promise<Frame> {
-    const frame = await MiroFrameService.findFrameByTitle(this.THEME_FRAME_NAME);
-    if (frame) {
-      // Clear frame contents if it exists
-      const items = await miro.board.get({ type: ['sticky_note', 'text', 'shape'] });
-      const frameItems = items.filter(item => item.parentId === frame.id);
-      
-      // Remove items one by one
-      for (const item of frameItems) {
-        await miro.board.remove(item);
-      }
-      
-      return frame;
-    }
-
-    // Create new frame with default dimensions from config - don't change existing frame size
-    const { defaults } = ConfigurationService.getFrameConfig();
-    return await MiroFrameService.createFrame(
-      this.THEME_FRAME_NAME,
-      defaults.initialX + 1500,
-      defaults.initialY,
-      defaults.width,
-      defaults.height
-    );
-  }
-
-  /**
-   * Get a valid sticky note color from theme color
-   */
-  private static getStickyColorFromTheme(themeColor: string): 'light_yellow' | 'light_green' | 'light_blue' | 'light_pink' | 'violet' {
-    switch (themeColor) {
-      case 'light_yellow': return 'light_yellow';
-      case 'light_green': return 'light_green';
-      case 'light_blue': return 'light_blue';
-      case 'light_pink': return 'light_pink';
-      case 'violet': return 'violet';
-      case 'light_gray': return 'light_yellow'; // fallback for light_gray
-      default: return 'light_yellow'; // default fallback
-    }
-  }
-
-  /**
-   * Get hex color value from theme color name
-   */
-  private static getHexColor(colorName: string): string {
-    return this.COLOR_HEX_MAP[colorName] || '#808080'; // Default to gray if color not found
-  }
-
-  /**
-   * Generate themes and visualize them on the board
-   */
-  public static async generateAndVisualizeThemes(): Promise<void> {
-    try {
-      console.log('Generating design themes...');
-      const themes = await this.generateDesignThemes();
-      
-      console.log(`Generated ${themes.length} design themes`);
-      await this.visualizeThemes(themes);
-      
-      console.log('Design themes visualized successfully');
-    } catch (error) {
-      console.error('Error generating and visualizing themes:', error);
-      throw error;
-    }
+    await new Promise(resolve => setTimeout(resolve, 200)); // Increased delay for better reliability
   }
 } 
