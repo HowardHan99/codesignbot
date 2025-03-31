@@ -114,14 +114,27 @@ For each theme, provide:
 2. A concise description explaining what unifies content in this theme (1-2 sentences)
 3. References to the specific design points that belong in this theme (use exact quotes or clear references)
 
-Format your response as a JSON array:
+EXTREMELY IMPORTANT:
+1. Your response MUST be a valid JSON array of objects.
+2. The JSON array MUST start with '[' and end with ']'.
+3. Each object in the array MUST have these exact keys: "name", "description", "relatedPoints".
+4. The "relatedPoints" value MUST be an array of strings.
+5. Do not include any text outside the JSON array.
+6. Do not include markdown formatting (like \`\`\`json).
+7. Do not include comments in the JSON.
+
+Example of CORRECT response format:
 [
   {
     "name": "Theme name",
     "description": "Theme description",
     "relatedPoints": ["Point 1", "Point 2", "Point 3"]
   },
-  // more themes...
+  {
+    "name": "Another theme",
+    "description": "Another description",
+    "relatedPoints": ["Point A", "Point B"]
+  }
 ]`;
 
       const userPrompt = `Design Proposals:\n${designProposals.map(p => `- ${p}`).join('\n')}\n\nThinking Dialogue:\n${thinkingDialogue.map(d => `- ${d}`).join('\n')}`;
@@ -135,7 +148,8 @@ Format your response as a JSON array:
         body: JSON.stringify({
           systemPrompt,
           userPrompt,
-          useGpt4: true
+          useGpt4: true,
+          expectsJson: true
         }),
       });
 
@@ -145,14 +159,70 @@ Format your response as a JSON array:
 
       const result = await response.json();
 
+      // Add detailed logging
+      console.log('Raw API response received:', typeof result.response);
+      console.log('Response preview:', result.response.substring(0, 100) + '...');
+      
       // Parse the JSON response
       let themes: DesignTheme[] = [];
       try {
-        const parsed = JSON.parse(result.response);
-        themes = parsed.map((theme: any, index: number) => ({
-          ...theme,
-          color: this.THEME_COLORS[index % this.THEME_COLORS.length]
-        }));
+        // Extract JSON content if it's wrapped in markdown code blocks
+        const jsonContent = this.extractJsonFromMarkdown(result.response);
+        console.log('Extracted JSON content:', jsonContent.substring(0, 100) + '...');
+        
+        // Additional validation to ensure it's array-like
+        if (!jsonContent.trim().startsWith('[')) {
+          console.error('Expected JSON array but received something else:', jsonContent.substring(0, 50));
+          // Try to wrap content in array if it might be a single object
+          if (jsonContent.trim().startsWith('{')) {
+            console.log('Attempting to wrap object in array');
+            const parsed = JSON.parse(`[${jsonContent}]`);
+            themes = parsed.map((theme: any, index: number) => ({
+              ...theme,
+              color: this.THEME_COLORS[index % this.THEME_COLORS.length]
+            }));
+          } else {
+            // Try manual fallback parsing
+            console.log('Attempting to parse using manual extraction');
+            // This is a last resort - try to find theme objects
+            const nameMatches = jsonContent.match(/"name"\s*:\s*"([^"]*)"/g);
+            const descMatches = jsonContent.match(/"description"\s*:\s*"([^"]*)"/g);
+            const pointsMatches = jsonContent.match(/"relatedPoints"\s*:\s*\[(.*?)\]/g);
+            
+            if (nameMatches && nameMatches.length && descMatches && pointsMatches) {
+              themes = nameMatches.map((_, index) => {
+                const name = nameMatches[index]?.match(/"name"\s*:\s*"([^"]*)"/)?.[1] || 'Unknown Theme';
+                const description = descMatches[index]?.match(/"description"\s*:\s*"([^"]*)"/)?.[1] || 'No description available';
+                const pointsMatch = pointsMatches[index]?.match(/"relatedPoints"\s*:\s*\[(.*?)\]/)?.[1] || '';
+                const points = pointsMatch.split(',').map(p => p.replace(/"/g, '').trim()).filter(p => p);
+                
+                return {
+                  name,
+                  description,
+                  relatedPoints: points.length ? points : ['No points available'],
+                  color: this.THEME_COLORS[index % this.THEME_COLORS.length]
+                };
+              });
+            }
+          }
+          
+          if (!themes.length) {
+            throw new Error('Could not parse response as a valid array of themes');
+          }
+        } else {
+          // Normal parsing path for array
+          const parsed = JSON.parse(jsonContent);
+          if (!Array.isArray(parsed)) {
+            console.error('Parsed content is not an array:', typeof parsed);
+            throw new Error('Response was parsed but is not an array');
+          }
+          themes = parsed.map((theme: any, index: number) => ({
+            ...theme,
+            color: this.THEME_COLORS[index % this.THEME_COLORS.length]
+          }));
+        }
+        
+        console.log(`Successfully parsed ${themes.length} themes`);
       } catch (error) {
         console.error('Error parsing themes:', error);
         throw new Error('Failed to parse theme analysis');
@@ -163,6 +233,63 @@ Format your response as a JSON array:
       console.error('Error analyzing content for themes:', error);
       throw error;
     }
+  }
+
+  /**
+   * Extract JSON content from a string that might be wrapped in markdown code blocks
+   */
+  private static extractJsonFromMarkdown(text: string): string {
+    // Try to extract content between ```json and ``` markers
+    const jsonCodeBlockRegex = /```(?:json)?\s*\n([\s\S]*?)```/;
+    const match = text.match(jsonCodeBlockRegex);
+    
+    if (match && match[1]) {
+      console.log('Found JSON content in markdown code block');
+      return match[1].trim();
+    }
+    
+    // If no markdown code block found, try to find content that looks like JSON array/object
+    // We look for balanced brackets to find the most likely JSON structure
+    let depth = 0;
+    let start = -1;
+    let end = -1;
+    
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === '[' || text[i] === '{') {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (text[i] === ']' || text[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    
+    if (start !== -1 && end !== -1) {
+      console.log('Found balanced JSON-like structure');
+      return text.substring(start, end + 1);
+    }
+    
+    // Fallback to simpler regex if bracket matching fails
+    const possibleJsonRegex = /(\[[\s\S]*\]|\{[\s\S]*\})/;
+    const jsonMatch = text.match(possibleJsonRegex);
+    
+    if (jsonMatch && jsonMatch[1]) {
+      console.log('Found JSON-like content without markdown wrapper');
+      return jsonMatch[1].trim();
+    }
+    
+    // Check if it's possibly just a single object without array wrapper
+    if (text.includes('"name"') && text.includes('"description"') && text.includes('"relatedPoints"')) {
+      console.log('Found JSON-like properties without proper structure');
+      return text.trim();
+    }
+    
+    // If all else fails, return the original text and let JSON.parse handle any errors
+    console.log('No JSON pattern found, returning original text');
+    return text.trim();
   }
 
   /**
