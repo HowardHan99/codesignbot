@@ -356,6 +356,49 @@ Example of CORRECT response format:
   }
 
   /**
+   * Create visualization for a single theme
+   */
+  private static async createThemeGroup(theme: DesignTheme, frame: Frame, index: number): Promise<void> {
+    const rows = 4; // Four rows, one for each theme
+    const row = index % rows;
+    
+    const rowHeight = frame.height / rows;
+    
+    // Calculate position inside the frame
+    const y = frame.y - frame.height/2 + (row * rowHeight) + rowHeight/2;
+    
+    // Create a full-width shape (horizontal bar)
+    await miro.board.createShape({
+      type: 'shape',
+      x: frame.x, // Center of the frame
+      y: y,
+      width: Math.max(frame.width - 40, 100), // Almost full width, with small margins, min 100px
+      height: Math.min(40, rowHeight * 0.7), // Fixed height or relative to row height if too small
+      style: {
+        fillColor: this.getHexColor(theme.color),
+        borderColor: this.getHexColor('gray'),
+        borderWidth: 1,
+        borderStyle: 'normal'
+      }
+    });
+    
+    // Create theme title centered on the rectangle
+    await miro.board.createText({
+      content: theme.name,
+      x: frame.x, // Center of the frame
+      y: y,
+      width: Math.max(frame.width - 60, 80), // Slightly narrower than shape, min 80px
+      style: {
+        textAlign: 'center',
+        fontSize: 16
+      }
+    });
+    
+    // Give Miro a moment to process
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  /**
    * Ensure themes frame exists
    */
   private static async ensureThemeFrame(): Promise<Frame> {
@@ -373,59 +416,15 @@ Example of CORRECT response format:
       return frame;
     }
 
-    // Create new frame with dimensions that accommodate simple theme layout
+    // Create new frame with default dimensions from config - don't change existing frame size
     const { defaults } = ConfigurationService.getFrameConfig();
     return await MiroFrameService.createFrame(
       this.THEME_FRAME_NAME,
-      defaults.initialX + 1500, // Position to the right of other frames
+      defaults.initialX + 1500,
       defaults.initialY,
-      1000, // Width for the simple layout
-      600  // Height for the simple layout
+      defaults.width,
+      defaults.height
     );
-  }
-
-  /**
-   * Create visualization for a single theme
-   */
-  private static async createThemeGroup(theme: DesignTheme, frame: Frame, index: number): Promise<void> {
-    const columns = 2;
-    const rows = 2;
-    const column = index % columns;
-    const row = Math.floor(index / columns) % rows; // Limit to 4 themes in a 2x2 grid
-    
-    const columnWidth = frame.width / columns;
-    const rowHeight = 200; // Reduced height for simpler layout
-    
-    // Calculate position with more even spacing
-    const x = frame.x - frame.width/2 + (column * columnWidth) + columnWidth/2;
-    const y = frame.y - frame.height/2 + (row * rowHeight) + rowHeight/2 + 100; // Add top margin
-
-    // Create simple colored rectangle with theme name
-    await miro.board.createShape({
-      type: 'shape',
-      x,
-      y,
-      width: columnWidth - 60,
-      height: 40, // Fixed height for just the title
-      style: {
-        fillColor: this.getHexColor(theme.color),
-        borderColor: this.getHexColor('gray'),
-        borderWidth: 1,
-        borderStyle: 'normal'
-      }
-    });
-
-    // Create theme title centered on the rectangle
-    await miro.board.createText({
-      content: theme.name,
-      x,
-      y,
-      width: columnWidth - 80,
-      style: {
-        textAlign: 'center',
-        fontSize: 16
-      }
-    });
   }
 
   /**
