@@ -20,11 +20,24 @@ interface DesignTheme {
  * Service for generating and visualizing design themes from content
  */
 export class DesignThemeService {
-  private static readonly THEME_FRAME_NAME = 'Design-Themes';
+  private static readonly THEME_FRAME_NAME = 'Antagonistic-Response';
   private static readonly THEME_COLORS = [
     'light_green', 'light_blue', 'light_yellow', 
     'light_pink', 'violet', 'light_gray'
   ] as const;
+  
+  // Hex color values for shape borders and backgrounds
+  private static readonly COLOR_HEX_MAP: Record<string, string> = {
+    'light_green': '#C3E5B5',
+    'light_blue': '#BFE3F2',
+    'light_yellow': '#F5F7B5',
+    'light_pink': '#F5C3C2',
+    'violet': '#D5C8E8',
+    'light_gray': '#E5E5E5',
+    'gray': '#808080',
+    'white': '#FFFFFF'
+  };
+
   private static isProcessing: boolean = false;
 
   /**
@@ -297,19 +310,45 @@ Example of CORRECT response format:
    */
   public static async visualizeThemes(themes: DesignTheme[]): Promise<void> {
     try {
+      console.log(`Visualizing ${themes.length} themes in '${this.THEME_FRAME_NAME}' frame...`);
+      
       // Create or find themes frame
       const themeFrame = await this.ensureThemeFrame();
+      console.log(`Frame ready: ${themeFrame.id} (${themeFrame.title})`);
 
-      // Create header for the themes
-      await this.createThemeHeader(themeFrame);
-
-      // Create theme groups
-      for (let i = 0; i < themes.length; i++) {
-        await this.createThemeGroup(themes[i], themeFrame, i);
+      // Handle case where no themes were found
+      if (themes.length === 0) {
+        // Create informative message in the frame
+        await miro.board.createText({
+          content: 'No themes could be identified from the current content.\nPlease ensure there are Design Proposals and Thinking Dialogue notes available.',
+          x: themeFrame.x,
+          y: themeFrame.y,
+          width: themeFrame.width - 100,
+          style: {
+            textAlign: 'center',
+            fontSize: 16
+          }
+        });
+        
+        // Zoom to frame and return
+        await miro.board.viewport.zoomTo(themeFrame);
+        console.log('No themes to visualize');
+        return;
       }
 
+      // Limit to 4 themes if we have more
+      const themesToShow = themes.slice(0, 4);
+
+      // Create theme groups
+      for (let i = 0; i < themesToShow.length; i++) {
+        console.log(`Creating theme ${i+1}/${themesToShow.length}: "${themesToShow[i].name}"`);
+        await this.createThemeGroup(themesToShow[i], themeFrame, i);
+      }
+
+      console.log('All themes created, zooming to frame');
       // Zoom to frame
       await miro.board.viewport.zoomTo(themeFrame);
+      console.log('Visualization complete');
     } catch (error) {
       console.error('Error visualizing themes:', error);
       throw error;
@@ -334,43 +373,15 @@ Example of CORRECT response format:
       return frame;
     }
 
-    // Create new frame
+    // Create new frame with dimensions that accommodate simple theme layout
     const { defaults } = ConfigurationService.getFrameConfig();
     return await MiroFrameService.createFrame(
       this.THEME_FRAME_NAME,
       defaults.initialX + 1500, // Position to the right of other frames
       defaults.initialY,
-      1200,
-      800
+      1000, // Width for the simple layout
+      600  // Height for the simple layout
     );
-  }
-
-  /**
-   * Create header for themes frame
-   */
-  private static async createThemeHeader(frame: Frame): Promise<void> {
-    await miro.board.createText({
-      content: '<strong>Design Themes & Groups</strong>',
-      x: frame.x,
-      y: frame.y - frame.height/2 + 60,
-      width: 400,
-      style: {
-        textAlign: 'center',
-        fontSize: 24
-      }
-    });
-
-    await miro.board.createText({
-      content: 'Automatically generated themes based on design proposals and thinking dialogue',
-      x: frame.x,
-      y: frame.y - frame.height/2 + 100,
-      width: 600,
-      style: {
-        textAlign: 'center',
-        fontSize: 16,
-        color: '#666666'
-      }
-    });
   }
 
   /**
@@ -378,95 +389,43 @@ Example of CORRECT response format:
    */
   private static async createThemeGroup(theme: DesignTheme, frame: Frame, index: number): Promise<void> {
     const columns = 2;
+    const rows = 2;
     const column = index % columns;
-    const row = Math.floor(index / columns);
+    const row = Math.floor(index / columns) % rows; // Limit to 4 themes in a 2x2 grid
     
     const columnWidth = frame.width / columns;
-    const rowHeight = 350;
+    const rowHeight = 200; // Reduced height for simpler layout
     
+    // Calculate position with more even spacing
     const x = frame.x - frame.width/2 + (column * columnWidth) + columnWidth/2;
-    const y = frame.y - frame.height/2 + 200 + (row * rowHeight);
+    const y = frame.y - frame.height/2 + (row * rowHeight) + rowHeight/2 + 100; // Add top margin
 
-    // Create theme card
+    // Create simple colored rectangle with theme name
     await miro.board.createShape({
       type: 'shape',
       x,
       y,
-      width: columnWidth - 40,
-      height: rowHeight - 40,
+      width: columnWidth - 60,
+      height: 40, // Fixed height for just the title
       style: {
-        fillColor: 'white',
-        borderColor: theme.color === 'light_gray' ? 'gray' : theme.color,
-        borderWidth: 3,
+        fillColor: this.getHexColor(theme.color),
+        borderColor: this.getHexColor('gray'),
+        borderWidth: 1,
         borderStyle: 'normal'
       }
     });
 
-    // Create theme title
+    // Create theme title centered on the rectangle
     await miro.board.createText({
-      content: `<strong>${theme.name}</strong>`,
+      content: theme.name,
       x,
-      y: y - rowHeight/2 + 40,
+      y,
       width: columnWidth - 80,
       style: {
         textAlign: 'center',
-        fontSize: 18
+        fontSize: 16
       }
     });
-
-    // Create theme description
-    await miro.board.createText({
-      content: theme.description,
-      x,
-      y: y - rowHeight/2 + 80,
-      width: columnWidth - 80,
-      style: {
-        textAlign: 'center',
-        fontSize: 14,
-        color: '#666666'
-      }
-    });
-
-    // Create related points
-    const pointsPerTheme = 3;
-    for (let i = 0; i < Math.min(theme.relatedPoints.length, pointsPerTheme); i++) {
-      const pointY = y - 50 + (i * 70);
-      
-      // Truncate point text if needed
-      let pointText = theme.relatedPoints[i];
-      if (pointText.length > 150) {
-        pointText = pointText.substring(0, 147) + '...';
-      }
-      
-      // Convert theme.color to a valid sticky note color
-      const stickyColor = this.getStickyColorFromTheme(theme.color);
-      
-      await miro.board.createStickyNote({
-        content: pointText,
-        x,
-        y: pointY,
-        width: columnWidth - 100,
-        style: {
-          fillColor: stickyColor,
-          textAlign: 'center'
-        }
-      });
-    }
-
-    // Add "more" text if there are additional points
-    if (theme.relatedPoints.length > pointsPerTheme) {
-      await miro.board.createText({
-        content: `+${theme.relatedPoints.length - pointsPerTheme} more related points`,
-        x,
-        y: y + rowHeight/2 - 50,
-        width: columnWidth - 80,
-        style: {
-          textAlign: 'center',
-          fontSize: 12,
-          color: '#666666'
-        }
-      });
-    }
   }
 
   /**
@@ -482,6 +441,13 @@ Example of CORRECT response format:
       case 'light_gray': return 'light_yellow'; // fallback for light_gray
       default: return 'light_yellow'; // default fallback
     }
+  }
+
+  /**
+   * Get hex color value from theme color name
+   */
+  private static getHexColor(colorName: string): string {
+    return this.COLOR_HEX_MAP[colorName] || '#808080'; // Default to gray if color not found
   }
 
   /**
