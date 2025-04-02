@@ -299,9 +299,20 @@ Example of CORRECT response format:
         const items = await miro.board.get({ type: ['sticky_note', 'text', 'shape'] });
         const frameItems = items.filter(item => item.parentId === themeFrame.id);
         
-        // Remove items one by one
-        for (const item of frameItems) {
-          await miro.board.remove(item);
+        // Remove items in batches to avoid overwhelming the API
+        const BATCH_SIZE = 20;
+        for (let i = 0; i < frameItems.length; i += BATCH_SIZE) {
+          const batch = frameItems.slice(i, Math.min(i + BATCH_SIZE, frameItems.length));
+          try {
+            // Remove each item individually to avoid type errors
+            for (const item of batch) {
+              await miro.board.remove(item);
+            }
+            // Short delay between batches
+            await new Promise(resolve => setTimeout(resolve, 50));
+          } catch (error) {
+            console.error('Error removing items:', error);
+          }
         }
         
         return themeFrame;
@@ -566,6 +577,41 @@ Example of CORRECT response format:
       const themeFrame = await this.ensureThemeFrame();
       console.log(`Frame ready: ${themeFrame.id} (${themeFrame.title})`);
 
+      // Clear the frame of existing content
+      console.log('Clearing existing content in theme frame...');
+      try {
+        // Get all items in the frame
+        const itemsToDelete = await MiroFrameService.getItemsWithinFrame(
+          themeFrame, 
+          ['text', 'shape', 'sticky_note']
+        );
+        
+        if (itemsToDelete.length > 0) {
+          console.log(`Removing ${itemsToDelete.length} existing items from theme frame`);
+          
+          // Delete items in batches to avoid overwhelming the API
+          const BATCH_SIZE = 20;
+          for (let i = 0; i < itemsToDelete.length; i += BATCH_SIZE) {
+            const batch = itemsToDelete.slice(i, Math.min(i + BATCH_SIZE, itemsToDelete.length));
+            try {
+              // Remove each item individually to avoid type errors
+              for (const item of batch) {
+                await miro.board.remove(item);
+              }
+              // Short delay between batches
+              await new Promise(resolve => setTimeout(resolve, 50));
+            } catch (error) {
+              console.error('Error removing items:', error);
+            }
+          }
+        } else {
+          console.log('No existing items to remove from theme frame');
+        }
+      } catch (error) {
+        console.error('Error clearing theme frame:', error);
+        // Continue despite clearing error
+      }
+
       // Handle case where no themes were found
       if (themes.length === 0) {
         // Create informative message in the frame
@@ -769,10 +815,19 @@ Example of CORRECT response format:
       const rowHeight = themeFrame.height / 4; // 4 rows
       const frameTop = themeFrame.y - themeFrame.height/2;
       
+      // Clean up the theme's frame first - remove any HTML tags from text content
+      textsInFrame.forEach(text => {
+        if (text.content) {
+          text.content = text.content.replace(/<\/?[^>]+(>|$)/g, '');
+        }
+      });
+      
       // Find theme headers (text elements positioned near the top of each row)
-      const themeHeaders = textsInFrame.filter(text => {
-        // Skip position marker labels
-        if (text.content.includes('notes position')) return false;
+      let themeHeaders = textsInFrame.filter(text => {
+        // Skip empty content or position marker labels
+        if (!text.content || text.content.trim() === '' || text.content.includes('notes position')) {
+          return false;
+        }
         
         // Horizontal position check - theme headers are centered
         const isCentered = Math.abs(text.x - themeFrame.x) < 100;
@@ -789,12 +844,46 @@ Example of CORRECT response format:
         return isCentered && isAtHeaderPosition;
       });
       
-      console.log(`Found ${themeHeaders.length} theme headers`);
+      console.log(`Found ${themeHeaders.length} potential theme headers before deduplication`);
+      
+      // Deduplicate theme headers by row - keep only the most recently created text element in each row
+      const uniqueThemesByRow: Record<number, any> = {};
+      
+      for (const header of themeHeaders) {
+        const relativeY = header.y - frameTop;
+        const row = Math.floor(relativeY / rowHeight);
+        
+        // If this row doesn't have a header yet, or this one is more recent (likely newer)
+        // Note: Assuming created objects have newer IDs or createdAt timestamps
+        if (!uniqueThemesByRow[row] || header.id > uniqueThemesByRow[row].id) {
+          uniqueThemesByRow[row] = header;
+        }
+      }
+      
+      // Convert back to array and sort by row
+      themeHeaders = Object.values(uniqueThemesByRow).sort((a, b) => {
+        const rowA = Math.floor((a.y - frameTop) / rowHeight);
+        const rowB = Math.floor((b.y - frameTop) / rowHeight);
+        return rowA - rowB;
+      });
+      
+      console.log(`After deduplication, found ${themeHeaders.length} unique theme headers`);
       
       // Process each theme header to create theme objects
       const themes: DesignTheme[] = [];
+      const usedThemeNames = new Set<string>(); // Track used theme names to avoid duplicates
       
       for (const header of themeHeaders) {
+        // Clean up header content (remove any residual HTML tags)
+        const themeName = header.content.trim();
+        
+        // Skip duplicate theme names and limit to 4 themes
+        if (usedThemeNames.has(themeName) || themes.length >= 4) {
+          continue;
+        }
+        
+        usedThemeNames.add(themeName);
+        
         // Determine which row this header is in
         const relativeY = header.y - frameTop;
         const row = Math.floor(relativeY / rowHeight);
@@ -820,7 +909,7 @@ Example of CORRECT response format:
         }
         
         // Get the stored position for this theme
-        let position = this.themePositions.get(header.content);
+        let position = this.themePositions.get(themeName);
         
         // If position not found in map, calculate it based on the row
         if (!position) {
@@ -831,28 +920,29 @@ Example of CORRECT response format:
             themeIndex: row
           };
           // Store for future use
-          this.themePositions.set(header.content, position);
+          this.themePositions.set(themeName, position);
         }
         
         // Create the theme object
         themes.push({
-          name: header.content,
+          name: themeName,
           description: "", // Empty description
           relatedPoints: [], // Empty related points
           color: themeColor
         });
         
-        console.log(`Found theme "${header.content}" in row ${row} with color ${themeColor}`);
+        console.log(`Found theme "${themeName}" in row ${row} with color ${themeColor}`);
       }
       
-      // Sort themes by row/index for consistency
+      // Sort themes by row/index for consistency and take only the first 4
       themes.sort((a, b) => {
         const posA = this.themePositions.get(a.name);
         const posB = this.themePositions.get(b.name);
         return (posA?.themeIndex || 0) - (posB?.themeIndex || 0);
       });
       
-      return themes;
+      // Limit to exactly 4 themes
+      return themes.slice(0, 4);
     } catch (error) {
       console.error(`Error getting current themes from board:`, error);
       return [];

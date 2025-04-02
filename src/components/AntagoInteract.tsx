@@ -332,6 +332,59 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     });
   }, [responses, simplifiedResponses, onResponsesUpdate, useThemedDisplay]);
 
+  /**
+   * Refresh design themes in the Miro board
+   * This clears existing themes and recreates them
+   */
+  const refreshDesignThemes = useCallback(async () => {
+    try {
+      setLoading(true);
+      
+      // Get the design themes
+      const themes = await DesignThemeService.generateDesignThemes();
+      
+      // Use only the first 2 themes for antagonistic points
+      const themesToUse = themes.slice(0, 2);
+      
+      // Visualize themes with clean slate (false = don't create test stickies)
+      // This will also clear existing items in the theme frame
+      console.log('Refreshing design themes...');
+      await DesignThemeService.visualizeThemes(themesToUse, false);
+      
+      // Update our themed responses
+      if (themedResponses.length > 0) {
+        // Reprocess themed responses with the refreshed themes
+        console.log('Updating themed responses after theme refresh');
+        
+        const updatedThemedResponses = themedResponses.map(themed => {
+          // Find matching refreshed theme by name
+          const matchingTheme = themesToUse.find(t => 
+            t.name.toLowerCase() === themed.name.toLowerCase() ||
+            t.name.toLowerCase().includes(themed.name.toLowerCase()) ||
+            themed.name.toLowerCase().includes(t.name.toLowerCase())
+          );
+          
+          if (matchingTheme) {
+            return {
+              ...themed,
+              name: matchingTheme.name, // Use the refreshed theme name
+              color: matchingTheme.color // Use the refreshed theme color
+            };
+          }
+          return themed;
+        });
+        
+        setThemedResponses(updatedThemedResponses);
+      }
+      
+      setLoading(false);
+    } catch (error) {
+      console.error('Error refreshing design themes:', error);
+      setError('Failed to refresh design themes: ' + (error as Error).message);
+      setLoading(false);
+    }
+  }, [themedResponses]);
+
   // Toggle between themed and standard display
   const handleDisplayToggle = useCallback(() => {
     setUseThemedDisplay(prev => {
@@ -543,6 +596,45 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               onNewPoints={handleNewResponsePoints}
               skipParentCallback={true}
             />
+            
+            {/* Theme Management */}
+            {useThemedDisplay && (
+              <div style={{ 
+                marginBottom: '16px', 
+                backgroundColor: '#f0f7ff', 
+                padding: '12px', 
+                borderRadius: '8px',
+                border: '1px solid #d0e0ff'
+              }}>
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  marginBottom: '8px'
+                }}>
+                  <span style={{ fontWeight: '500' }}>Design Themes</span>
+                  <button
+                    onClick={refreshDesignThemes}
+                    className="button button-secondary"
+                    style={{ padding: '4px 8px', fontSize: '13px' }}
+                    disabled={loading}
+                  >
+                    Refresh Themes
+                  </button>
+                </div>
+                <div style={{ fontSize: '13px', color: '#666' }}>
+                  {themedResponses.length > 0 ? (
+                    <ul style={{ margin: '0', paddingLeft: '20px' }}>
+                      {themedResponses.map(theme => (
+                        <li key={theme.name}>{theme.name} ({theme.points.length} points)</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p style={{ margin: '0' }}>No themed responses available</p>
+                  )}
+                </div>
+              </div>
+            )}
             
             <AnalysisControls
               selectedTone={selectedTone}
