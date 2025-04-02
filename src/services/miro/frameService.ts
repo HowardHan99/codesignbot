@@ -34,6 +34,56 @@ export class MiroFrameService {
   }
 
   /**
+   * Checks if an item is within a frame's bounds
+   * @param item The Miro item to check
+   * @param frame The frame to check against
+   * @returns True if the item is within the frame's bounds
+   */
+  public static isItemInFrame(item: any, frame: Frame): boolean {
+    // Calculate frame boundaries
+    const frameLeft = frame.x - frame.width / 2;
+    const frameRight = frame.x + frame.width / 2;
+    const frameTop = frame.y - frame.height / 2;
+    const frameBottom = frame.y + frame.height / 2;
+    
+    // Check if the item's center is within the frame's bounds
+    return (
+      item.x >= frameLeft &&
+      item.x <= frameRight &&
+      item.y >= frameTop &&
+      item.y <= frameBottom
+    );
+  }
+
+  /**
+   * Gets all items of specified types within a frame using spatial bounds
+   * @param frame The frame to get items for
+   * @param types Array of item types to retrieve (e.g., ['text', 'shape', 'sticky_note'])
+   * @returns Array of items that are within the frame's bounds
+   */
+  public static async getItemsWithinFrame<T = any>(
+    frame: Frame,
+    types: string[] = ['sticky_note', 'text', 'shape', 'connector']
+  ): Promise<T[]> {
+    try {
+      console.log(`Getting items of types [${types.join(', ')}] within frame: ${frame.title} (${frame.id})`);
+      
+      // Get all items of the specified types
+      const allItems = await miro.board.get({ type: types });
+      console.log(`Found ${allItems.length} total items of requested types`);
+      
+      // Filter items that are within the frame's bounds
+      const itemsInFrame = allItems.filter(item => this.isItemInFrame(item, frame));
+      console.log(`Found ${itemsInFrame.length} items within frame ${frame.title}`);
+      
+      return itemsInFrame as T[];
+    } catch (error) {
+      console.error(`Error getting items within frame ${frame.title}:`, error);
+      return [] as T[];
+    }
+  }
+
+  /**
    * Gets sticky notes within a frame's boundaries
    */
   public static async getStickiesInFrame(frame: Frame): Promise<any[]> {

@@ -13,6 +13,7 @@ import { TranscriptProcessingService } from '../services/transcriptProcessingSer
 import { DesignerRolePlayService } from '../services/designerRolePlayService';
 import { DesignThemeService } from '../services/designThemeService';
 import { MiroFrameService } from '../services/miro/frameService';
+import { DesignThemeDisplay } from './DesignThemeDisplay';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   ssr: false 
@@ -36,11 +37,7 @@ interface MainBoardProps {
   onResponsesUpdate: (responses: string[]) => void;
 }
 
-// Constants for timing
-const DEBOUNCE_DELAY = 10000; // Increased to 10 seconds
-const UPDATE_INTERVAL = 30000; // 30 seconds between forced updates
-
-// Add this helper function before the MainBoard component
+// Helper function to build a decision tree from notes and connections
 const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
   console.log('Building decision tree from:', { 
     notes: notes.length, 
@@ -145,7 +142,7 @@ const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
   return trees;
 };
 
-// Add this component before the MainBoard component
+// Component to render a single node in the decision tree
 const DecisionTreeNode: React.FC<{
   node: any;
   level: number;
@@ -195,6 +192,10 @@ const DecisionTreeNode: React.FC<{
   );
 };
 
+// Constants for timing
+const DEBOUNCE_DELAY = 10000; // Increased to 10 seconds
+const UPDATE_INTERVAL = 30000; // 30 seconds between forced updates
+
 export function MainBoard({ 
   showAnalysis, 
   isAnalyzing, 
@@ -217,6 +218,12 @@ export function MainBoard({
   const [toolsVisible, setToolsVisible] = useState(false);
   const [shouldRefreshAnalysis, setShouldRefreshAnalysis] = useState(false);
   const [isGeneratingThemes, setIsGeneratingThemes] = useState<boolean>(false);
+  const [themeRefreshTrigger, setThemeRefreshTrigger] = useState<number>(0);
+
+  // Memoize the decision tree to avoid unnecessary recalculations
+  const decisionTree = useMemo(() => {
+    return buildDecisionTree(designNotes, designConnections);
+  }, [designNotes, designConnections]);
 
   // Function to get the Design-Proposal frame ID
   const getDesignFrameId = async () => {
@@ -300,6 +307,11 @@ export function MainBoard({
       } else {
         miro.board.notifications.showInfo('No changes detected in design decisions.');
       }
+      
+      // Also trigger a refresh of the design themes
+      setThemeRefreshTrigger(prev => prev + 1);
+      console.log('Triggered design theme refresh');
+      
     } catch (error) {
       console.error('Error refreshing design decisions:', error);
       miro.board.notifications.showError('Failed to refresh design decisions. Please try again.');
@@ -307,6 +319,22 @@ export function MainBoard({
       setIsRefreshing(false);
     }
   };
+
+  // Initial data load
+  useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        const { notes, connections } = await getCurrentDesignData();
+        setDesignNotes(notes);
+        setDesignConnections(connections);
+        console.log(`Initial data loaded: ${notes.length} notes, ${connections.length} connections`);
+      } catch (error) {
+        console.error('Error loading initial design data:', error);
+      }
+    };
+    
+    loadInitialData();
+  }, []);
 
   // Handle analysis button click
   const handleAnalysisClick = useCallback(async () => {
@@ -833,7 +861,7 @@ export function MainBoard({
         </div>
       )}
       
-      {/* Decision Tree Section */}
+      {/* Decision List Section */}
       {isExpanded && (
         designNotes.length === 0 ? (
           <div style={{
@@ -865,26 +893,68 @@ export function MainBoard({
               gap: '8px'
             }}>
               <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🔍</span>
-              Design Decision Structure
+              Design Decisions
             </p>
-            <ul style={{ 
-              listStyle: 'none',
-              padding: 0,
-              margin: 0
+            <div style={{ 
+              maxHeight: '300px', 
+              overflowY: 'auto',
+              padding: '0 4px'
             }}>
-              {buildDecisionTree(designNotes, designConnections).map((tree: any, index: number) => (
-                <DecisionTreeNode
-                  key={`tree-${index}`}
-                  node={tree}
-                  level={0}
-                />
-              ))}
-            </ul>
+              {/* Replace the flat list with the hierarchical tree view */}
+              {decisionTree.length > 0 ? (
+                <ul style={{ 
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0
+                }}>
+                  {decisionTree.map((node, index) => (
+                    <DecisionTreeNode 
+                      key={`${node.id || index}`}
+                      node={node}
+                      level={0}
+                    />
+                  ))}
+                </ul>
+              ) : (
+                <div style={{
+                  padding: '10px',
+                  textAlign: 'center',
+                  color: '#666'
+                }}>
+                  Decision notes found, but no connections between them.
+                </div>
+              )}
+            </div>
           </div>
         )
       )}
 
-      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+      {/* Design Themes Section */}
+      {isExpanded && (
+        <div style={{
+          marginTop: '16px',
+          backgroundColor: '#f8f9fa',
+          borderRadius: '6px',
+          padding: '8px',
+          border: '1px solid #e0e0e0'
+        }}>
+          <p style={{ 
+            margin: '0 0 8px 0',
+            fontWeight: 500,
+            color: '#555',
+            fontSize: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🎨</span>
+            Design Themes
+          </p>
+          <DesignThemeDisplay refreshTrigger={themeRefreshTrigger} />
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
         <button 
           className="button button-primary"
           onClick={handleAnalysisClick}

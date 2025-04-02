@@ -736,4 +736,216 @@ Example of CORRECT response format:
     // Give Miro a moment to process
     await new Promise(resolve => setTimeout(resolve, 200)); // Increased delay for better reliability
   }
+
+  /**
+   * Get current themes directly from the Miro board
+   * This reflects any edits a user may have made to the themes after generation
+   * @returns Array of current themes with their positions and colors
+   */
+  public static async getCurrentThemesFromBoard(): Promise<DesignTheme[]> {
+    try {
+      console.log(`Getting current themes from ${this.THEME_FRAME_NAME} frame...`);
+      
+      // Find the theme frame
+      const themeFrame = await MiroFrameService.findFrameByTitle(this.THEME_FRAME_NAME);
+      
+      if (!themeFrame) {
+        console.log(`${this.THEME_FRAME_NAME} frame not found`);
+        return [];
+      }
+      
+      // Get all text elements and shapes within the frame using the generic function
+      const textsInFrame = await MiroFrameService.getItemsWithinFrame(themeFrame, ['text']);
+      const shapesInFrame = await MiroFrameService.getItemsWithinFrame(themeFrame, ['shape']);
+      
+      if (textsInFrame.length === 0) {
+        console.log(`No text elements found in ${this.THEME_FRAME_NAME} frame`);
+        return [];
+      }
+      
+      console.log(`Found ${textsInFrame.length} text elements and ${shapesInFrame.length} shapes in ${this.THEME_FRAME_NAME} frame`);
+      
+      // Define row information
+      const rowHeight = themeFrame.height / 4; // 4 rows
+      const frameTop = themeFrame.y - themeFrame.height/2;
+      
+      // Find theme headers (text elements positioned near the top of each row)
+      const themeHeaders = textsInFrame.filter(text => {
+        // Skip position marker labels
+        if (text.content.includes('notes position')) return false;
+        
+        // Horizontal position check - theme headers are centered
+        const isCentered = Math.abs(text.x - themeFrame.x) < 100;
+        
+        // Calculate which row this text belongs to
+        const relativeY = text.y - frameTop;
+        const row = Math.floor(relativeY / rowHeight);
+        
+        // Theme headers are positioned at around 5% of the row height
+        const rowTopY = frameTop + (row * rowHeight);
+        const expectedHeaderY = rowTopY + (rowHeight * 0.05);
+        const isAtHeaderPosition = Math.abs(text.y - expectedHeaderY) < 20; // Allow small margin
+        
+        return isCentered && isAtHeaderPosition;
+      });
+      
+      console.log(`Found ${themeHeaders.length} theme headers`);
+      
+      // Process each theme header to create theme objects
+      const themes: DesignTheme[] = [];
+      
+      for (const header of themeHeaders) {
+        // Determine which row this header is in
+        const relativeY = header.y - frameTop;
+        const row = Math.floor(relativeY / rowHeight);
+        
+        // Find the associated shape (theme bar)
+        const themeBar = shapesInFrame.find(shape => {
+          const shapeRelativeY = shape.y - frameTop;
+          const shapeRow = Math.floor(shapeRelativeY / rowHeight);
+          return shapeRow === row;
+        });
+        
+        // Extract color from shape
+        let themeColor = 'light_yellow'; // Default color
+        if (themeBar && themeBar.style && themeBar.style.fillColor) {
+          // Convert hex to named color
+          const hexColor = themeBar.style.fillColor;
+          for (const [colorName, colorHex] of Object.entries(this.COLOR_HEX_MAP)) {
+            if (colorHex.toLowerCase() === hexColor.toLowerCase()) {
+              themeColor = colorName as any;
+              break;
+            }
+          }
+        }
+        
+        // Get the stored position for this theme
+        let position = this.themePositions.get(header.content);
+        
+        // If position not found in map, calculate it based on the row
+        if (!position) {
+          const calculatedPosition = this.calculateStickyNotePosition(themeFrame, row);
+          position = {
+            x: calculatedPosition.x,
+            y: calculatedPosition.y,
+            themeIndex: row
+          };
+          // Store for future use
+          this.themePositions.set(header.content, position);
+        }
+        
+        // Create the theme object
+        themes.push({
+          name: header.content,
+          description: "", // Empty description
+          relatedPoints: [], // Empty related points
+          color: themeColor
+        });
+        
+        console.log(`Found theme "${header.content}" in row ${row} with color ${themeColor}`);
+      }
+      
+      // Sort themes by row/index for consistency
+      themes.sort((a, b) => {
+        const posA = this.themePositions.get(a.name);
+        const posB = this.themePositions.get(b.name);
+        return (posA?.themeIndex || 0) - (posB?.themeIndex || 0);
+      });
+      
+      return themes;
+    } catch (error) {
+      console.error(`Error getting current themes from board:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Get the design decision structure for display in the UI
+   * This includes themes and associated design decisions
+   * @param forceRefresh Whether to force a refresh of the themes from the board
+   * @returns Design decision structure for the UI
+   */
+  public static async getDesignDecisionStructure(forceRefresh: boolean = false): Promise<{
+    themes: {
+      name: string;
+      color: string;
+      decisions: string[];
+    }[];
+  }> {
+    try {
+      console.log('Getting design decision structure...');
+      
+      // Get current themes from the Antagonistic-Response frame
+      const themes = await this.getCurrentThemesFromBoard();
+      console.log(`Found ${themes.length} themes for the design decision structure`);
+      
+      // Find decisions in the Design-Proposal frame
+      // Get sticky notes from the Design-Proposal frame
+      const proposals = await this.getDesignProposals();
+      console.log(`Found ${proposals.length} design proposals for decisions`);
+      
+      // Simple theme-based decision categorization
+      // Each proposal will be categorized into the most relevant theme
+      const themeDecisions: Record<string, string[]> = {};
+      
+      // Initialize empty decision arrays for each theme
+      themes.forEach(theme => {
+        themeDecisions[theme.name] = [];
+      });
+      
+      // Categorize each proposal into a theme
+      // For now, we'll just use a simple keyword matching approach
+      for (const proposal of proposals) {
+        if (!proposal.trim()) continue;
+        
+        let bestMatch = '';
+        let highestScore = 0;
+        
+        // Find the best matching theme
+        for (const theme of themes) {
+          // Calculate a simple matching score based on word overlap
+          const themeWords = theme.name.toLowerCase().split(/\s+/);
+          const proposalLower = proposal.toLowerCase();
+          
+          let score = 0;
+          for (const word of themeWords) {
+            if (word.length > 2 && proposalLower.includes(word)) {
+              score += 1;
+            }
+          }
+          
+          if (score > highestScore) {
+            highestScore = score;
+            bestMatch = theme.name;
+          }
+        }
+        
+        // If no good match found, assign to the first theme or skip
+        if (!bestMatch && themes.length > 0) {
+          bestMatch = themes[0].name;
+        }
+        
+        // Add the proposal to the matched theme's decisions
+        if (bestMatch) {
+          themeDecisions[bestMatch].push(proposal);
+        }
+      }
+      
+      // Format the themes and decisions for the UI
+      const result = {
+        themes: themes.map(theme => ({
+          name: theme.name,
+          color: theme.color,
+          decisions: themeDecisions[theme.name] || []
+        }))
+      };
+      
+      return result;
+    } catch (error) {
+      console.error('Error getting design decision structure:', error);
+      return { themes: [] };
+    }
+  }
+ 
+
 } 
