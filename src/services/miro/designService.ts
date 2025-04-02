@@ -103,11 +103,12 @@ export class MiroDesignService {
   }
 
   /**
-   * Cleans the Antagonistic-Response frame by removing all sticky notes within it
+   * Previously cleaned the Antagonistic-Response frame by removing sticky notes
+   * Now disabled to prevent accidental deletion of user content
    */
   public static async cleanAnalysisBoard(): Promise<void> {
     try {
-      // Get frames first
+      // Get frames first to check if they exist
       const frames = await miro.board.get({ type: 'frame' });
       const responseFrame = frames.find(frame => frame.title === 'Antagonistic-Response');
 
@@ -116,19 +117,17 @@ export class MiroDesignService {
         return;
       }
 
-      // Get all sticky notes and filter by parentId
+      // Get all sticky notes and filter by parentId to count them
       const allStickies = await miro.board.get({ type: 'sticky_note' });
       const frameStickies = allStickies.filter(sticky => sticky.parentId === responseFrame.id);
       
-      // Remove sticky notes one by one
-      for (const sticky of frameStickies) {
-        await miro.board.remove(sticky);
-      }
-
-      console.log(`Removed ${frameStickies.length} sticky notes from Antagonistic-Response frame`);
+      // DISABLED: Removal of sticky notes to prevent accidental deletion
+      // For backward compatibility, we'll just log what would have been deleted
+      console.log(`SAFETY: Skipped removal of ${frameStickies.length} sticky notes from Antagonistic-Response frame`);
+      console.log(`Sticky note deletion has been disabled to preserve user content`);
       
     } catch (error) {
-      console.error('Error cleaning analysis:', error);
+      console.error('Error in cleanAnalysisBoard:', error);
     }
   }
 

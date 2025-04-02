@@ -170,10 +170,11 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       // Use only the first 2 themes for antagonistic points
       const themesToUse = themes.slice(0, 2);
       
-      // Ensure themes are visualized in Miro to calculate and store positions
+      // Ensure themes are calculated in Miro to store positions
       // This is important for placing sticky notes correctly
-      console.log('Visualizing themes to calculate positions...');
-      await DesignThemeService.visualizeThemes(themesToUse, false); // false = don't create test stickies
+      // No existing content will be removed
+      console.log('Calculating theme positions for sticky note placement...');
+      await DesignThemeService.visualizeThemes(themesToUse, false);
       
       // Generate theme-specific antagonistic points in parallel
       const openaiStartTime = performance.now();
@@ -333,10 +334,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   }, [responses, simplifiedResponses, onResponsesUpdate, useThemedDisplay]);
 
   /**
-   * Refresh design themes in the Miro board
-   * This clears existing themes and recreates them
+   * Add design themes to the Miro board
+   * This adds themes without removing any existing content
    */
-  const refreshDesignThemes = useCallback(async () => {
+  const addDesignThemes = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -346,18 +347,18 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       // Use only the first 2 themes for antagonistic points
       const themesToUse = themes.slice(0, 2);
       
-      // Visualize themes with clean slate (false = don't create test stickies)
-      // This will also clear existing items in the theme frame
-      console.log('Refreshing design themes...');
+      // Visualize themes (false = don't create test stickies)
+      // This adds theme elements without removing anything
+      console.log('Adding design themes without removing any existing content...');
       await DesignThemeService.visualizeThemes(themesToUse, false);
       
       // Update our themed responses
       if (themedResponses.length > 0) {
-        // Reprocess themed responses with the refreshed themes
-        console.log('Updating themed responses after theme refresh');
+        // Reprocess themed responses with the new themes
+        console.log('Updating themed responses after adding themes');
         
         const updatedThemedResponses = themedResponses.map(themed => {
-          // Find matching refreshed theme by name
+          // Find matching new theme by name
           const matchingTheme = themesToUse.find(t => 
             t.name.toLowerCase() === themed.name.toLowerCase() ||
             t.name.toLowerCase().includes(themed.name.toLowerCase()) ||
@@ -367,8 +368,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           if (matchingTheme) {
             return {
               ...themed,
-              name: matchingTheme.name, // Use the refreshed theme name
-              color: matchingTheme.color // Use the refreshed theme color
+              name: matchingTheme.name, // Use the new theme name
+              color: matchingTheme.color // Use the new theme color
             };
           }
           return themed;
@@ -379,8 +380,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       setLoading(false);
     } catch (error) {
-      console.error('Error refreshing design themes:', error);
-      setError('Failed to refresh design themes: ' + (error as Error).message);
+      console.error('Error adding design themes:', error);
+      setError('Failed to add design themes: ' + (error as Error).message);
       setLoading(false);
     }
   }, [themedResponses]);
@@ -614,12 +615,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
                 }}>
                   <span style={{ fontWeight: '500' }}>Design Themes</span>
                   <button
-                    onClick={refreshDesignThemes}
+                    onClick={addDesignThemes}
                     className="button button-secondary"
                     style={{ padding: '4px 8px', fontSize: '13px' }}
                     disabled={loading}
+                    title="Calculates theme positions without affecting any existing content"
                   >
-                    Refresh Themes
+                    Calculate Positions
                   </button>
                 </div>
                 <div style={{ fontSize: '13px', color: '#666' }}>

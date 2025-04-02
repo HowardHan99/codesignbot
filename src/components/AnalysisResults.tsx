@@ -172,7 +172,8 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
           themedResponses={themedResponses}
           useThemedDisplay={useThemedDisplay}
         />
-        {/* Button to clean existing analysis from board */}
+        {/* Clean Analysis functionality is maintained in code but button is hidden from UI */}
+        {/* 
         <button
           type="button"
           onClick={onCleanAnalysis}
@@ -181,6 +182,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
         >
           Clean Analysis Board
         </button>
+        */}
       </div>
     </>
   );

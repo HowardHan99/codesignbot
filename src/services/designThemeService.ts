@@ -294,27 +294,7 @@ Example of CORRECT response format:
       
       if (themeFrame) {
         console.log(`Found existing theme frame: ${themeFrame.id}`);
-        
-        // Clear frame contents if it exists
-        const items = await miro.board.get({ type: ['sticky_note', 'text', 'shape'] });
-        const frameItems = items.filter(item => item.parentId === themeFrame.id);
-        
-        // Remove items in batches to avoid overwhelming the API
-        const BATCH_SIZE = 20;
-        for (let i = 0; i < frameItems.length; i += BATCH_SIZE) {
-          const batch = frameItems.slice(i, Math.min(i + BATCH_SIZE, frameItems.length));
-          try {
-            // Remove each item individually to avoid type errors
-            for (const item of batch) {
-              await miro.board.remove(item);
-            }
-            // Short delay between batches
-            await new Promise(resolve => setTimeout(resolve, 50));
-          } catch (error) {
-            console.error('Error removing items:', error);
-          }
-        }
-        
+        console.log(`Using existing theme frame without modifying its contents`);
         return themeFrame;
       }
       
@@ -348,28 +328,11 @@ Example of CORRECT response format:
       
       console.log(`Created new theme frame: ${newFrame.id}`);
       
-      // Important technique: Create then delete then create a sticky note inside the frame
-      // This ensures the frame is properly registered in Miro's system
-      const tempSticky = await miro.board.createStickyNote({
-        content: "Temporary note - will be removed",
-        x: frameX,
-        y: frameY,
-        width: 200,
-        style: {
-          fillColor: 'light_yellow'
-        }
-      });
-      console.log(`Created temporary sticky note: ${tempSticky.id}`);
-      
-      // Wait a moment for Miro to process the frame and sticky note
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Remove the temporary sticky note
-      await miro.board.remove(tempSticky);
-      console.log(`Removed temporary sticky note`);
-      
       // Wait a moment for Miro to process the frame
       await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Important: We're NOT creating and removing any temporary sticky notes
+      // to avoid any accidental deletion of user content
       
       return newFrame;
     } catch (error) {
@@ -559,16 +522,17 @@ Example of CORRECT response format:
   /**
    * Visualize themes on the Miro board
    * @param themes Array of themes to visualize
-   * @param createTestStickies Optional flag to create test sticky notes
+   * @param createTestStickies Ignored parameter (for backward compatibility)
    */
   public static async visualizeThemes(themes: DesignTheme[], createTestStickies: boolean = true): Promise<void> {
     // Reset theme positions map
     this.themePositions.clear();
     
-    // Set test sticky notes flag - default to true for debugging
-    this.testStickyNotesEnabled = createTestStickies;
+    // Always set test sticky notes to false regardless of parameter
+    // This ensures no test sticky notes are ever created
+    this.testStickyNotesEnabled = false;
     
-    console.log(`[DEBUG] Test sticky notes ${this.testStickyNotesEnabled ? 'ENABLED' : 'DISABLED'}`);
+    console.log(`[DEBUG] Test sticky notes DISABLED (parameter ignored for safety)`);
     
     try {
       console.log(`Visualizing ${themes.length} themes in '${this.THEME_FRAME_NAME}' frame...`);
@@ -577,40 +541,8 @@ Example of CORRECT response format:
       const themeFrame = await this.ensureThemeFrame();
       console.log(`Frame ready: ${themeFrame.id} (${themeFrame.title})`);
 
-      // Clear the frame of existing content
-      console.log('Clearing existing content in theme frame...');
-      try {
-        // Get all items in the frame
-        const itemsToDelete = await MiroFrameService.getItemsWithinFrame(
-          themeFrame, 
-          ['text', 'shape', 'sticky_note']
-        );
-        
-        if (itemsToDelete.length > 0) {
-          console.log(`Removing ${itemsToDelete.length} existing items from theme frame`);
-          
-          // Delete items in batches to avoid overwhelming the API
-          const BATCH_SIZE = 20;
-          for (let i = 0; i < itemsToDelete.length; i += BATCH_SIZE) {
-            const batch = itemsToDelete.slice(i, Math.min(i + BATCH_SIZE, itemsToDelete.length));
-            try {
-              // Remove each item individually to avoid type errors
-              for (const item of batch) {
-                await miro.board.remove(item);
-              }
-              // Short delay between batches
-              await new Promise(resolve => setTimeout(resolve, 50));
-            } catch (error) {
-              console.error('Error removing items:', error);
-            }
-          }
-        } else {
-          console.log('No existing items to remove from theme frame');
-        }
-      } catch (error) {
-        console.error('Error clearing theme frame:', error);
-        // Continue despite clearing error
-      }
+      // Skip clearing process - we're not removing any items
+      console.log('Preserving all existing content in theme frame (no items will be removed)');
 
       // Handle case where no themes were found
       if (themes.length === 0) {
@@ -659,22 +591,20 @@ Example of CORRECT response format:
   
   /**
    * Generate themes and visualize them on the board
-   * @param createTestStickies Optional flag to create test sticky notes
+   * @param createTestStickies Ignored parameter (for backward compatibility)
    */
   public static async generateAndVisualizeThemes(createTestStickies: boolean = true): Promise<void> {
     try {
-      console.log(`[DEBUG] Starting generation with test stickies ${createTestStickies ? 'ENABLED' : 'DISABLED'}`);
-      console.log(`[DEBUG] Current testStickyNotesEnabled value: ${this.testStickyNotesEnabled}`);
+      console.log('[DEBUG] Starting theme generation (test stickies always disabled)');
       
       console.log('Generating design themes...');
       const themes = await this.generateDesignThemes();
       
       console.log(`Generated ${themes.length} design themes`);
-      await this.visualizeThemes(themes, createTestStickies);
+      await this.visualizeThemes(themes, false); // Always pass false for safety
       
       console.log('Design themes visualized successfully');
-      console.log(`[DEBUG] Final testStickyNotesEnabled value: ${this.testStickyNotesEnabled}`);
-      console.log(`[DEBUG] Final theme positions:`, 
+      console.log('[DEBUG] Theme positions:', 
         Array.from(this.themePositions.entries()).map(([name, pos]) => 
           `${name}: (${pos.x}, ${pos.y})`)
       );
@@ -729,8 +659,8 @@ Example of CORRECT response format:
       }
     });
     
-    // Always calculate and store position for future sticky notes, 
-    // regardless of whether we create test notes or not
+    // Calculate and store position for future sticky notes, 
+    // but don't create any test sticky notes or markers
     const position = this.calculateStickyNotePosition(frame, index);
     
     // Store this position for future reference
@@ -742,45 +672,12 @@ Example of CORRECT response format:
     
     console.log(`[DEBUG] Position marked for theme "${theme.name}": x=${position.x}, y=${position.y}`);
     
-    // Create placeholder sticky note only if test mode is enabled
-    if (this.testStickyNotesEnabled) {
-      console.log(`[DEBUG] Creating test sticky note for theme: ${theme.name}`);
-      await this.createTestStickyNote(frame, theme, index);
-    } else {
-      console.log(`[DEBUG] Test sticky notes disabled. Position marked but no sticky created for: ${theme.name}`);
-      
-      // Add a small position marker for debugging purposes without creating full sticky notes
-      await miro.board.createShape({
-        type: 'shape',
-        x: position.x,
-        y: position.y,
-        width: 10, // Small dot
-        height: 10,
-        shape: 'circle', // Specify circle shape
-        style: {
-          fillColor: this.getHexColor(theme.color),
-          borderColor: '#000000',
-          borderWidth: 1,
-          borderStyle: 'normal',
-          borderOpacity: 0.5
-        }
-      });
-      
-      // Add a tiny label to indicate this is a position marker
-      await miro.board.createText({
-        content: `${theme.name} notes position`,
-        x: position.x + 80, // Offset to the right of marker
-        y: position.y,
-        width: 120,
-        style: {
-          textAlign: 'left',
-          fontSize: 8
-        }
-      });
-    }
+    // We never create test sticky notes or position markers now
+    // Test sticky notes and position markers have been disabled to prevent any
+    // accidental deletion of user content
     
     // Give Miro a moment to process
-    await new Promise(resolve => setTimeout(resolve, 200)); // Increased delay for better reliability
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
 
   /**
