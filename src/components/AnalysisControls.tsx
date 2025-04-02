@@ -20,7 +20,7 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
   selectedTone,
   isSimplifiedMode,
   synthesizedPointsCount,
-  useThemedDisplay = false,
+  useThemedDisplay = true,
   onToneChange,
   onModeToggle,
   onShowSynthesizedPoints,
