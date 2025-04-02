@@ -15,6 +15,16 @@ import { EmbeddingService } from '../services/embeddingService';
 import { VoiceRecorder } from './VoiceRecorder';
 import { FileUploadTest } from './FileUploadTest';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
+import { DesignThemeService } from '../services/designThemeService';
+
+/**
+ * Interface for themed response
+ */
+interface ThemedResponse {
+  name: string;
+  color: string;
+  points: string[];
+}
 
 interface AntagoInteractProps {
   stickyNotes: string[];          // Array of sticky note contents from the design decisions
@@ -40,6 +50,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 }) => {
   // State management for responses and UI
   const [responses, setResponses] = useState<string[]>([]);
+  const [themedResponses, setThemedResponses] = useState<ThemedResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSimplifiedMode, setIsSimplifiedMode] = useState(() => {
@@ -58,6 +69,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [isChangingTone, setIsChangingTone] = useState(false);
   const [storedFullResponses, setStoredFullResponses] = useState<StoredResponses>({ normal: '' });
   const [storedSimplifiedResponses, setStoredSimplifiedResponses] = useState<StoredResponses>({ normal: '' });
+  const [useThemedDisplay, setUseThemedDisplay] = useState<boolean>(true);
   
   // Singleton instance for managing response storage
   const responseStore = ResponseStore.getInstance();
@@ -152,15 +164,38 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       const formatEndTime = performance.now();
       
-      // Generate initial response
+      // Get the design themes for generating theme-specific analyses
+      const themes = await DesignThemeService.generateDesignThemes();
+      
+      // Use only the first 2 themes for antagonistic points
+      const themesToUse = themes.slice(0, 2);
+      
+      // Ensure themes are visualized in Miro to calculate and store positions
+      // This is important for placing sticky notes correctly
+      console.log('Visualizing themes to calculate positions...');
+      await DesignThemeService.visualizeThemes(themesToUse, false); // false = don't create test stickies
+      
+      // Generate theme-specific antagonistic points in parallel
       const openaiStartTime = performance.now();
       
-      const response = await OpenAIService.generateAnalysis(
-        messageWithContext, 
-        designChallenge,
-        synthesizedPoints,
-        consensusPoints
-      );
+      // Run both the theme-specific analyses and the original response generation in parallel
+      const [themedResponsesData, response] = await Promise.all([
+        // Generate all theme analyses in parallel
+        OpenAIService.generateAllThemeAnalyses(
+          messageWithContext,
+          themesToUse,
+          designChallenge,
+          consensusPoints
+        ),
+        
+        // Also generate original response for compatibility and fallback
+        OpenAIService.generateAnalysis(
+          messageWithContext, 
+          designChallenge,
+          synthesizedPoints,
+          consensusPoints
+        )
+      ]);
       
       const openaiEndTime = performance.now();
       
@@ -168,11 +203,21 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       const uiStartTime = performance.now();
       
       setResponses([response]);
+      setThemedResponses(themedResponsesData);
       setStoredFullResponses({ normal: response }); // Store normal tone
       
-      // Update parent with appropriate responses immediately
-      const splitResponses = splitResponse(response);
-      onResponsesUpdate?.(splitResponses);
+      // Create a combined list of all points for backward compatibility
+      const allPoints = themedResponsesData.flatMap(theme => theme.points);
+      
+      // Update parent with appropriate responses
+      if (useThemedDisplay) {
+        // If using themed display, we still need to pass array of strings for compatibility
+        onResponsesUpdate?.(allPoints);
+      } else {
+        // Otherwise, use the standard response format
+        const splitResponses = splitResponse(response);
+        onResponsesUpdate?.(splitResponses);
+      }
       
       const uiEndTime = performance.now();
       
@@ -192,7 +237,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             designChallenge: designChallenge,
             decisions: designStickyNotes.map(note => note.content || ''),
             analysis: {
-              full: splitResponse(response),
+              full: useThemedDisplay ? allPoints : splitResponse(response),
               simplified: []
             },
             tone: selectedTone || 'normal',
@@ -217,7 +262,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             setSimplifiedResponses([simplified]);
             setStoredSimplifiedResponses({ normal: simplified });
             
-            if (isSimplifiedMode) {
+            if (isSimplifiedMode && !useThemedDisplay) {
               onResponsesUpdate?.(splitResponse(simplified));
             }
             setIsChangingTone(false);
@@ -241,7 +286,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setLoading(false);
       processingRef.current = false;
     }
-  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints, stickyNotes]);
+  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints, useThemedDisplay]);
+
+  // Process notes when they change or when shouldRefresh is true
+  useEffect(() => {
+    if (stickyNotes.length > 0) {
+      processNotes(stickyNotes, shouldRefresh || false)
+        .catch(console.error);
+    }
+  }, [stickyNotes, shouldRefresh, processNotes]);
 
   // Handle mode toggle
   const handleModeToggle = useCallback(() => {
@@ -257,7 +310,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             const simplified = await OpenAIService.simplifyAnalysis(responses[0]);
             setSimplifiedResponses([simplified]);
             setStoredSimplifiedResponses({ normal: simplified });
-            onResponsesUpdate?.(splitResponse(simplified));
+            
+            if (!useThemedDisplay) {
+              onResponsesUpdate?.(splitResponse(simplified));
+            }
             setIsChangingTone(false);
           } catch (error) {
             console.error('Error generating simplified response:', error);
@@ -266,7 +322,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             setIsChangingTone(false);
           }
         })();
-      } else if (responses.length > 0) {
+      } else if (responses.length > 0 && !useThemedDisplay) {
         // If we already have the right responses, just update
         const currentResponses = newMode ? simplifiedResponses : responses;
         onResponsesUpdate?.(splitResponse(currentResponses[0]));
@@ -274,7 +330,29 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       return newMode;
     });
-  }, [responses, simplifiedResponses, onResponsesUpdate]);
+  }, [responses, simplifiedResponses, onResponsesUpdate, useThemedDisplay]);
+
+  // Toggle between themed and standard display
+  const handleDisplayToggle = useCallback(() => {
+    setUseThemedDisplay(prev => {
+      const newDisplayMode = !prev;
+      
+      // Update parent with appropriate responses based on new display mode
+      if (newDisplayMode && themedResponses.length > 0) {
+        // If switching to themed display, pass all themed points
+        const allPoints = themedResponses.flatMap(theme => theme.points);
+        onResponsesUpdate?.(allPoints);
+      } else if (!newDisplayMode && responses.length > 0) {
+        // If switching to standard display, use the normal or simplified responses
+        const currentResponses = isSimplifiedMode ? simplifiedResponses : responses;
+        if (currentResponses.length > 0) {
+          onResponsesUpdate?.(splitResponse(currentResponses[0]));
+        }
+      }
+      
+      return newDisplayMode;
+    });
+  }, [themedResponses, responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate]);
 
   /**
    * Handle tone changes and update responses accordingly
@@ -292,7 +370,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         const normalSimplified = storedSimplifiedResponses.normal;
         setResponses([normalFull]);
         setSimplifiedResponses([normalSimplified]);
-        onResponsesUpdate?.(splitResponse(isSimplifiedMode ? normalSimplified : normalFull));
+        
+        if (!useThemedDisplay) {
+          onResponsesUpdate?.(splitResponse(isSimplifiedMode ? normalSimplified : normalFull));
+        }
         return;
       }
 
@@ -305,7 +386,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         } else {
           setResponses([storedResponse]);
         }
-        onResponsesUpdate?.(splitResponse(storedResponse));
+        
+        if (!useThemedDisplay) {
+          onResponsesUpdate?.(splitResponse(storedResponse));
+        }
         return;
       }
 
@@ -322,21 +406,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         setResponses([adjustedResponse]);
       }
 
-      onResponsesUpdate?.(splitResponse(adjustedResponse));
+      if (!useThemedDisplay) {
+        onResponsesUpdate?.(splitResponse(adjustedResponse));
+      }
     } catch (error) {
       console.error('Error updating tone:', error);
     } finally {
       setIsChangingTone(false);
     }
-  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, storedFullResponses, storedSimplifiedResponses]);
-
-  // Process notes when they change or when shouldRefresh is true
-  useEffect(() => {
-    if (stickyNotes.length > 0) {
-      processNotes(stickyNotes, shouldRefresh || false)
-        .catch(console.error);
-    }
-  }, [stickyNotes, shouldRefresh, processNotes]);
+  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, storedFullResponses, storedSimplifiedResponses, useThemedDisplay]);
 
   // Store responses in local storage
   useEffect(() => {
@@ -351,10 +429,18 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   }, [simplifiedResponses]);
 
+  // Store themed responses in local storage
+  useEffect(() => {
+    if (themedResponses.length > 0) {
+      responseStore.storeResponse('themed-responses', 'themed', JSON.stringify(themedResponses));
+    }
+  }, [themedResponses]);
+
   // Restore responses from storage on mount
   useEffect(() => {
     const storedFull = responseStore.getStoredResponse('full-response');
     const storedSimplified = responseStore.getStoredResponse('simplified-response');
+    const storedThemed = responseStore.getStoredResponse('themed-responses');
     
     if (storedFull?.response) {
       setResponses([storedFull.response]);
@@ -364,9 +450,29 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setSimplifiedResponses([storedSimplified.response]);
       setStoredSimplifiedResponses({ normal: storedSimplified.response });
     }
+    if (storedThemed?.response) {
+      try {
+        const themed = JSON.parse(storedThemed.response);
+        if (Array.isArray(themed)) {
+          setThemedResponses(themed);
+        }
+      } catch (e) {
+        console.error('Error parsing stored themed responses', e);
+      }
+    }
 
     // Update parent with the correct response type based on saved mode
-    if (isSimplifiedMode && storedSimplified?.response) {
+    if (storedThemed?.response && useThemedDisplay) {
+      try {
+        const themed = JSON.parse(storedThemed.response);
+        if (Array.isArray(themed)) {
+          const allPoints = themed.flatMap(theme => theme.points);
+          onResponsesUpdate?.(allPoints);
+        }
+      } catch (e) {
+        console.error('Error parsing stored themed responses for parent update', e);
+      }
+    } else if (isSimplifiedMode && storedSimplified?.response) {
       onResponsesUpdate?.(splitResponse(storedSimplified.response));
     } else if (!isSimplifiedMode && storedFull?.response) {
       onResponsesUpdate?.(splitResponse(storedFull.response));
@@ -375,11 +481,16 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
   // Add effect to update responses when mode changes
   useEffect(() => {
-    const currentResponses = isSimplifiedMode ? simplifiedResponses : responses;
-    if (currentResponses.length > 0) {
-      onResponsesUpdate?.(splitResponse(currentResponses[0]));
+    if (useThemedDisplay && themedResponses.length > 0) {
+      const allPoints = themedResponses.flatMap(theme => theme.points);
+      onResponsesUpdate?.(allPoints);
+    } else {
+      const currentResponses = isSimplifiedMode ? simplifiedResponses : responses;
+      if (currentResponses.length > 0) {
+        onResponsesUpdate?.(splitResponse(currentResponses[0]));
+      }
     }
-  }, [isSimplifiedMode, responses, simplifiedResponses, onResponsesUpdate]);
+  }, [isSimplifiedMode, useThemedDisplay, responses, simplifiedResponses, themedResponses, onResponsesUpdate]);
 
   // Reset stored responses when analysis is refreshed
   useEffect(() => {
@@ -440,6 +551,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               onToneChange={handleToneChange}
               onModeToggle={handleModeToggle}
               onShowSynthesizedPoints={() => MiroService.sendSynthesizedPointsToBoard(synthesizedPoints)}
+              useThemedDisplay={useThemedDisplay}
+              onDisplayToggle={handleDisplayToggle}
             />
 
             <AnalysisResults
@@ -448,6 +561,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               selectedTone={selectedTone}
               onCleanAnalysis={() => MiroService.cleanAnalysisBoard()}
               isChangingTone={isChangingTone}
+              themedResponses={themedResponses}
+              useThemedDisplay={useThemedDisplay}
             />
           </div>
         </>

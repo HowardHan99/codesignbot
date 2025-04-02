@@ -5,9 +5,11 @@ interface AnalysisControlsProps {
   selectedTone: string;              // Currently selected tone for the analysis
   isSimplifiedMode: boolean;         // Whether simplified mode is active
   synthesizedPointsCount: number;    // Number of synthesized points available
+  useThemedDisplay?: boolean;        // Whether to use themed display (optional for backward compatibility)
   onToneChange: (tone: string) => void;          // Handler for tone changes
   onModeToggle: () => void;                      // Handler for mode toggle
   onShowSynthesizedPoints: () => void;           // Handler for showing synthesized points
+  onDisplayToggle?: () => void;                  // Handler for display mode toggle (optional for backward compatibility)
 }
 
 /**
@@ -18,9 +20,11 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
   selectedTone,
   isSimplifiedMode,
   synthesizedPointsCount,
+  useThemedDisplay = false,
   onToneChange,
   onModeToggle,
   onShowSynthesizedPoints,
+  onDisplayToggle = () => {},
 }) => {
   return (
     <div style={{ 
@@ -48,6 +52,52 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
       >
         Show All Suggested Points ({synthesizedPointsCount})
       </button>
+
+      {/* Display Mode Toggle */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '8px 12px',
+        backgroundColor: useThemedDisplay ? '#e6f7ff' : '#f9f9f9',
+        borderRadius: '4px',
+        border: '1px solid #e0e0e0'
+      }}>
+        <div style={{ fontSize: '14px', fontWeight: '500' }}>
+          Display Mode
+        </div>
+        <div style={{ 
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <label className="toggle" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
+            <span style={{ 
+              marginRight: '6px', 
+              fontSize: '14px', 
+              color: useThemedDisplay ? '#999' : '#333',
+              transition: 'color 0.2s'
+            }}>
+              Standard
+            </span>
+            <input 
+              type="checkbox" 
+              tabIndex={0}
+              checked={useThemedDisplay}
+              onChange={onDisplayToggle}
+              style={{ position: 'relative', margin: '0 8px' }}
+            />
+            <span style={{ 
+              marginLeft: '0px', 
+              fontSize: '14px', 
+              color: useThemedDisplay ? '#333' : '#999',
+              transition: 'color 0.2s'
+            }}>
+              Themed
+            </span>
+          </label>
+        </div>
+      </div>
 
       {/* Controls Container */}
       <div style={{ 
@@ -89,8 +139,14 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
               tabIndex={0}
               checked={isSimplifiedMode}
               onChange={onModeToggle}
+              disabled={useThemedDisplay}
             />
-            <span style={{ marginLeft: '0px', fontSize: '14px', whiteSpace: 'nowrap' }}>
+            <span style={{ 
+              marginLeft: '0px', 
+              fontSize: '14px', 
+              whiteSpace: 'nowrap',
+              opacity: useThemedDisplay ? 0.5 : 1
+            }}>
               {isSimplifiedMode ? 'Simple' : 'Full'}
             </span>
           </label>
@@ -98,7 +154,7 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
       </div>
 
       {/* Simplified Mode Note */}
-      {isSimplifiedMode && (
+      {isSimplifiedMode && !useThemedDisplay && (
         <div style={{ 
           fontSize: '13px', 
           color: '#666',
@@ -108,6 +164,20 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
           paddingTop: '12px'
         }}>
           💡 Currently showing simplified points. Toggle the Message switch above to see the full points.
+        </div>
+      )}
+
+      {/* Themed Display Note */}
+      {useThemedDisplay && (
+        <div style={{ 
+          fontSize: '13px', 
+          color: '#666',
+          fontStyle: 'italic',
+          borderTop: '1px solid rgba(0,0,0,0.1)',
+          marginTop: '4px',
+          paddingTop: '12px'
+        }}>
+          💡 Currently showing themed points. Each theme contains 5 specific criticisms related to that theme's focus.
         </div>
       )}
     </div>

@@ -167,4 +167,67 @@ export class MiroApiClient {
     const allStickies = await this.getStickyNotes();
     return allStickies.filter(sticky => sticky.parentId === frameId);
   }
+  
+  /**
+   * Deletes all items of specified types within a frame
+   * @param frameId The ID of the frame containing the items to delete
+   * @param itemTypes Array of item types to delete (e.g., 'sticky_note', 'shape', 'text')
+   * @returns Number of items deleted
+   */
+  public static async deleteItemsInFrame(frameId: string, itemTypes: string[]): Promise<number> {
+    const result = await this.call<number>(
+      'Delete items in frame',
+      async () => {
+        let deletedCount = 0;
+        
+        // Process each specified item type
+        for (const itemType of itemTypes) {
+          // Get all items of this type
+          const items = await miro.board.get({ type: itemType as any });
+          
+          // Filter to items in the specified frame
+          // Use type assertion for parentId which exists on most item types
+          const itemsInFrame = items.filter(item => {
+            // Safely check if the item belongs to the frame
+            return (item as any).parentId === frameId;
+          });
+          
+          if (itemsInFrame.length === 0) {
+            console.log(`No ${itemType} items found in frame ${frameId}`);
+            continue;
+          }
+          
+          console.log(`Deleting ${itemsInFrame.length} ${itemType} items from frame ${frameId}`);
+          
+          // Delete items in batches to avoid rate limiting
+          const BATCH_SIZE = 10;
+          for (let i = 0; i < itemsInFrame.length; i += BATCH_SIZE) {
+            const batch = itemsInFrame.slice(i, i + BATCH_SIZE);
+            
+            try {
+              // Remove each item individually
+              for (const item of batch) {
+                await miro.board.remove(item);
+                deletedCount++;
+              }
+              
+              // Small delay between batches
+              if (i + BATCH_SIZE < itemsInFrame.length) {
+                await delay(100);
+              }
+            } catch (error) {
+              console.error(`Error deleting batch of ${itemType} items:`, error);
+              throw error;
+            }
+          }
+        }
+        
+        return deletedCount;
+      },
+      0
+    );
+    
+    // Ensure we return a number (not null)
+    return result ?? 0;
+  }
 } 

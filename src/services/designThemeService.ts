@@ -946,6 +946,216 @@ Example of CORRECT response format:
       return { themes: [] };
     }
   }
- 
 
+  /**
+   * Categorize antagonistic points by design themes
+   * @param points Array of antagonistic points to categorize
+   * @returns Points organized by design themes (2 themes with 5 points each)
+   */
+  public static async categorizeAntagonisticPointsByTheme(points: string[]): Promise<{
+    themes: {
+      name: string;
+      color: string;
+      points: string[];
+    }[];
+  }> {
+    try {
+      if (!points || points.length < 10) {
+        throw new Error('Insufficient points to categorize. Need at least 10 points.');
+      }
+
+      console.log(`Categorizing ${points.length} antagonistic points into themes`);
+      
+      // Get the current design themes
+      const themes = await this.generateDesignThemes();
+      console.log(`Retrieved ${themes.length} design themes for categorization`);
+      
+      // We'll use only the first 2 themes for organization
+      const themesToUse = themes.slice(0, 2);
+      if (themesToUse.length < 2) {
+        throw new Error('Insufficient themes available for categorization. Need at least 2 themes.');
+      }
+      
+      // Use OpenAI to categorize points by theme
+      const result = await this.categorizationWithOpenAI(points, themesToUse);
+      
+      // Ensure each theme has exactly 5 points
+      const finalThemes = themesToUse.map((theme, index) => {
+        const themePoints = result[theme.name] || [];
+        
+        // If we have fewer than 5 points, add default points
+        while (themePoints.length < 5) {
+          const unusedPoints = points.filter(p => 
+            !themesToUse.some(t => (result[t.name] || []).includes(p))
+          );
+          
+          if (unusedPoints.length > 0) {
+            themePoints.push(unusedPoints[0]);
+            // Remove the point from consideration for other themes
+            const pointIndex = points.indexOf(unusedPoints[0]);
+            if (pointIndex !== -1) {
+              points.splice(pointIndex, 1);
+            }
+          } else {
+            // If no unused points, create a generic point
+            themePoints.push(`This design requires more consideration for ${theme.name}.`);
+          }
+        }
+        
+        // If we have more than 5 points, take the first 5
+        const finalPoints = themePoints.slice(0, 5);
+        
+        return {
+          name: theme.name,
+          color: theme.color,
+          points: finalPoints
+        };
+      });
+      
+      console.log(`Successfully categorized points into ${finalThemes.length} themes`);
+      
+      return { themes: finalThemes };
+    } catch (error) {
+      console.error('Error categorizing antagonistic points:', error);
+      
+      // Fallback: split points evenly between two generic themes
+      const points10 = points.slice(0, 10);
+      const halfLength = Math.ceil(points10.length / 2);
+      
+      return {
+        themes: [
+          {
+            name: 'Design Concerns',
+            color: 'light_blue',
+            points: points10.slice(0, halfLength)
+          },
+          {
+            name: 'Implementation Risks',
+            color: 'light_pink',
+            points: points10.slice(halfLength, 10)
+          }
+        ]
+      };
+    }
+  }
+  
+  /**
+   * Use OpenAI to categorize points by theme
+   * @private
+   */
+  private static async categorizationWithOpenAI(
+    points: string[],
+    themes: DesignTheme[]
+  ): Promise<Record<string, string[]>> {
+    try {
+      const { OpenAIService } = await import('../services/openaiService');
+      
+      const systemPrompt = `You are an expert design analyst who specializes in categorizing design critique points into themes.
+      
+You will receive a list of design critique points and a list of design themes. Your task is to categorize each point into the most appropriate theme.
+
+RULES:
+1. Each critique point should be assigned to EXACTLY ONE theme
+2. The distribution should be as even as possible between themes
+3. Choose the theme that best matches the core concern of each critique point
+4. Return your analysis as a valid JSON object where:
+   - Keys are the theme names
+   - Values are arrays of critique points assigned to that theme
+
+Example response format:
+{
+  "Theme Name 1": ["Critique point 1", "Critique point 3"],
+  "Theme Name 2": ["Critique point 2", "Critique point 4"]
+}
+
+The available themes are:
+${themes.map((theme, index) => `${index + 1}. ${theme.name}`).join('\n')}`;
+
+      const userPrompt = `Please categorize these design critique points into the most appropriate themes:
+
+${points.map((point, index) => `${index + 1}. ${point}`).join('\n')}`;
+
+      // Use a custom API call for this specific task
+      const response = await fetch('/api/openaiwrap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userPrompt,
+          systemPrompt,
+          useGpt4: true
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      // Extract JSON content from the response
+      const jsonContent = this.extractJsonFromMarkdown(result.response);
+      
+      // Parse the JSON
+      const categorization = JSON.parse(jsonContent);
+      
+      // Validate and normalize the categorization
+      const validatedResult: Record<string, string[]> = {};
+      let allAssignedPoints: string[] = [];
+      
+      // Initialize with empty arrays for each theme
+      themes.forEach(theme => {
+        validatedResult[theme.name] = [];
+      });
+      
+      // Add points to the appropriate themes
+      Object.entries(categorization).forEach(([themeName, themePoints]) => {
+        const matchedTheme = themes.find(t => 
+          t.name.toLowerCase() === themeName.toLowerCase() ||
+          themeName.toLowerCase().includes(t.name.toLowerCase()) ||
+          t.name.toLowerCase().includes(themeName.toLowerCase())
+        );
+        
+        if (matchedTheme) {
+          const pointsArray = Array.isArray(themePoints) ? themePoints : [themePoints];
+          validatedResult[matchedTheme.name] = pointsArray.filter(p => 
+            typeof p === 'string' && points.includes(p) && !allAssignedPoints.includes(p)
+          );
+          allAssignedPoints = [...allAssignedPoints, ...validatedResult[matchedTheme.name]];
+        }
+      });
+      
+      // For any unassigned points, assign to the theme with fewest points
+      const unassignedPoints = points.filter(p => !allAssignedPoints.includes(p));
+      unassignedPoints.forEach(point => {
+        let minPointsTheme = themes[0].name;
+        let minPoints = validatedResult[minPointsTheme].length;
+        
+        themes.forEach(theme => {
+          if (validatedResult[theme.name].length < minPoints) {
+            minPointsTheme = theme.name;
+            minPoints = validatedResult[theme.name].length;
+          }
+        });
+        
+        validatedResult[minPointsTheme].push(point);
+      });
+      
+      return validatedResult;
+    } catch (error) {
+      console.error('Error in OpenAI categorization:', error);
+      
+      // Fallback: distribute points evenly between themes
+      const result: Record<string, string[]> = {};
+      themes.forEach((theme, themeIndex) => {
+        const themePoints = points.filter((_, pointIndex) => 
+          pointIndex % themes.length === themeIndex
+        );
+        result[theme.name] = themePoints;
+      });
+      
+      return result;
+    }
+  }
 } 

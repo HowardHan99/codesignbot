@@ -33,6 +33,34 @@ export class OpenAIService {
   }
 
   /**
+   * Common method to process and clean OpenAI responses
+   * @param result - The raw OpenAI response
+   * @param pointCount - Number of points to ensure in the result
+   * @param fallbackText - The fallback text to use if needed
+   * @returns Processed array of points
+   */
+  private static processOpenAIResponse(result: OpenAIResponse, pointCount: number, fallbackText: string): string[] {
+    // Clean and validate the response
+    let points = result.response
+      .replace(/•/g, '')
+      .replace(/\d+\./g, '')
+      .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/\*\*\s+\*\*/g, '**')
+      .trim()
+      .split('**')
+      .map(point => point.trim())
+      .filter(point => point.length > 0);
+
+    // Ensure we have exactly the required number of points
+    while (points.length < pointCount) {
+      points.push(points.length > 0 ? points[points.length - 1] : fallbackText);
+    }
+    
+    return points.slice(0, pointCount);
+  }
+
+  /**
    * Generates an antagonistic analysis of design decisions
    * @param userPrompt - The combined design decisions to analyze
    * @param designChallenge - The context of the design challenge
@@ -50,17 +78,17 @@ export class OpenAIService {
       ? `\n\nConsensus points that should NOT be questioned or criticized:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
       : '';
 
-    const systemPrompt = `You are analyzing design decisions for the design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 6 critical points that identify potential problems or conflicts in these decisions.
+    const systemPrompt = `You are analyzing design decisions for the design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 10 critical points that identify potential problems or conflicts in these decisions.
 
 Rules:
 1. NEVER question or criticize the consensus points - these are established agreements that must be respected
 2. Focus on potential problems, conflicts, or negative consequences
-3. Always provide EXACTLY 6 points, no more, no less
+3. Always provide EXACTLY 10 points, no more, no less
 4. Each point should be a complete, self-contained criticism
 5. Keep each point focused on a single issue
 
-Format your response as exactly 6 points separated by ** **. Example:
-First point here ** ** Second point here ** ** Third point here ** ** Fourth point here ** ** Fifth point here ** ** Sixth point here${consensusPointsText}`;
+Format your response as exactly 10 points separated by ** **. Example:
+First point here ** ** Second point here ** ** Third point here ** ** Fourth point here ** ** Fifth point here ** ** Sixth point here ** ** Seventh point here ** ** Eighth point here ** ** Ninth point here ** ** Tenth point here${consensusPointsText}`;
 
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt,
@@ -68,25 +96,9 @@ First point here ** ** Second point here ** ** Third point here ** ** Fourth poi
       useGpt4: true // Use GPT-4 for generating analysis
     });
 
-    // Clean and validate the response
-    let points = result.response
-      .replace(/•/g, '')
-      .replace(/\d+\./g, '')
-      .replace(/\n+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .replace(/\*\*\s+\*\*/g, '**')
-      .trim()
-      .split('**')
-      .map(point => point.trim())
-      .filter(point => point.length > 0);
+    const points = this.processOpenAIResponse(result, 10, 'This design decision requires further analysis');
 
-    // Ensure we have exactly 6 points
-    while (points.length < 6) {
-      points.push(points[points.length - 1] || 'This design decision requires further analysis');
-    }
-    points = points.slice(0, 6);
-
-    // Now filter for conflicts and select the best 3 points
+    // Filter for conflicts and preserve all 10 points
     const filteredPoints = await this.filterNonConflictingPoints(points, consensusPoints);
     
     return filteredPoints.join(' ** ');
@@ -104,16 +116,16 @@ First point here ** ** Second point here ** ** Third point here ** ** Fourth poi
 Consensus points that must not be contradicted:
 ${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
 
-Review these 6 criticism points and:
-1. Select exactly 3 points that do NOT conflict with the consensus points
-2. If a point conflicts with the consensus points such as the designer has already considered or addresses, skip it and move to the next one  
-3. If fewer than 3 non-conflicting points are found, generate substitutes that:
+Review these criticism points and:
+1. Select all points that do NOT conflict with the consensus points
+2. If a point conflicts with the consensus points such as the designer has already considered or addresses, skip it and move to the next one
+3. If fewer than 10 non-conflicting points are found, generate substitutes that:
    - focus on different aspects, such as different user groups, different parts of the design decision, or different parts of the design process
    - Address different aspects than the consensus points
    - Maintain critical perspective
    - Are unique from other selected points
 
-Return exactly 3 final points separated by ** **.`;
+Return exactly 10 final points separated by ** **.`;
 
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt: points.join('\n'),
@@ -121,24 +133,7 @@ Return exactly 3 final points separated by ** **.`;
       useGpt4: true // Use GPT-4 for filtering points
     });
 
-    let filteredPoints = result.response
-      .replace(/•/g, '')
-      .replace(/\d+\./g, '')
-      .replace(/\n+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .replace(/\*\*\s+\*\*/g, '**')
-      .trim()
-      .split('**')
-      .map(point => point.trim())
-      .filter(point => point.length > 0);
-
-    // Ensure exactly 3 points
-    while (filteredPoints.length < 3) {
-      filteredPoints.push(filteredPoints[filteredPoints.length - 1] || 'This point needs revision');
-    }
-    filteredPoints = filteredPoints.slice(0, 3);
-
-    return filteredPoints;
+    return this.processOpenAIResponse(result, 10, 'This point needs revision');
   }
 
   /**
@@ -164,29 +159,7 @@ First point here ** ** Second point here ** ** Third point here
 Do not include any other text or formatting.`
     });
 
-    // Clean and validate the response
-    let cleanedResponse = result.response
-      .replace(/•/g, '') // Remove bullet points
-      .replace(/\d+\./g, '') // Remove numbered lists
-      .replace(/Title:|\bPoint\b:|\bCriticism\b:/gi, '') // Remove any titles or labels
-      .replace(/\n+/g, ' ') // Replace newlines with spaces
-      .replace(/\s+/g, ' ') // Normalize spaces
-      .replace(/\*\*\s+\*\*/g, '**') // Clean up multiple ** sequences
-      .trim();
-
-    // Split points and ensure exactly 3
-    let points = cleanedResponse.split('**').map(point => point.trim()).filter(point => point.length > 0);
-    
-    // Handle cases with wrong number of points
-    while (points.length < 3) {
-      if (points.length > 0) {
-        points.push(points[points.length - 1]);
-      } else {
-        points.push('This point needs further simplification');
-      }
-    }
-    points = points.slice(0, 3);
-
+    const points = this.processOpenAIResponse(result, 3, 'This point needs further simplification');
     return points.join(' ** ');
   }
 
@@ -221,32 +194,7 @@ First point here ** ** Second point here ** ** Third point here
 Rewrite the following criticism points using this format and tone. Do not add any additional text or formatting.`
     });
 
-    // Clean and validate the response
-    let cleanedResponse = result.response
-      .replace(/•/g, '') // Remove bullet points
-      .replace(/\d+\./g, '') // Remove numbered lists
-      .replace(/Title:|\bPoint\b:|\bCriticism\b:/gi, '') // Remove any titles or labels
-      .replace(/\n+/g, ' ') // Replace newlines with spaces
-      .replace(/\s+/g, ' ') // Normalize spaces
-      .replace(/\*\*\s+\*\*/g, '**') // Clean up multiple ** sequences
-      .trim();
-
-    // Split points and ensure exactly 3
-    let points = cleanedResponse.split('**').map(point => point.trim()).filter(point => point.length > 0);
-    
-    // If we have fewer than 3 points, repeat the last point or add generic points
-    while (points.length < 3) {
-      if (points.length > 0) {
-        points.push(points[points.length - 1]);
-      } else {
-        points.push('This design decision requires further analysis');
-      }
-    }
-    
-    // If we have more than 3 points, take only the first 3
-    points = points.slice(0, 3);
-
-    // Rejoin with proper separator
+    const points = this.processOpenAIResponse(result, 3, 'This design decision requires further analysis');
     return points.join(' ** ');
   }
 
@@ -322,5 +270,78 @@ Respond to the user's message in a helpful and constructive way.`;
       console.error('Error analyzing images:', error);
       throw error;
     }
+  }
+
+  /**
+   * Generates theme-specific antagonistic analysis points
+   * @param userPrompt - The combined design decisions to analyze
+   * @param themeName - The name of the design theme to focus on
+   * @param designChallenge - The context of the design challenge
+   * @param consensusPoints - Array of consensus points that should not be questioned
+   * @returns Promise resolving to array of points specific to the theme
+   */
+  public static async generateThemeSpecificAnalysis(
+    userPrompt: string,
+    themeName: string,
+    designChallenge: string,
+    consensusPoints: string[] = []
+  ): Promise<string[]> {
+    const consensusPointsText = consensusPoints.length > 0
+      ? `\n\nConsensus points that should NOT be questioned or criticized:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
+      : '';
+
+    const systemPrompt = `You are analyzing design decisions for the design challenge: "${designChallenge || 'No challenge specified'}" with a specific focus on the theme "${themeName}".
+
+Provide exactly 5 critical points that identify potential problems or conflicts related specifically to the "${themeName}" theme of these design decisions.
+
+Rules:
+1. NEVER question or criticize the consensus points - these are established agreements that must be respected
+2. Focus on potential problems, conflicts, or negative consequences related to ${themeName}
+3. Always provide EXACTLY 5 points, no more, no less
+4. Each point should be a complete, self-contained criticism
+5. Keep each point focused on a single issue within the ${themeName} theme
+
+Format your response as exactly 5 points separated by ** **. Example:
+First point here ** ** Second point here ** ** Third point here ** ** Fourth point here ** ** Fifth point here${consensusPointsText}`;
+
+    const result = await this.makeRequest('/api/openaiwrap', {
+      userPrompt,
+      systemPrompt,
+      useGpt4: true // Use GPT-4 for generating theme-specific analysis
+    });
+
+    return this.processOpenAIResponse(result, 5, `The design needs further consideration regarding ${themeName}.`);
+  }
+
+  /**
+   * Generates multiple theme-specific analyses in parallel
+   * @param userPrompt - The combined design decisions to analyze
+   * @param themes - Array of theme objects with name and color
+   * @param designChallenge - The context of the design challenge
+   * @param consensusPoints - Array of consensus points that should not be questioned
+   * @returns Promise resolving to array of themed responses
+   */
+  public static async generateAllThemeAnalyses(
+    userPrompt: string,
+    themes: Array<{name: string, color: string}>,
+    designChallenge: string,
+    consensusPoints: string[] = []
+  ): Promise<Array<{name: string, color: string, points: string[]}>> {
+    // Run all theme analyses in parallel
+    const themeAnalysesPromises = themes.map(theme => 
+      this.generateThemeSpecificAnalysis(
+        userPrompt,
+        theme.name,
+        designChallenge,
+        consensusPoints
+      ).then(points => ({
+        name: theme.name,
+        color: theme.color,
+        points
+      }))
+    );
+    
+    // Wait for all analyses to complete
+    return Promise.all(themeAnalysesPromises);
   }
 } 
