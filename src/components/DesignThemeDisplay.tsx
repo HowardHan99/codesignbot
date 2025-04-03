@@ -401,18 +401,6 @@ export const DesignThemeDisplay: React.FC<DesignThemeDisplayProps> = ({ refreshT
         </div>
       </div>
       
-      {/* Theme selection help text */}
-      <div style={{ 
-        marginBottom: '10px',
-        backgroundColor: '#f9f9f9',
-        border: '1px dashed #ddd',
-        borderRadius: '4px',
-        padding: '8px',
-        fontSize: '12px',
-        color: '#555'
-      }}>
-        <p>Click on a theme to toggle its selection. Selected themes (full color) will receive points during analysis, while deselected themes (grayscale) will be excluded.</p>
-      </div>
       
       <div className="design-theme-list">
         {themes.map((theme, index) => {
