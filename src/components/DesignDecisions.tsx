@@ -10,13 +10,14 @@ import { MiroDesignService } from '../services/miro/designService';
 import { VoiceRecorder } from './VoiceRecorder';
 import { FileUploadTest } from './FileUploadTest';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
-import { DesignerRolePlayService } from '../services/designerRolePlayService';
+import { DesignerRolePlayService, DesignerModelType } from '../services/designerRolePlayService';
 import { DesignThemeService } from '../services/designThemeService';
 import { MiroFrameService } from '../services/miro/frameService';
 import { DesignThemeDisplay } from './DesignThemeDisplay';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
-  ssr: false 
+  loading: () => <div>Loading...</div>,
+  ssr: false,
 });
 
 interface StickyNote {
@@ -35,6 +36,12 @@ interface MainBoardProps {
   onAnalysisClick: () => void;
   onAnalysisComplete: () => void;
   onResponsesUpdate: (responses: string[]) => void;
+}
+
+// Define the DesignOutput type
+interface DesignOutput {
+  thinking?: string[];
+  designDecisions: string[];
 }
 
 // Helper function to build a decision tree from notes and connections
@@ -209,7 +216,7 @@ export function MainBoard({
   const [isExpanded, setIsExpanded] = useState(true);
   const [isSavingImage, setIsSavingImage] = useState(false);
   const [isParsingImage, setIsParsingImage] = useState(false);
-  const [isRolePlayingDesigner, setIsRolePlayingDesigner] = useState(false);
+  const [isRolePlayingDesigner, setIsRolePlayingDesigner] = useState<boolean>(false);
   const [designChallenge, setDesignChallenge] = useState<string>('');
   const [currentResponses, setCurrentResponses] = useState<string[]>([]);
   const [imageContext, setImageContext] = useState<string>('');
@@ -219,6 +226,11 @@ export function MainBoard({
   const [shouldRefreshAnalysis, setShouldRefreshAnalysis] = useState(false);
   const [isGeneratingThemes, setIsGeneratingThemes] = useState<boolean>(false);
   const [themeRefreshTrigger, setThemeRefreshTrigger] = useState<number>(0);
+  const [selectedDesignerModel, setSelectedDesignerModel] = useState<DesignerModelType>(DesignerModelType.GPT4);
+  const [designDecisions, setDesignDecisions] = useState<string[]>([]);
+  const [thinking, setThinking] = useState<string[]>([]);
+  const [roleplayLoading, setRoleplayLoading] = useState<boolean>(false);
+  const [rolePlayError, setRolePlayError] = useState<string>("");
 
   // Memoize the decision tree to avoid unnecessary recalculations
   const decisionTree = useMemo(() => {
@@ -458,10 +470,36 @@ export function MainBoard({
     
     try {
       setIsRolePlayingDesigner(true);
-      console.log('[DESIGNER ROLE PLAY UI] Starting designer role play simulation');
+      console.log(`[DESIGNER ROLE PLAY UI] Starting designer role play simulation with model: ${selectedDesignerModel}`);
       
-      await DesignerRolePlayService.simulateDesigner();
+      // If Claude is selected, show a message about the thinking process
+      if (selectedDesignerModel === DesignerModelType.CLAUDE) {
+        miro.board.notifications.showInfo('Using Claude with extended thinking enabled. This will show the designer\'s thinking process separately from decisions.');
+      }
+      
+      // Call the designer role play service
+      const designerThinking = await DesignerRolePlayService.simulateDesigner(selectedDesignerModel);
       console.log('[DESIGNER ROLE PLAY UI] Designer role play simulation completed successfully');
+      
+      // Log detailed information about the thinking content for debugging
+      if (designerThinking && designerThinking.thinking && designerThinking.thinking.length > 0) {
+        console.log('[DESIGNER ROLE PLAY UI] Received thinking content:', {
+          thinkingPointsCount: designerThinking.thinking.length,
+          firstThinkingPoint: designerThinking.thinking[0].substring(0, 150) + '...',
+          isFromAPIExtendedThinking: selectedDesignerModel === DesignerModelType.CLAUDE,
+        });
+        
+        // Set the thinking content in state
+        setThinking(designerThinking.thinking);
+        
+        // Show a success message specifically mentioning the thinking feature
+        if (selectedDesignerModel === DesignerModelType.CLAUDE) {
+          miro.board.notifications.showInfo('Designer role play completed with extended thinking! View the thinking process in the Thinking-Dialogue frame.');
+        }
+      } else {
+        console.log('[DESIGNER ROLE PLAY UI] No thinking content received from the API');
+        setThinking([]);
+      }
       
       // Refresh design decisions after role play
       console.log('[DESIGNER ROLE PLAY UI] Refreshing design decisions');
@@ -477,12 +515,57 @@ export function MainBoard({
       const duration = Date.now() - startTime;
       console.error(`[DESIGNER ROLE PLAY UI] Error role playing designer after ${duration}ms:`, error);
       
+      // Create a detailed error message, especially for Claude
+      let errorMessage = 'Failed to role play designer. Please try again.';
+      
+      // Check if it's a Claude-specific error
+      if (selectedDesignerModel === DesignerModelType.CLAUDE && error instanceof Error) {
+        errorMessage = 'Claude API Error: ';
+        
+        if (error.message.includes('401')) {
+          errorMessage += 'Authentication failed. Please check your Anthropic API key.';
+        } else if (error.message.includes('403')) {
+          errorMessage += 'Access denied. Your API key may not have permission to use this Claude model.';
+        } else if (error.message.includes('429')) {
+          errorMessage += 'Rate limit exceeded. Please try again later.';
+        } else if (error.message.includes('500') || error.message.includes('502') || error.message.includes('503')) {
+          errorMessage += 'Claude service error. The API might be temporarily unavailable.';
+        } else if (error.message.includes('Validation error') || error.message.includes('character(s)')) {
+          errorMessage += 'Message format validation error. This is likely an issue with our implementation. Please try GPT-4 while we fix this.';
+          console.error('[DESIGNER ROLE PLAY UI] Validation error details:', error.message);
+        } else if (error.message.includes('not_found_error') || error.message.includes('No available Claude models found')) {
+          errorMessage += 'None of the Claude models are available with your API key. Please check your Anthropic account permissions and available models.';
+          console.error('[DESIGNER ROLE PLAY UI] Model availability error details:', error.message);
+        } else if (error.message.includes('model:') && error.message.includes('404')) {
+          errorMessage += 'The Claude model was not found. This has been fixed to use the correct model name format. Please try again.';
+          console.error('[DESIGNER ROLE PLAY UI] Model name error:', error.message);
+        } else if (error.message.includes('thinking: Input should be') || 
+                  error.message.includes('invalid_request_error') ||
+                  error.message.includes('thinking.type: Field required') ||
+                  error.message.includes('thinking.budget_tokens:') ||
+                  error.message.includes('max_tokens must be greater than') ||
+                  error.message.includes('content.type') ||
+                  error.message.includes('thinking blocks')) {
+          errorMessage += 'Error with the extended thinking feature format. This has been fixed and will work the next time you try.';
+          console.error('[DESIGNER ROLE PLAY UI] Thinking parameter error:', error.message);
+        } else {
+          // Include the actual error message for debugging
+          errorMessage += error.message;
+        }
+      }
+      
       // Show error to user
-      miro.board.notifications.showError('Failed to role play designer. Please try again.');
+      miro.board.notifications.showError(errorMessage);
     } finally {
       setIsRolePlayingDesigner(false);
       console.log('[DESIGNER ROLE PLAY UI] Reset role playing state');
     }
+  };
+
+  // Handle model change
+  const handleModelChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedDesignerModel(event.target.value as DesignerModelType);
+    console.log(`[DESIGNER ROLE PLAY UI] Model changed to: ${event.target.value}`);
   };
 
   // New function to handle design theme generation
@@ -523,6 +606,108 @@ export function MainBoard({
   useEffect(() => {
     getDesignFrameId();
   }, []);
+
+  const callClaudeDesigner = async (designPrompt: string): Promise<DesignOutput> => {
+    console.log('[DesignDecisions] Calling Claude designer with prompt length:', designPrompt.length);
+    console.log('[DesignDecisions] Prompt preview:', designPrompt.substring(0, 100) + '...');
+    
+    try {
+      const start = performance.now();
+      console.log('[DesignDecisions] Sending request to /api/designer-roleplay');
+      
+      const response = await fetch('/api/designer-roleplay', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: designPrompt,
+        }),
+      });
+
+      const duration = performance.now() - start;
+      console.log(`[DesignDecisions] Request completed in ${duration.toFixed(0)}ms`);
+      
+      // Log response status
+      console.log('[DesignDecisions] Response status:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        console.error('[DesignDecisions] Error response from API:', response.status, response.statusText);
+        
+        // Try to extract error details if possible
+        try {
+          const errorText = await response.text();
+          console.error('[DesignDecisions] Error details:', errorText);
+          
+          try {
+            // Try to parse as JSON
+            const errorJson = JSON.parse(errorText);
+            console.error('[DesignDecisions] Parsed error:', errorJson);
+            
+            if (errorJson?.error?.message) {
+              throw new Error(`Claude API error: ${errorJson.error.message}`);
+            }
+          } catch (e) {
+            // Not JSON or JSON parsing failed
+            console.error('[DesignDecisions] Could not parse error as JSON');
+          }
+        } catch (e) {
+          console.error('[DesignDecisions] Could not extract error text', e);
+        }
+        
+        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('[DesignDecisions] API response received:', {
+        thinkingPointsCount: data.thinking?.length || 0,
+        designDecisionsCount: data.designDecisions?.length || 0,
+        firstThinkingPreview: data.thinking && data.thinking.length > 0 
+          ? data.thinking[0].substring(0, 100) + '...' 
+          : 'None',
+        firstDecisionPreview: data.designDecisions && data.designDecisions.length > 0 
+          ? data.designDecisions[0].substring(0, 100) + '...' 
+          : 'None'
+      });
+      
+      // Validate response data
+      if (!data.designDecisions || !Array.isArray(data.designDecisions)) {
+        console.error('[DesignDecisions] Invalid response format - missing designDecisions array', data);
+        throw new Error('Invalid API response: missing designDecisions');
+      }
+      
+      console.log('[DesignDecisions] Processing complete, returning design output');
+      return data;
+    } catch (error) {
+      console.error('[DesignDecisions] Error calling Claude designer:', error);
+      
+      // Enhanced error handling
+      let errorMessage = 'Failed to generate design decisions';
+      
+      if (error instanceof Error) {
+        console.error('[DesignDecisions] Error details:', error.message);
+        console.error('[DesignDecisions] Error stack:', error.stack);
+        
+        errorMessage = error.message;
+        
+        // Detect specific error patterns
+        if (
+          error.message.includes('thinking.type: Field required') ||
+          error.message.includes('thinking.budget_tokens:') ||
+          error.message.includes('max_tokens must be greater than') ||
+          error.message.includes('thinking: Input should be') ||
+          error.message.includes('invalid_request_error') ||
+          error.message.includes('content.type') ||
+          error.message.includes('thinking blocks')
+        ) {
+          console.error('[DesignDecisions] Detected Claude API format error');
+          errorMessage = 'There was an error with the extended thinking feature format. This has been fixed for future attempts.';
+        }
+      }
+      
+      throw new Error(errorMessage);
+    }
+  };
 
   return (
     <>
@@ -792,29 +977,54 @@ export function MainBoard({
                     <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>👩‍🎨</span>
                     Designer Role Play
                   </h3>
-                  <button
-                    onClick={handleDesignerRolePlay}
-                    className="button button-secondary"
-                    disabled={isRolePlayingDesigner}
-                    style={{
-                      padding: '8px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid #e0e0e0',
-                      backgroundColor: '#ffffff',
-                      color: '#555',
-                      fontWeight: 500,
-                      fontSize: '14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      cursor: isRolePlayingDesigner ? 'not-allowed' : 'pointer',
-                      width: '100%',
-                      justifyContent: 'flex-start'
-                    }}
-                  >
-                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🧠</span>
-                    {isRolePlayingDesigner ? 'Designing...' : 'Role Play Designer'}
-                  </button>
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '8px',
+                    alignItems: 'center' 
+                  }}>
+                    <button
+                      onClick={handleDesignerRolePlay}
+                      className="button button-secondary"
+                      disabled={isRolePlayingDesigner}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #e0e0e0',
+                        backgroundColor: '#ffffff',
+                        color: '#555',
+                        fontWeight: 500,
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: isRolePlayingDesigner ? 'not-allowed' : 'pointer',
+                        flex: '1',
+                        justifyContent: 'flex-start'
+                      }}
+                    >
+                      <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🧠</span>
+                      {isRolePlayingDesigner ? 'Designing...' : 'Role Play Designer'}
+                    </button>
+                    <select 
+                      value={selectedDesignerModel}
+                      onChange={handleModelChange}
+                      disabled={isRolePlayingDesigner}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #e0e0e0',
+                        backgroundColor: '#ffffff',
+                        color: '#555',
+                        fontWeight: 500,
+                        fontSize: '14px',
+                        cursor: isRolePlayingDesigner ? 'not-allowed' : 'pointer',
+                        minWidth: '110px'
+                      }}
+                    >
+                      <option value={DesignerModelType.GPT4}>GPT-4 (Balanced)</option>
+                      <option value={DesignerModelType.CLAUDE}>Claude (Creative)</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* New Design Themes Section */}

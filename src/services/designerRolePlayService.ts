@@ -12,6 +12,14 @@ interface DesignerThinkingProcess {
   decisions: string[];        // Final design decisions/highlights
 }
 
+/**
+ * Available AI models for designer role play
+ */
+export enum DesignerModelType {
+  GPT4 = 'gpt4',
+  CLAUDE = 'claude'
+}
+
 export class DesignerRolePlayService {
   private static isProcessing: boolean = false;
   private static readonly THINKING_FRAME_NAME = 'Thinking-Dialogue';
@@ -45,8 +53,13 @@ export class DesignerRolePlayService {
 
   /**
    * Simulates a designer's thinking process for solving a design challenge
+   * @param designChallenge The design challenge to solve
+   * @param modelType The AI model to use for reasoning (GPT4 or Claude)
    */
-  public static async generateDesignerThinking(designChallenge: string): Promise<DesignerThinkingProcess> {
+  public static async generateDesignerThinking(
+    designChallenge: string, 
+    modelType: DesignerModelType = DesignerModelType.GPT4
+  ): Promise<DesignerThinkingProcess> {
     if (this.isProcessing) {
       throw new Error('A designer role play session is already in progress');
     }
@@ -56,7 +69,8 @@ export class DesignerRolePlayService {
       
       const response = await this.makeRequest('/api/designer-roleplay', {
         designChallenge,
-        type: 'thinking'
+        type: 'thinking',
+        modelType
       });
 
       if (!response || !response.thinking || !response.decisions) {
@@ -133,8 +147,10 @@ export class DesignerRolePlayService {
   
   /**
    * Simulates a designer solving a design challenge
+   * @param modelType The AI model to use for reasoning (GPT4 or Claude)
+   * @returns The designer's thinking process and decisions
    */
-  public static async simulateDesigner(): Promise<void> {
+  public static async simulateDesigner(modelType: DesignerModelType = DesignerModelType.GPT4): Promise<DesignerThinkingProcess> {
     try {
       const designChallenge = await MiroService.getDesignChallenge();
       
@@ -142,8 +158,11 @@ export class DesignerRolePlayService {
         throw new Error('No design challenge found. Please create one in the Design-Challenge frame.');
       }
       
-      const designerThinking = await this.generateDesignerThinking(designChallenge);
+      const designerThinking = await this.generateDesignerThinking(designChallenge, modelType);
       await this.addThinkingToBoard(designerThinking);
+      
+      // Return the designer thinking process for use in the UI
+      return designerThinking;
     } catch (error) {
       throw error;
     }
