@@ -7,6 +7,7 @@ interface ThemedResponse {
   name: string;
   color: string;
   points: string[];
+  isSelected?: boolean; // Whether this theme is selected for point generation
 }
 
 /**
@@ -20,6 +21,7 @@ interface AnalysisResultsProps {
   isChangingTone?: boolean;      // Whether tone is currently being changed
   themedResponses?: ThemedResponse[];  // Responses organized by themes
   useThemedDisplay?: boolean;    // Whether to use the themed display
+  onThemeSelectToggle?: (themeIndex: number) => void; // Handler for toggling theme selection
 }
 
 /**
@@ -35,6 +37,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   isChangingTone = false,
   themedResponses = [],
   useThemedDisplay = false,
+  onThemeSelectToggle,
 }) => {
   // Don't render anything if there are no responses
   if (!responses.length && !themedResponses.length) return null;
@@ -129,49 +132,93 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
           {/* Themed display */}
           {useThemedDisplay && themedResponses.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {themedResponses.map((theme, themeIndex) => (
-                <div key={themeIndex} style={{ 
-                  borderLeft: `4px solid ${getThemeColor(theme.color)}`,
-                  padding: '0 0 0 12px',
-                  backgroundColor: `${getThemeColor(theme.color)}20`, // Add slight background with 12.5% opacity
-                  borderRadius: '0 4px 4px 0',
-                  paddingTop: '10px',
-                  paddingBottom: '10px',
-                  paddingRight: '10px'
-                }}>
-                  <h4 style={{ 
-                    margin: '0 0 10px 0', 
-                    color: '#333',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
+              {themedResponses.map((theme, themeIndex) => {
+                // Determine if theme is selected (default to true if not specified)
+                const isSelected = theme.isSelected !== false;
+                
+                // Apply grayscale filter if theme is not selected
+                const themeColor = isSelected ? getThemeColor(theme.color) : '#E5E5E5';
+                const filter = isSelected ? 'none' : 'grayscale(100%)';
+                
+                return (
+                  <div key={themeIndex} style={{ 
+                    borderLeft: `4px solid ${themeColor}`,
+                    padding: '0 0 0 12px',
+                    backgroundColor: `${themeColor}20`, // Add slight background with 12.5% opacity
+                    borderRadius: '0 4px 4px 0',
+                    paddingTop: '10px',
+                    paddingBottom: '10px',
+                    paddingRight: '10px',
+                    filter,
+                    opacity: isSelected ? 1 : 0.6,
+                    transition: 'filter 0.3s, opacity 0.3s'
                   }}>
-                    <span>{theme.name}</span>
-                    <span style={{ 
-                      fontSize: '13px', 
-                      fontWeight: 'normal',
-                      color: '#666',
-                      backgroundColor: '#ffffff80',
-                      padding: '2px 6px',
-                      borderRadius: '10px'
-                    }}>
-                      {theme.points.length} points
-                    </span>
-                  </h4>
-                  <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                    {theme.points.map((point, pointIndex) => (
-                      <li key={pointIndex} style={{ 
-                        marginBottom: '8px',
-                        backgroundColor: `${getThemeColor(theme.color)}10`, // Even lighter background
-                        padding: '4px 8px',
-                        borderRadius: '4px'
+                    <h4 
+                      onClick={() => onThemeSelectToggle?.(themeIndex)}
+                      style={{ 
+                        margin: '0 0 10px 0', 
+                        color: '#333',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        cursor: onThemeSelectToggle ? 'pointer' : 'default',
+                        position: 'relative'
+                      }}
+                      title={onThemeSelectToggle ? `Click to ${isSelected ? 'deselect' : 'select'} this theme for point generation` : ''}
+                    >
+                      <span>
+                        {theme.name}
+                        {!isSelected && (
+                          <span style={{ 
+                            marginLeft: '8px', 
+                            fontSize: '12px', 
+                            color: '#888',
+                            fontWeight: 'normal'
+                          }}>
+                            (deselected for point generation)
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ 
+                        fontSize: '13px', 
+                        fontWeight: 'normal',
+                        color: '#666',
+                        backgroundColor: '#ffffff80',
+                        padding: '2px 6px',
+                        borderRadius: '10px',
+                        display: 'flex',
+                        alignItems: 'center'
                       }}>
-                        {point}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+                        {theme.points.length} points
+                        {onThemeSelectToggle && (
+                          <span style={{ 
+                            marginLeft: '5px', 
+                            fontSize: '10px',
+                            border: '1px solid #ccc',
+                            borderRadius: '3px',
+                            padding: '1px 3px',
+                            color: isSelected ? '#666' : '#888'
+                          }}>
+                            {isSelected ? '✓' : '○'}
+                          </span>
+                        )}
+                      </span>
+                    </h4>
+                    <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                      {theme.points.map((point, pointIndex) => (
+                        <li key={pointIndex} style={{ 
+                          marginBottom: '8px',
+                          backgroundColor: `${themeColor}10`, // Even lighter background
+                          padding: '4px 8px',
+                          borderRadius: '4px'
+                        }}>
+                          {point}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             /* Standard list of analysis points */

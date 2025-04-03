@@ -998,16 +998,17 @@ Example of CORRECT response format:
    * Categorize antagonistic points by design themes
    * @param points Array of antagonistic points to categorize
    * @param existingThemes Optional array of existing themes to use instead of generating new ones
-   * @returns Points organized by design themes (2 themes with 5 points each)
+   * @returns Points organized by design themes
    */
   public static async categorizeAntagonisticPointsByTheme(
     points: string[], 
-    existingThemes?: DesignTheme[]
+    existingThemes?: DesignTheme[] & { isSelected?: boolean }[]
   ): Promise<{
     themes: {
       name: string;
       color: string;
       points: string[];
+      isSelected?: boolean;
     }[];
   }> {
     try {
@@ -1018,31 +1019,38 @@ Example of CORRECT response format:
       console.log(`Categorizing ${points.length} antagonistic points into themes`);
       
       // Get the themes - either use existing ones or generate new ones
-      let themes: DesignTheme[];
+      let themes: (DesignTheme & { isSelected?: boolean })[];
       if (existingThemes && existingThemes.length > 0) {
         console.log(`Using ${existingThemes.length} existing themes for categorization`);
         themes = existingThemes;
       } else {
         console.log('No existing themes provided, generating new themes');
         themes = await this.generateDesignThemes();
+        // Mark all newly generated themes as selected by default
+        themes = themes.map(theme => ({ ...theme, isSelected: true }));
       }
       console.log(`Using ${themes.length} design themes for categorization`);
       
-      // We'll use only the first 2 themes for organization
-      const themesToUse = themes.slice(0, 2);
-      if (themesToUse.length < 2) {
-        throw new Error('Insufficient themes available for categorization. Need at least 2 themes.');
-      }
+      // Filter to only use selected themes (or all if none are marked as selected)
+      const selectedThemes = themes.filter(theme => theme.isSelected !== false);
+      
+      // If no themes are selected, use all themes (first use case or fallback)
+      const themesToUse = selectedThemes.length > 0 ? selectedThemes : themes;
+      
+      console.log(`Using ${themesToUse.length} themes for point categorization`);
       
       // Use OpenAI to categorize points by theme
       const result = await this.categorizationWithOpenAI(points, themesToUse);
       
-      // Ensure each theme has exactly 5 points
+      // Ensure each theme has a reasonable number of points
+      const pointsPerTheme = Math.max(5, Math.floor(points.length / themesToUse.length));
+      
+      // Ensure each theme has exactly the expected number of points (default to 5)
       const finalThemes = themesToUse.map((theme, index) => {
         const themePoints = result[theme.name] || [];
         
-        // If we have fewer than 5 points, add default points
-        while (themePoints.length < 5) {
+        // If we have fewer than expected points, add more
+        while (themePoints.length < pointsPerTheme) {
           const unusedPoints = points.filter(p => 
             !themesToUse.some(t => (result[t.name] || []).includes(p))
           );
@@ -1060,13 +1068,14 @@ Example of CORRECT response format:
           }
         }
         
-        // If we have more than 5 points, take the first 5
-        const finalPoints = themePoints.slice(0, 5);
+        // If we have more than expected points, take the first N
+        const finalPoints = themePoints.slice(0, pointsPerTheme);
         
         return {
           name: theme.name,
           color: theme.color,
-          points: finalPoints
+          points: finalPoints,
+          isSelected: theme.isSelected
         };
       });
       
@@ -1085,12 +1094,14 @@ Example of CORRECT response format:
           {
             name: 'Design Concerns',
             color: 'light_blue',
-            points: points10.slice(0, halfLength)
+            points: points10.slice(0, halfLength),
+            isSelected: true
           },
           {
             name: 'Implementation Risks',
             color: 'light_pink',
-            points: points10.slice(halfLength, 10)
+            points: points10.slice(halfLength, 10),
+            isSelected: true
           }
         ]
       };

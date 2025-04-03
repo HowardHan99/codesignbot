@@ -24,6 +24,15 @@ interface ThemedResponse {
   name: string;
   color: string;
   points: string[];
+  isSelected?: boolean;
+}
+
+interface DesignThemeWithSelection {
+  name: string;
+  description: string;
+  relatedPoints: string[];
+  color: string;
+  isSelected?: boolean;
 }
 
 interface AntagoInteractProps {
@@ -130,11 +139,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     setSelectedTone('');
     
     try {
-      console.log("===== STARTING ANALYSIS GENERATION PIPELINE =====");
       const startTime = performance.now();
       const miroStartTime = performance.now();
       
-      console.log("1. Getting design frame and sticky notes...");
       const frames = await miro.board.get({ type: 'frame' });
       const designFrame = frames.find(f => f.title === 'Design-Proposal');
       
@@ -151,7 +158,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       );
       
       const miroEndTime = performance.now();
-      console.log(`Found ${designStickyNotes.length} design sticky notes in ${Math.round(miroEndTime - miroStartTime)}ms`);
       
       // Format data for OpenAI
       const formatStartTime = performance.now();
@@ -166,99 +172,120 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         : combinedMessage;
       
       const formatEndTime = performance.now();
-      console.log(`2. Formatted design decisions in ${Math.round(formatEndTime - formatStartTime)}ms`);
       
-      // THEME PIPELINE - First check if there are themes on the board
-      console.log("3. THEME PIPELINE: Checking for existing themes on the board...");
-      const themeStartTime = performance.now();
+      // Simply read existing themes from the board and their selection state
+      console.log('Reading themes from the board...');
+      const existingThemes = await DesignThemeService.getCurrentThemesFromBoard();
+      console.log(`Found ${existingThemes.length} existing themes on the board`);
       
-      // Just check for existing themes without creating new ones if none exist
-      let themesToUse = await DesignThemeService.getCurrentThemesFromBoard();
-      let useThemes = themesToUse && themesToUse.length > 0;
-      
-      if (useThemes) {
-        console.log(`Found ${themesToUse.length} existing themes on board:`);
-        themesToUse.forEach((theme, i) => console.log(`  - [${i+1}] "${theme.name}" (${theme.color})`));
+      // If no themes exist on the board, we can't do themed analysis
+      if (existingThemes.length === 0) {
+        console.log('No themes found on board. Using standard analysis without themes.');
+        // Generate standard analysis
+        const response = await OpenAIService.generateAnalysis(
+          messageWithContext, 
+          designChallenge,
+          synthesizedPoints,
+          consensusPoints
+        );
         
-        // Just ensure theme positions are calculated
-        console.log('Calculating theme positions for sticky note placement...');
-        await DesignThemeService.clearThemePositions();
-      } else {
-        console.log('No themes found on board. Skipping theme-based categorization.');
+        setResponses([response]);
+        setStoredFullResponses({ normal: response });
+        
+        // Update UI with response
+        const splitResponses = splitResponse(response);
+        onResponsesUpdate?.(splitResponses);
+        
+        // Skip the rest of the themed processing
+        return;
       }
       
-      const themeEndTime = performance.now();
-      console.log(`Theme check completed in ${Math.round(themeEndTime - themeStartTime)}ms`);
+      // Read theme selection state from localStorage
+      let selectedThemes = [...existingThemes]; // Default to using all themes
       
-      // Generate antagonistic points
+      if (typeof window !== 'undefined') {
+        try {
+          const savedSelectionJson = localStorage.getItem('themeSelectionState');
+          if (savedSelectionJson) {
+            console.log('Reading theme selection state from localStorage');
+            const savedSelection = JSON.parse(savedSelectionJson);
+            
+            if (Array.isArray(savedSelection) && savedSelection.length > 0) {
+              // Create a map of theme names to selection state
+              const selectionMap = new Map<string, boolean>();
+              savedSelection.forEach(item => {
+                selectionMap.set(item.name.toLowerCase(), item.isSelected !== false);
+              });
+              
+              // Filter themes based on selection state
+              const filteredThemes = existingThemes.filter(theme => {
+                // Try to find this theme in the selection map
+                for (const [savedName, isSelected] of selectionMap.entries()) {
+                  if (theme.name.toLowerCase() === savedName || 
+                      theme.name.toLowerCase().includes(savedName) || 
+                      savedName.includes(theme.name.toLowerCase())) {
+                    return isSelected; // Keep only if selected
+                  }
+                }
+                return true; // If not found in selection map, include by default
+              });
+              
+              // Use filtered themes if we have any
+              if (filteredThemes.length > 0) {
+                selectedThemes = filteredThemes;
+                console.log(`Using ${selectedThemes.length} selected themes from localStorage`);
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Error reading theme selection from localStorage:', e);
+        }
+      }
+      
+      // No need to regenerate themes or recalculate positions - the existing themes already have positions
+      
+      // Generate theme-specific antagonistic points in parallel
       const openaiStartTime = performance.now();
       
-      // Step 1: Generate a single set of antagonistic points
-      console.log("4. ANALYSIS PIPELINE: Generating antagonistic points...");
-      const response = await OpenAIService.generateAnalysis(
-        messageWithContext, 
-        designChallenge,
-        synthesizedPoints,
-        consensusPoints
-      );
-      
-      // Split into individual points for processing
-      console.log("5. Splitting response into individual points...");
-      const allPoints = splitResponse(response);
-      console.log(`Generated ${allPoints.length} antagonistic points`);
-      
-      // Initialize themed responses data
-      let themedResponsesData: ThemedResponse[] = [];
-      
-      // Step 2: Categorize these points into themes only if themes exist
-      if (useThemes) {
-        console.log(`6. CATEGORIZATION PIPELINE: Categorizing ${allPoints.length} points into ${themesToUse.length} themes...`);
-        console.log("Themes being used for categorization:");
-        themesToUse.forEach((theme, i) => {
-          console.log(`  [${i+1}] ${theme.name}`);
-        });
+      // Run both the theme-specific analyses and the original response generation in parallel
+      const [themedResponsesData, response] = await Promise.all([
+        // Generate all theme analyses in parallel
+        OpenAIService.generateAllThemeAnalyses(
+          messageWithContext,
+          selectedThemes,
+          designChallenge,
+          consensusPoints
+        ),
         
-        const categorizationStartTime = performance.now();
-        // Create a custom method that uses existing themes instead of regenerating
-        const categorized = await DesignThemeService.categorizeAntagonisticPointsByTheme(
-          allPoints,
-          themesToUse // Pass existing themes to avoid regeneration
-        );
-        themedResponsesData = categorized.themes;
-        const categorizationEndTime = performance.now();
-        
-        console.log(`Categorization completed in ${Math.round(categorizationEndTime - categorizationStartTime)}ms`);
-        console.log("Final themed responses:");
-        themedResponsesData.forEach((theme, i) => {
-          console.log(`  [${i+1}] ${theme.name} (${theme.points.length} points)`);
-        });
-      } else {
-        console.log("Skipping theme categorization as no themes were found");
-        // If no themes exist, we'll just use standard display mode
-        setUseThemedDisplay(false);
-      }
+        // Also generate original response for compatibility and fallback
+        OpenAIService.generateAnalysis(
+          messageWithContext, 
+          designChallenge,
+          synthesizedPoints,
+          consensusPoints
+        )
+      ]);
       
       const openaiEndTime = performance.now();
       
       // Update UI with the response
       const uiStartTime = performance.now();
       
-      console.log("7. Updating UI with responses...");
       setResponses([response]);
-      
-      if (useThemes) {
-        setThemedResponses(themedResponsesData);
-      }
-      
+      setThemedResponses(themedResponsesData);
       setStoredFullResponses({ normal: response }); // Store normal tone
       
+      // Create a combined list of all points for backward compatibility
+      const allPoints = themedResponsesData.flatMap(theme => theme.points);
+      
       // Update parent with appropriate responses
-      if (useThemes && useThemedDisplay) {
+      if (useThemedDisplay) {
         // If using themed display, we still need to pass array of strings for compatibility
         onResponsesUpdate?.(allPoints);
       } else {
         // Otherwise, use the standard response format
-        onResponsesUpdate?.(allPoints);
+        const splitResponses = splitResponse(response);
+        onResponsesUpdate?.(splitResponses);
       }
       
       const uiEndTime = performance.now();
@@ -272,7 +299,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       // Always save to Firebase in the background
       const saveStartTime = performance.now();
       
-      console.log("8. Background tasks: Saving analysis to Firebase...");
       const savePromise = (async () => {
         try {
           const analysisData = {
@@ -280,7 +306,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             designChallenge: designChallenge,
             decisions: designStickyNotes.map(note => note.content || ''),
             analysis: {
-              full: allPoints,
+              full: useThemedDisplay ? allPoints : splitResponse(response),
               simplified: []
             },
             tone: selectedTone || 'normal',
@@ -295,7 +321,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       // Generate simplified version immediately if in simplified mode
       if (isSimplifiedMode) {
-        console.log("9. Generating simplified version of responses...");
         const simplifyStartTime = performance.now();
         
         const simplifyPromise = (async () => {
@@ -325,119 +350,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       processingRef.current = false;
       onComplete?.();
       
-      const totalTime = performance.now() - startTime;
-      console.log(`===== ANALYSIS GENERATION COMPLETED in ${Math.round(totalTime)}ms =====`);
-      
     } catch (error) {
-      console.error("ERROR IN ANALYSIS PIPELINE:", error);
       setError('Failed to process notes: ' + (error as Error).message);
       setLoading(false);
       processingRef.current = false;
     }
-  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints, useThemedDisplay]);
-
-  /**
-   * Generate and visualize design themes on the Miro board
-   * This is a consolidated method for generating themes to prevent duplication
-   */
-  const generateAndVisualizeThemes = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      console.log("Generating fresh design themes...");
-      
-      // Clear existing theme positions to start fresh
-      await DesignThemeService.clearThemePositions();
-      
-      // Generate new themes
-      const newThemes = await DesignThemeService.generateDesignThemes();
-      console.log(`Generated ${newThemes.length} new themes`);
-      
-      // Visualize themes on the board (false = don't create test stickies)
-      console.log('Visualizing themes on board...');
-      await DesignThemeService.visualizeThemes(newThemes, false);
-      
-      // If we have existing responses, re-categorize them with the new themes
-      if (responses.length > 0) {
-        const currentPoints = splitResponse(
-          (isSimplifiedMode && simplifiedResponses.length > 0) ? simplifiedResponses[0] : responses[0]
-        );
-        
-        console.log(`Re-categorizing ${currentPoints.length} points with new themes...`);
-        const categorized = await DesignThemeService.categorizeAntagonisticPointsByTheme(
-          currentPoints,
-          newThemes // Pass the new themes for categorization
-        );
-        setThemedResponses(categorized.themes);
-      }
-      
-      setLoading(false);
-    } catch (error) {
-      console.error('Error generating themes:', error);
-      setError('Failed to generate themes: ' + (error as Error).message);
-      setLoading(false);
-    }
-  }, [responses, simplifiedResponses, isSimplifiedMode]);
-
-  /**
-   * Add design themes to the Miro board
-   * This adds themes without removing any existing content
-   */
-  const addDesignThemes = useCallback(async () => {
-    try {
-      setLoading(true);
-      
-      // Check if there are already themes on the board
-      let themesToUse = await DesignThemeService.getCurrentThemesFromBoard();
-      
-      // If no themes were found, generate new ones
-      if (!themesToUse || themesToUse.length === 0) {
-        // Re-use our consolidated method
-        await generateAndVisualizeThemes();
-        setLoading(false);
-        return;
-      }
-      
-      console.log(`Found ${themesToUse.length} existing themes on board`);
-      
-      // Just ensure theme positions are calculated without creating duplicates
-      console.log('Calculating theme positions for sticky note placement...');
-      await DesignThemeService.clearThemePositions();
-      
-      // Update our themed responses
-      if (themedResponses.length > 0) {
-        // Reprocess themed responses with the existing themes
-        console.log('Updating themed responses with existing themes');
-        
-        const updatedThemedResponses = themedResponses.map(themed => {
-          // Find matching theme by name
-          const matchingTheme = themesToUse.find(t => 
-            t.name.toLowerCase() === themed.name.toLowerCase() ||
-            t.name.toLowerCase().includes(themed.name.toLowerCase()) ||
-            themed.name.toLowerCase().includes(t.name.toLowerCase())
-          );
-          
-          if (matchingTheme) {
-            return {
-              ...themed,
-              name: matchingTheme.name, // Use the existing theme name
-              color: matchingTheme.color // Use the existing theme color
-            };
-          }
-          return themed;
-        });
-        
-        setThemedResponses(updatedThemedResponses);
-      }
-      
-      setLoading(false);
-    } catch (error) {
-      console.error('Error calculating theme positions:', error);
-      setError('Failed to calculate theme positions: ' + (error as Error).message);
-      setLoading(false);
-    }
-  }, [themedResponses, generateAndVisualizeThemes]);
+  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints, useThemedDisplay, themedResponses]);
 
   // Process notes when they change or when shouldRefresh is true
   useEffect(() => {
@@ -449,94 +367,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
   // Handle mode toggle
   const handleModeToggle = useCallback(() => {
+    // Don't process mode toggle if themed display is active
+    if (useThemedDisplay) return;
+    
     setIsSimplifiedMode((prev: boolean) => {
       const newMode = !prev;
       
-      // For themed display, we need to simplify or expand each theme's points
-      if (useThemedDisplay && themedResponses.length > 0) {
-        (async () => {
-          try {
-            setIsChangingTone(true);
-            
-            // Process each theme's points
-            const updatedThemedResponses = await Promise.all(
-              themedResponses.map(async (theme) => {
-                // If switching to simplified mode, simplify each point
-                if (newMode) {
-                  const simplifiedPoints = await Promise.all(
-                    theme.points.map(point => 
-                      OpenAIService.simplifyPoint(point)
-                    )
-                  );
-                  return { ...theme, points: simplifiedPoints };
-                } else {
-                  // If the theme has stored original points, restore them
-                  // This is a simplification - in a real implementation you would 
-                  // need to store original points for each theme
-                  // For now we'll just use the current points as-is when switching back
-                  return theme;
-                }
-              })
-            );
-            
-            setThemedResponses(updatedThemedResponses);
-            
-            // Update parent with all themed points (simplified or full)
-            const allPoints = updatedThemedResponses.flatMap(theme => theme.points);
-            onResponsesUpdate?.(allPoints);
-            
-            setIsChangingTone(false);
-          } catch (error) {
-            console.error('Error updating themed responses for simplified mode:', error);
-            setIsChangingTone(false);
-          }
-        })();
-      } else if (responses.length > 0) {
-        // Original logic for standard display
-        if (newMode && !simplifiedResponses.length) {
-          // Generate simplified version on demand
-          (async () => {
-            try {
-              setIsChangingTone(true);
-              const simplified = await OpenAIService.simplifyAnalysis(responses[0]);
-              setSimplifiedResponses([simplified]);
-              setStoredSimplifiedResponses({ normal: simplified });
-              
-              if (!useThemedDisplay) {
-                onResponsesUpdate?.(splitResponse(simplified));
-              }
-              setIsChangingTone(false);
-            } catch (error) {
-              console.error('Error generating simplified response:', error);
-              // If we failed to generate simplified version, fall back to full version
-              setIsSimplifiedMode(false);
-              setIsChangingTone(false);
-            }
-          })();
-        } else if (!useThemedDisplay) {
-          // If we already have the right responses, just update
-          const currentResponses = newMode ? simplifiedResponses : responses;
-          onResponsesUpdate?.(splitResponse(currentResponses[0]));
-        }
-      }
-      
-      return newMode;
-    });
-  }, [responses, simplifiedResponses, onResponsesUpdate, useThemedDisplay, themedResponses]);
-
-  // Toggle between themed and standard display
-  const handleDisplayToggle = useCallback(() => {
-    setUseThemedDisplay(prev => {
-      const newDisplayMode = !prev;
-      
-      // No need to reorganize points since both modes use the same underlying points
-      // Just toggle the display mode
-      console.log(`Switching display mode to: ${newDisplayMode ? 'themed' : 'standard'}`);
-      
-      // When switching back to standard display and using simplified mode
-      // make sure we have simplified responses available
-      if (!newDisplayMode && isSimplifiedMode && !simplifiedResponses.length && responses.length > 0) {
-        // If we need to generate simplified responses
+      // If switching to simplified mode but we don't have simplified responses yet
+      if (newMode && responses.length > 0 && !simplifiedResponses.length) {
+        // Generate simplified version on demand
         (async () => {
           try {
             setIsChangingTone(true);
@@ -544,68 +383,88 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             setSimplifiedResponses([simplified]);
             setStoredSimplifiedResponses({ normal: simplified });
             
-            if (isSimplifiedMode) {
+            if (!useThemedDisplay) {
               onResponsesUpdate?.(splitResponse(simplified));
             }
-            
             setIsChangingTone(false);
           } catch (error) {
             console.error('Error generating simplified response:', error);
+            // If we failed to generate simplified version, fall back to full version
             setIsSimplifiedMode(false);
             setIsChangingTone(false);
           }
         })();
+      } else if (responses.length > 0 && !useThemedDisplay) {
+        // If we already have the right responses, just update
+        const currentResponses = newMode ? simplifiedResponses : responses;
+        onResponsesUpdate?.(splitResponse(currentResponses[0]));
+      }
+      
+      return newMode;
+    });
+  }, [responses, simplifiedResponses, onResponsesUpdate, useThemedDisplay]);
+
+  /**
+   * Toggle between themed and standard display
+   */
+  const handleDisplayToggle = useCallback(() => {
+    // Keep track of current settings before toggle
+    const prevTone = selectedTone;
+    const prevSimplifiedMode = isSimplifiedMode;
+    
+    setUseThemedDisplay(prev => {
+      const newDisplayMode = !prev;
+      
+      // When switching to themed display, update UI state
+      if (newDisplayMode) {
+        // No need to change tone selection as it's visually disabled
+        // No need to change simplified mode as it's visually disabled
+      } else {
+        // When switching back to standard display, restore previous settings
+        if (isSimplifiedMode && !simplifiedResponses.length && responses.length > 0) {
+          // If we need to generate simplified responses
+          (async () => {
+            try {
+              setIsChangingTone(true);
+              const simplified = await OpenAIService.simplifyAnalysis(responses[0]);
+              setSimplifiedResponses([simplified]);
+              setStoredSimplifiedResponses({ normal: simplified });
+              onResponsesUpdate?.(splitResponse(simplified));
+              setIsChangingTone(false);
+            } catch (error) {
+              console.error('Error generating simplified response:', error);
+              setIsSimplifiedMode(false);
+              setIsChangingTone(false);
+            }
+          })();
+        }
+      }
+      
+      // Update parent with appropriate responses based on new display mode
+      if (newDisplayMode && themedResponses.length > 0) {
+        // If switching to themed display, pass all themed points
+        const allPoints = themedResponses.flatMap(theme => theme.points);
+        onResponsesUpdate?.(allPoints);
+      } else if (!newDisplayMode && responses.length > 0) {
+        // If switching to standard display, use the normal or simplified responses
+        const currentResponses = isSimplifiedMode ? simplifiedResponses : responses;
+        if (currentResponses.length > 0) {
+          onResponsesUpdate?.(splitResponse(currentResponses[0]));
+        }
       }
       
       return newDisplayMode;
     });
-  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate]);
+  }, [themedResponses, responses, simplifiedResponses, isSimplifiedMode, selectedTone, onResponsesUpdate]);
 
   /**
    * Handle tone changes and update responses accordingly
    */
   const handleToneChange = useCallback(async (newTone: string) => {
+    // Don't process tone changes if themed display is active
+    if (useThemedDisplay) return;
+    
     setSelectedTone(newTone);
-    
-    // For themed display, adjust tone of each themed point
-    if (useThemedDisplay && themedResponses.length > 0) {
-      try {
-        setIsChangingTone(true);
-        
-        // Process each theme's points
-        const updatedThemedResponses = await Promise.all(
-          themedResponses.map(async (theme) => {
-            // If no tone selected, use original versions (this needs original storage)
-            if (!newTone) {
-              return theme; // Simplified - in real implementation, restore originals
-            }
-            
-            // Adjust tone of each point in the theme
-            const adjustedPoints = await Promise.all(
-              theme.points.map(point => 
-                OpenAIService.adjustPointTone(point, newTone)
-              )
-            );
-            
-            return { ...theme, points: adjustedPoints };
-          })
-        );
-        
-        setThemedResponses(updatedThemedResponses);
-        
-        // Update parent with all themed points (with adjusted tone)
-        const allPoints = updatedThemedResponses.flatMap(theme => theme.points);
-        onResponsesUpdate?.(allPoints);
-        
-        setIsChangingTone(false);
-      } catch (error) {
-        console.error('Error adjusting tone for themed responses:', error);
-        setIsChangingTone(false);
-      }
-      return;
-    }
-    
-    // Original logic for standard display
     if (!responses.length) return;
 
     try {
@@ -661,7 +520,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     } finally {
       setIsChangingTone(false);
     }
-  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, storedFullResponses, storedSimplifiedResponses, useThemedDisplay, themedResponses]);
+  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, storedFullResponses, storedSimplifiedResponses, useThemedDisplay]);
 
   // Store responses in local storage
   useEffect(() => {
@@ -728,17 +587,16 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
   // Add effect to update responses when mode changes
   useEffect(() => {
-    // If we have responses available
-    if (responses.length > 0) {
-      const currentPoints = splitResponse(
-        (isSimplifiedMode && simplifiedResponses.length > 0) ? simplifiedResponses[0] : responses[0]
-      );
-      
-      // Update parent with current points - these are the same underlying points
-      // regardless of display mode
-      onResponsesUpdate?.(currentPoints);
+    if (useThemedDisplay && themedResponses.length > 0) {
+      const allPoints = themedResponses.flatMap(theme => theme.points);
+      onResponsesUpdate?.(allPoints);
+    } else {
+      const currentResponses = isSimplifiedMode ? simplifiedResponses : responses;
+      if (currentResponses.length > 0) {
+        onResponsesUpdate?.(splitResponse(currentResponses[0]));
+      }
     }
-  }, [isSimplifiedMode, useThemedDisplay, responses, simplifiedResponses, onResponsesUpdate]);
+  }, [isSimplifiedMode, useThemedDisplay, responses, simplifiedResponses, themedResponses, onResponsesUpdate]);
 
   // Reset stored responses when analysis is refreshed
   useEffect(() => {
@@ -791,106 +649,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               onNewPoints={handleNewResponsePoints}
               skipParentCallback={true}
             />
-            
-            {/* Theme Management */}
-            {useThemedDisplay && (
-              <div style={{ 
-                marginBottom: '16px', 
-                backgroundColor: '#f0f7ff', 
-                padding: '12px', 
-                borderRadius: '8px',
-                border: '1px solid #d0e0ff'
-              }}>
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  marginBottom: '8px'
-                }}>
-                  <span style={{ fontWeight: '500' }}>Design Themes</span>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      onClick={async () => {
-                        try {
-                          setLoading(true);
-                          setError(null);
-                          console.log("Refreshing themes directly from the board...");
-                          
-                          // Clear theme positions cache to force a complete refresh
-                          await DesignThemeService.clearThemePositions();
-                          
-                          // Get fresh themes from the board
-                          const freshThemes = await DesignThemeService.getCurrentThemesFromBoard();
-                          console.log(`Refreshed ${freshThemes.length} themes from board`);
-                          
-                          // Update UI with fresh themes
-                          // Re-use existing themed responses but update with fresh theme data
-                          const updatedThemedResponses = themedResponses.map(themed => {
-                            // Find matching fresh theme by name
-                            const matchingTheme = freshThemes.find(t => 
-                              t.name.toLowerCase() === themed.name.toLowerCase() ||
-                              t.name.toLowerCase().includes(themed.name.toLowerCase()) ||
-                              themed.name.toLowerCase().includes(t.name.toLowerCase())
-                            );
-                            
-                            if (matchingTheme) {
-                              return {
-                                ...themed,
-                                name: matchingTheme.name,
-                                color: matchingTheme.color
-                              };
-                            }
-                            return themed;
-                          });
-                          
-                          setThemedResponses(updatedThemedResponses);
-                          setLoading(false);
-                        } catch (error) {
-                          console.error('Error refreshing themes:', error);
-                          setError('Failed to refresh themes: ' + (error as Error).message);
-                          setLoading(false);
-                        }
-                      }}
-                      className="button button-secondary"
-                      style={{ padding: '4px 8px', fontSize: '13px' }}
-                      disabled={loading}
-                      title="Refresh themes directly from the board"
-                    >
-                      Refresh Themes
-                    </button>
-                    <button
-                      onClick={generateAndVisualizeThemes}
-                      className="button button-secondary"
-                      style={{ padding: '4px 8px', fontSize: '13px' }}
-                      disabled={loading}
-                      title="Generate new themes and visualize them on the board"
-                    >
-                      Generate Themes
-                    </button>
-                    <button
-                      onClick={addDesignThemes}
-                      className="button button-secondary"
-                      style={{ padding: '4px 8px', fontSize: '13px' }}
-                      disabled={loading}
-                      title="Calculate positions for existing themes without creating new ones"
-                    >
-                      Calculate Positions
-                    </button>
-                  </div>
-                </div>
-                <div style={{ fontSize: '13px', color: '#666' }}>
-                  {themedResponses.length > 0 ? (
-                    <ul style={{ margin: '0', paddingLeft: '20px' }}>
-                      {themedResponses.map(theme => (
-                        <li key={theme.name}>{theme.name} ({theme.points.length} points)</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p style={{ margin: '0' }}>No themed responses available</p>
-                  )}
-                </div>
-              </div>
-            )}
             
             <AnalysisControls
               selectedTone={selectedTone}
