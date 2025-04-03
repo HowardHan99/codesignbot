@@ -104,6 +104,7 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
         display: 'flex',
         gap: '10px',
         alignItems: 'center',
+        position: 'relative'
       }}>
         {/* Tone Selection */}
         <div style={{ 
@@ -117,7 +118,10 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
             value={selectedTone}
             onChange={(e) => onToneChange(e.target.value)}
             className="select"
-            style={{ flex: 1 }}
+            style={{ 
+              flex: 1,
+              opacity: 1 // Always fully visible
+            }}
           >
             <option value="">Normal</option>
             <option value="persuasive">Persuasive</option>
@@ -133,19 +137,23 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
           gap: '2px'
         }}>
           <label style={{ fontSize: '14px', fontWeight: '500', whiteSpace: 'nowrap' }}>Message:</label>
-          <label className="toggle" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
+          <label className="toggle" style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            cursor: 'pointer', 
+            margin: 0 
+          }}>
             <input 
               type="checkbox" 
               tabIndex={0}
               checked={isSimplifiedMode}
               onChange={onModeToggle}
-              disabled={useThemedDisplay}
             />
             <span style={{ 
               marginLeft: '0px', 
               fontSize: '14px', 
               whiteSpace: 'nowrap',
-              opacity: useThemedDisplay ? 0.5 : 1
+              opacity: 1 // Always fully visible
             }}>
               {isSimplifiedMode ? 'Simple' : 'Full'}
             </span>
@@ -154,7 +162,7 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
       </div>
 
       {/* Simplified Mode Note */}
-      {isSimplifiedMode && !useThemedDisplay && (
+      {isSimplifiedMode && (
         <div style={{ 
           fontSize: '13px', 
           color: '#666',
@@ -177,7 +185,7 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
           marginTop: '4px',
           paddingTop: '12px'
         }}>
-          💡 Currently showing themed points. Each theme contains 5 specific criticisms related to that theme's focus.
+          💡 Currently showing themed points. Each theme contains points related to that theme's focus.
         </div>
       )}
     </div>

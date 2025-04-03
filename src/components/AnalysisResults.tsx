@@ -103,8 +103,28 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
         <div style={{ opacity: isChangingTone ? 0.3 : 1, transition: 'opacity 0.2s' }}>
           {/* Header showing current mode and tone */}
           <strong style={{ display: 'block', marginBottom: '12px' }}>
-            Analysis Points {isSimplifiedMode ? '(Simplified)' : ''} {selectedTone ? `(${selectedTone} tone)` : ''}
+            {useThemedDisplay && themedResponses.length > 0 ? 
+              'Themed Analysis Points' : 
+              `Analysis Points ${isSimplifiedMode ? '(Simplified)' : ''} ${selectedTone ? `(${selectedTone} tone)` : ''}`
+            }
           </strong>
+          
+          {/* Helper text explaining themed mode limitations */}
+          {useThemedDisplay && themedResponses.length > 0 && (
+            <div style={{ 
+              marginBottom: '15px', 
+              fontSize: '13px', 
+              color: '#666',
+              backgroundColor: '#f5f5f5',
+              padding: '8px',
+              borderRadius: '4px',
+              display: 'flex',
+              alignItems: 'center'
+            }}>
+              <span style={{ marginRight: '6px' }}>💡</span>
+              <span>Currently showing themed points. Each theme contains specific criticisms related to that theme's focus. You can adjust tone and simplify points using the controls above.</span>
+            </div>
+          )}
           
           {/* Themed display */}
           {useThemedDisplay && themedResponses.length > 0 ? (

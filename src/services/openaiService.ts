@@ -344,4 +344,92 @@ First point here ** ** Second point here ** ** Third point here ** ** Fourth poi
     // Wait for all analyses to complete
     return Promise.all(themeAnalysesPromises);
   }
+
+  /**
+   * Simplifies a single analysis point to make it more concise
+   * @param point - The analysis point to simplify
+   * @returns Promise resolving to simplified point
+   */
+  public static async simplifyPoint(point: string): Promise<string> {
+    const systemPrompt = `You are helping to simplify design criticism points to make them more concise and actionable.
+
+Task: Simplify the given design criticism point to make it more concise while preserving the core critique.
+
+Guidelines:
+1. Reduce the length by 30-50% while preserving the main idea
+2. Remove unnecessary explanations but keep the key concern
+3. Maintain the tone of the original point
+4. Make it direct and actionable
+5. Don't add any new criticism that wasn't in the original`;
+
+    const result = await this.makeRequest('/api/openaiwrap', {
+      userPrompt: point,
+      systemPrompt,
+      useGpt4: true
+    });
+
+    // Remove any bullets or numbering the AI might have added
+    let simplified = result.response.replace(/^\s*[\d*-]+\s*/, '').trim();
+    
+    // If somehow we got a completely empty result, return the original
+    if (!simplified) {
+      simplified = point;
+    }
+
+    return simplified;
+  }
+
+  /**
+   * Adjusts the tone of a single analysis point
+   * @param point - The analysis point to adjust
+   * @param tone - The target tone (persuasive, aggressive, critical)
+   * @returns Promise resolving to tone-adjusted point
+   */
+  public static async adjustPointTone(point: string, tone: string): Promise<string> {
+    // Map the tone to a more descriptive guideline
+    let toneGuideline = '';
+    switch (tone) {
+      case 'persuasive':
+        toneGuideline = 'This should sound convincing, empathetic, and focused on mutual benefit. Use persuasive language that appeals to shared goals and values.';
+        break;
+      case 'aggressive':
+        toneGuideline = 'This should sound forceful, direct, and uncompromising. Use strong language and be very direct about the issues.';
+        break;
+      case 'critical':
+        toneGuideline = 'This should sound analytical, detailed, and thorough in the criticism. Emphasize specific flaws and why they are problematic.';
+        break;
+      default:
+        // If an unrecognized tone, default to normal
+        return point;
+    }
+
+    const systemPrompt = `You are helping to adjust the tone of design criticism points without changing their core message.
+
+Task: Rewrite the given design criticism point in a ${tone} tone.
+
+Tone guidelines: ${toneGuideline}
+
+IMPORTANT:
+1. Do NOT change the core criticism or concern
+2. Do NOT add new criticisms or remove existing ones
+3. Only change the tone and wording
+4. Keep approximately the same length
+5. Maintain the same level of technical detail`;
+
+    const result = await this.makeRequest('/api/openaiwrap', {
+      userPrompt: point,
+      systemPrompt,
+      useGpt4: true
+    });
+
+    // Remove any bullets or numbering the AI might have added
+    let adjusted = result.response.replace(/^\s*[\d*-]+\s*/, '').trim();
+    
+    // If somehow we got a completely empty result, return the original
+    if (!adjusted) {
+      adjusted = point;
+    }
+
+    return adjusted;
+  }
 } 

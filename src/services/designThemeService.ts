@@ -5,6 +5,7 @@ import { MiroApiClient } from './miro/miroApiClient';
 import { ProcessedDesignPoint } from '../types/common';
 import { safeApiCall } from '../utils/errorHandlingUtils';
 import { Frame, StickyNote } from '@mirohq/websdk-types';
+import { OpenAIService } from '../services/openaiService';
 
 /**
  * Theme or group identified from design content
@@ -14,6 +15,13 @@ interface DesignTheme {
   description: string;    // Theme description
   relatedPoints: string[]; // Related design points
   color: string;          // Color for visualization
+  icon?: string;          // Optional icon
+}
+
+// Add the theme type in OpenAIService
+interface ThemeResponse {
+  name: string;
+  description: string;
 }
 
 /**
@@ -47,7 +55,37 @@ export class DesignThemeService {
   private static themePositions: Map<string, {x: number, y: number, themeIndex: number}> = new Map();
 
   /**
-   * Generate themes from design proposals and thinking dialogue
+   * Clear cached theme positions to force a fresh calculation
+   */
+  public static clearThemePositions(): void {
+    console.log('Clearing cached theme positions');
+    this.themePositions.clear();
+  }
+
+  /**
+   * Get the currently stored theme positions
+   * @returns The map of theme positions
+   */
+  public static getThemePositions(): Map<string, {x: number, y: number, themeIndex: number}> {
+    return this.themePositions;
+  }
+
+  /**
+   * This is a mock implementation - the actual method should be added to OpenAIService
+   */
+  private static async mockGenerateThemes(text: string): Promise<ThemeResponse[]> {
+    console.log("Mocking theme generation - please implement OpenAIService.generateThemes");
+    return [
+      { name: "User Experience", description: "Focus on user interactions and experiences" },
+      { name: "Technical Feasibility", description: "Consideration of technical implementation challenges" },
+      { name: "Accessibility", description: "Ensuring the design is accessible to all users" },
+      { name: "Innovation", description: "Novel approaches and creative solutions" }
+    ];
+  }
+
+  /**
+   * Generate design themes based on the input text
+   * @returns Array of design themes
    */
   public static async generateDesignThemes(): Promise<DesignTheme[]> {
     if (this.isProcessing) {
@@ -372,14 +410,6 @@ Example of CORRECT response format:
   }
   
   /**
-   * Get positions for sticky notes under themes
-   * Returns a map of theme names to positions
-   */
-  public static getThemePositions(): Map<string, {x: number, y: number, themeIndex: number}> {
-    return this.themePositions;
-  }
-  
-  /**
    * Calculate position for sticky notes under a theme
    */
   public static calculateStickyNotePosition(frame: Frame, themeIndex: number): {x: number, y: number} {
@@ -546,31 +576,66 @@ Example of CORRECT response format:
 
       // Handle case where no themes were found
       if (themes.length === 0) {
-        // Create informative message in the frame
-        await miro.board.createText({
-          content: 'No themes could be identified from the current content.\nPlease ensure there are Design Proposals and Thinking Dialogue notes available.',
-          x: themeFrame.x,
-          y: themeFrame.y,
-          width: themeFrame.width - 100,
-          style: {
-            textAlign: 'center',
-            fontSize: 16
-          }
-        });
-        
-        // Zoom to frame and return
-        await miro.board.viewport.zoomTo(themeFrame);
-        console.log('No themes to visualize');
+        console.log('No themes to visualize, skipping visualization');
         return;
       }
 
-      // Limit to 4 themes if we have more
-      const themesToShow = themes.slice(0, 4);
-
-      // Create theme groups
+      // Check for existing themes to avoid duplicates
+      console.log("Checking for existing themes to avoid duplicates...");
+      const existingThemeNames = new Set<string>();
+      
+      // Get text elements within the frame to identify existing theme names
+      const textsInFrame = await MiroFrameService.getItemsWithinFrame(themeFrame, ['text']);
+      for (const text of textsInFrame) {
+        if (text.content) {
+          const cleanContent = text.content.replace(/<\/?[^>]+(>|$)/g, '').trim();
+          existingThemeNames.add(cleanContent.toLowerCase());
+        }
+      }
+      
+      console.log(`Found ${existingThemeNames.size} existing theme names in frame`);
+      
+      // Filter out themes that already exist on the board
+      const themesToShow = themes.filter(theme => {
+        const lowerThemeName = theme.name.toLowerCase();
+        if (existingThemeNames.has(lowerThemeName)) {
+          console.log(`Theme "${theme.name}" already exists on board, skipping visualization`);
+          return false;
+        }
+        return true;
+      });
+      
+      console.log(`Creating ${themesToShow.length} new themes (${themes.length - themesToShow.length} skipped as duplicates)`);
+      
+      // Create theme groups only for new themes
       for (let i = 0; i < themesToShow.length; i++) {
         console.log(`Creating theme ${i+1}/${themesToShow.length}: "${themesToShow[i].name}"`);
         await this.createThemeGroup(themesToShow[i], themeFrame, i);
+      }
+
+      // Ensure we calculate positions for all themes, including existing ones
+      // This ensures we have positions for sticky note placement
+      console.log("Calculating positions for all themes...");
+      for (let i = 0; i < themes.length; i++) {
+        const theme = themes[i];
+        
+        // Skip if we already calculated position for this theme
+        if (this.themePositions.has(theme.name)) {
+          console.log(`Position for "${theme.name}" already calculated, skipping`);
+          continue;
+        }
+        
+        // Calculate sticky note position for this theme
+        const position = this.calculateStickyNotePosition(themeFrame, i % 4);
+        
+        // Store position for future sticky notes
+        this.themePositions.set(theme.name, {
+          x: position.x,
+          y: position.y,
+          themeIndex: i % 4
+        });
+        
+        console.log(`Calculated position for "${theme.name}": x=${position.x}, y=${position.y}`);
       }
 
       console.log('All themes created, zooming to frame');
@@ -697,153 +762,148 @@ Example of CORRECT response format:
         return [];
       }
       
-      // Get all text elements and shapes within the frame using the generic function
+      // Reset the theme positions map to ensure clean state
+      this.themePositions.clear();
+      
+      // Get text elements within the frame - these are our potential themes
       const textsInFrame = await MiroFrameService.getItemsWithinFrame(themeFrame, ['text']);
-      const shapesInFrame = await MiroFrameService.getItemsWithinFrame(themeFrame, ['shape']);
       
       if (textsInFrame.length === 0) {
         console.log(`No text elements found in ${this.THEME_FRAME_NAME} frame`);
         return [];
       }
       
-      console.log(`Found ${textsInFrame.length} text elements and ${shapesInFrame.length} shapes in ${this.THEME_FRAME_NAME} frame`);
+      console.log(`Found ${textsInFrame.length} text elements in the frame`);
       
-      // Define row information
-      const rowHeight = themeFrame.height / 4; // 4 rows
+      // Clean the text content
+      const cleanedTexts = textsInFrame.map(text => {
+        return {
+          ...text,
+          content: text.content ? text.content.replace(/<\/?[^>]+(>|$)/g, '').trim() : ''
+        };
+      });
+
+      // Log all found text elements
+      console.log("All text elements in frame:");
+      cleanedTexts.forEach(text => {
+        console.log(`- "${text.content}" at position ${text.x}, ${text.y}`);
+      });
+      
+      // Filter for potential theme headers - main theme titles
+      // Looking for centered, short text elements
+      const potentialThemes = cleanedTexts.filter(text => {
+        // Skip empty or very long text
+        if (!text.content || text.content.length > 50) return false;
+        
+        // Themes are typically centered in the frame horizontally
+        const isCentered = Math.abs(text.x - themeFrame.x) < 300;
+        
+        // Skip text elements with certain characteristics not typical of headers
+        const isPossiblyHeader = 
+          !text.content.includes('notes position') && 
+          !text.content.includes('No themes could be identified');
+        
+        return isCentered && isPossiblyHeader;
+      });
+      
+      console.log(`Found ${potentialThemes.length} potential theme headers`);
+      
+      // Sort themes by vertical position (top to bottom)
+      potentialThemes.sort((a, b) => a.y - b.y);
+      
+      // Track seen theme names to avoid duplicates in the result
+      const seenThemeNames = new Set<string>();
+      
+      // Frame dimensions for row calculation
       const frameTop = themeFrame.y - themeFrame.height/2;
+      const rowHeight = themeFrame.height / Math.max(4, potentialThemes.length); // Adapt row height to number of themes
       
-      // Clean up the theme's frame first - remove any HTML tags from text content
-      textsInFrame.forEach(text => {
-        if (text.content) {
-          text.content = text.content.replace(/<\/?[^>]+(>|$)/g, '');
-        }
-      });
-      
-      // Find theme headers (text elements positioned near the top of each row)
-      let themeHeaders = textsInFrame.filter(text => {
-        // Skip empty content or position marker labels
-        if (!text.content || text.content.trim() === '' || text.content.includes('notes position')) {
-          return false;
-        }
-        
-        // Horizontal position check - theme headers are centered
-        const isCentered = Math.abs(text.x - themeFrame.x) < 100;
-        
-        // Calculate which row this text belongs to
-        const relativeY = text.y - frameTop;
-        const row = Math.floor(relativeY / rowHeight);
-        
-        // Theme headers are positioned at around 5% of the row height
-        const rowTopY = frameTop + (row * rowHeight);
-        const expectedHeaderY = rowTopY + (rowHeight * 0.05);
-        const isAtHeaderPosition = Math.abs(text.y - expectedHeaderY) < 20; // Allow small margin
-        
-        return isCentered && isAtHeaderPosition;
-      });
-      
-      console.log(`Found ${themeHeaders.length} potential theme headers before deduplication`);
-      
-      // Deduplicate theme headers by row - keep only the most recently created text element in each row
-      const uniqueThemesByRow: Record<number, any> = {};
-      
-      for (const header of themeHeaders) {
-        const relativeY = header.y - frameTop;
-        const row = Math.floor(relativeY / rowHeight);
-        
-        // If this row doesn't have a header yet, or this one is more recent (likely newer)
-        // Note: Assuming created objects have newer IDs or createdAt timestamps
-        if (!uniqueThemesByRow[row] || header.id > uniqueThemesByRow[row].id) {
-          uniqueThemesByRow[row] = header;
-        }
-      }
-      
-      // Convert back to array and sort by row
-      themeHeaders = Object.values(uniqueThemesByRow).sort((a, b) => {
-        const rowA = Math.floor((a.y - frameTop) / rowHeight);
-        const rowB = Math.floor((b.y - frameTop) / rowHeight);
-        return rowA - rowB;
-      });
-      
-      console.log(`After deduplication, found ${themeHeaders.length} unique theme headers`);
-      
-      // Process each theme header to create theme objects
+      // Create theme objects with colors and positions
       const themes: DesignTheme[] = [];
-      const usedThemeNames = new Set<string>(); // Track used theme names to avoid duplicates
       
-      for (const header of themeHeaders) {
-        // Clean up header content (remove any residual HTML tags)
-        const themeName = header.content.trim();
+      for (let i = 0; i < potentialThemes.length; i++) {
+        const themeText = potentialThemes[i];
         
-        // Skip duplicate theme names and limit to 4 themes
-        if (usedThemeNames.has(themeName) || themes.length >= 4) {
+        // Skip empty content
+        if (!themeText.content) continue;
+        
+        // Skip duplicate themes (don't add number suffix, just skip)
+        if (seenThemeNames.has(themeText.content.toLowerCase())) {
+          console.log(`Skipping duplicate theme: "${themeText.content}"`);
           continue;
         }
         
-        usedThemeNames.add(themeName);
+        // Mark this theme name as seen
+        seenThemeNames.add(themeText.content.toLowerCase());
         
-        // Determine which row this header is in
-        const relativeY = header.y - frameTop;
+        // Calculate which row this theme is in
+        const relativeY = themeText.y - frameTop;
         const row = Math.floor(relativeY / rowHeight);
         
-        // Find the associated shape (theme bar)
-        const themeBar = shapesInFrame.find(shape => {
-          const shapeRelativeY = shape.y - frameTop;
-          const shapeRow = Math.floor(shapeRelativeY / rowHeight);
-          return shapeRow === row;
+        // Assign a color based on position
+        const themeColor = this.THEME_COLORS[i % this.THEME_COLORS.length];
+        
+        // Calculate sticky note position for this theme
+        const position = this.calculateStickyNotePosition(themeFrame, row);
+        
+        // Store position for future sticky notes
+        this.themePositions.set(themeText.content, {
+          x: position.x,
+          y: position.y,
+            themeIndex: row
         });
         
-        // Extract color from shape
-        let themeColor = 'light_yellow'; // Default color
-        if (themeBar && themeBar.style && themeBar.style.fillColor) {
-          // Convert hex to named color
-          const hexColor = themeBar.style.fillColor;
-          for (const [colorName, colorHex] of Object.entries(this.COLOR_HEX_MAP)) {
-            if (colorHex.toLowerCase() === hexColor.toLowerCase()) {
-              themeColor = colorName as any;
-              break;
-            }
-          }
-        }
-        
-        // Get the stored position for this theme
-        let position = this.themePositions.get(themeName);
-        
-        // If position not found in map, calculate it based on the row
-        if (!position) {
-          const calculatedPosition = this.calculateStickyNotePosition(themeFrame, row);
-          position = {
-            x: calculatedPosition.x,
-            y: calculatedPosition.y,
-            themeIndex: row
-          };
-          // Store for future use
-          this.themePositions.set(themeName, position);
-        }
-        
-        // Create the theme object
+        // Create theme object
         themes.push({
-          name: themeName,
-          description: "", // Empty description
-          relatedPoints: [], // Empty related points
+          name: themeText.content,
+          description: "",
+          relatedPoints: [],
           color: themeColor
         });
         
-        console.log(`Found theme "${themeName}" in row ${row} with color ${themeColor}`);
+        console.log(`Added theme "${themeText.content}" with color ${themeColor} in row ${row}`);
       }
       
-      // Sort themes by row/index for consistency and take only the first 4
-      themes.sort((a, b) => {
-        const posA = this.themePositions.get(a.name);
-        const posB = this.themePositions.get(b.name);
-        return (posA?.themeIndex || 0) - (posB?.themeIndex || 0);
+      console.log(`Returning ${themes.length} themes found in the frame:`);
+      themes.forEach((theme, idx) => {
+        console.log(`[${idx}] "${theme.name}" with color ${theme.color}`);
       });
       
-      // Limit to exactly 4 themes
-      return themes.slice(0, 4);
+      return themes;
     } catch (error) {
       console.error(`Error getting current themes from board:`, error);
       return [];
     }
+  }
+ 
+  /**
+   * Clean header text by removing extra whitespace and formatting
+   * @param text The header text to clean
+   * @returns Cleaned header text
+   */
+  private static cleanHeaderText(text: string): string {
+    if (!text) return '';
+    
+    // Remove HTML tags
+    let cleaned = text.replace(/<\/?[^>]+(>|$)/g, '');
+    
+    // Remove extra whitespace
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    
+    return cleaned;
+  }
+
+  /**
+   * Sort headers by their position
+   */
+  private static sortHeadersByPosition(a: any, b: any): number {
+    // First sort by Y position (top to bottom)
+    if (a.y !== b.y) {
+      return a.y - b.y;
+    }
+    
+    // If Y is the same, sort by X position (left to right)
+    return a.x - b.x;
   }
 
   /**
@@ -937,9 +997,13 @@ Example of CORRECT response format:
   /**
    * Categorize antagonistic points by design themes
    * @param points Array of antagonistic points to categorize
+   * @param existingThemes Optional array of existing themes to use instead of generating new ones
    * @returns Points organized by design themes (2 themes with 5 points each)
    */
-  public static async categorizeAntagonisticPointsByTheme(points: string[]): Promise<{
+  public static async categorizeAntagonisticPointsByTheme(
+    points: string[], 
+    existingThemes?: DesignTheme[]
+  ): Promise<{
     themes: {
       name: string;
       color: string;
@@ -953,9 +1017,16 @@ Example of CORRECT response format:
 
       console.log(`Categorizing ${points.length} antagonistic points into themes`);
       
-      // Get the current design themes
-      const themes = await this.generateDesignThemes();
-      console.log(`Retrieved ${themes.length} design themes for categorization`);
+      // Get the themes - either use existing ones or generate new ones
+      let themes: DesignTheme[];
+      if (existingThemes && existingThemes.length > 0) {
+        console.log(`Using ${existingThemes.length} existing themes for categorization`);
+        themes = existingThemes;
+      } else {
+        console.log('No existing themes provided, generating new themes');
+        themes = await this.generateDesignThemes();
+      }
+      console.log(`Using ${themes.length} design themes for categorization`);
       
       // We'll use only the first 2 themes for organization
       const themesToUse = themes.slice(0, 2);
@@ -1144,5 +1215,33 @@ ${points.map((point, index) => `${index + 1}. ${point}`).join('\n')}`;
       
       return result;
     }
+  }
+
+  /**
+   * Normalize text by removing extra whitespace and making it lowercase
+   * @param text The text to normalize
+   * @returns Normalized text
+   */
+  private static normalizeText(text: string): string {
+    if (!text) return '';
+    return text.replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  /**
+   * Is the given text likely a header?
+   * @param text The text to check
+   * @returns True if the text is likely a header
+   */
+  private static isLikelyHeader(text: string): boolean {
+    if (!text) return false;
+    
+    // Headers tend to be short
+    if (text.length > 50) return false;
+    
+    // Headers typically don't contain complete sentences or punctuation
+    const hasSentencePunctuation = text.includes('.') || text.includes('?') || text.includes('!');
+    const hasComplexStrcture = text.includes(',') && text.length > 20;
+    
+    return !hasSentencePunctuation && !hasComplexStrcture;
   }
 } 
