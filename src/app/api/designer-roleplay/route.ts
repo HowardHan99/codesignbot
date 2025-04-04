@@ -55,14 +55,14 @@ YOUR THINKING PROCESS will be captured in the "thinking" section of your respons
 - How you evaluate and refine potential solutions
 - Any challenges you identify and how you might address them
 
-YOUR RESPONSE should ONLY include the final design decisions, presented as a concise, numbered list under the heading "## Design Decisions":
+YOUR RESPONSE should ONLY include the final design decisions, presented as clear bullet points under the heading "## Design Decisions":
 
 ## Design Decisions
-1. [First key design decision]
-2. [Second key design decision]
+- [First key design decision]
+- [Second key design decision]
 ...and so on
 
-Each design decision should be concrete, actionable, and represent the key components of your solution.`;
+Do not number the design decisions. Each design decision should be a concise, actionable point that represents a key component of your solution.`;
 
 /**
  * Designer Role Play API Route
