@@ -14,6 +14,7 @@ import { DesignerRolePlayService, DesignerModelType } from '../services/designer
 import { DesignThemeService } from '../services/designThemeService';
 import { MiroFrameService } from '../services/miro/frameService';
 import { DesignThemeDisplay } from './DesignThemeDisplay';
+import { StickyNoteService } from '../services/miro/stickyNoteService';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   loading: () => <div>Loading...</div>,
@@ -231,6 +232,7 @@ export function MainBoard({
   const [thinking, setThinking] = useState<string[]>([]);
   const [roleplayLoading, setRoleplayLoading] = useState<boolean>(false);
   const [rolePlayError, setRolePlayError] = useState<string>("");
+  const [stickyCharLimit, setStickyCharLimit] = useState<number>(StickyNoteService.getStickyCharLimit());
 
   // Memoize the decision tree to avoid unnecessary recalculations
   const decisionTree = useMemo(() => {
@@ -606,6 +608,22 @@ export function MainBoard({
   useEffect(() => {
     getDesignFrameId();
   }, []);
+
+  // Keep this useEffect for sticky char limit initialization
+  useEffect(() => {
+    // Set the initial sticky character limit from the service
+    setStickyCharLimit(StickyNoteService.getStickyCharLimit());
+  }, []);
+
+  // Keep this handler function for programmatic updates to sticky char limit
+  const handleStickyCharLimitChange = (newLimit: number) => {
+    if (!isNaN(newLimit) && newLimit > 0) {
+      setStickyCharLimit(newLimit);
+      StickyNoteService.setStickyCharLimit(newLimit);
+      console.log(`Sticky note character limit updated to ${newLimit}`);
+      miro.board.notifications.showInfo(`Sticky note character limit updated to ${newLimit}`);
+    }
+  };
 
   const callClaudeDesigner = async (designPrompt: string): Promise<DesignOutput> => {
     console.log('[DesignDecisions] Calling Claude designer with prompt length:', designPrompt.length);

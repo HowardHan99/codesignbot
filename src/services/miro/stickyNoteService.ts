@@ -15,6 +15,178 @@ type ColorCategory = 'highRelevance' | 'mediumRelevance' | 'lowRelevance';
  * Service for handling sticky note creation and positioning in Miro
  */
 export class StickyNoteService {
+  // Configurable character limit for sticky notes
+  private static STICKY_CHAR_LIMIT = 250; // Increased from 80 to 250
+
+  /**
+   * Set the sticky note character limit
+   * @param limit New character limit to use
+   */
+  public static setStickyCharLimit(limit: number): void {
+    if (limit > 0) {
+      this.STICKY_CHAR_LIMIT = limit;
+      console.log(`Sticky note character limit set to ${limit}`);
+    } else {
+      console.error(`Invalid character limit: ${limit}. Must be positive.`);
+    }
+  }
+
+  /**
+   * Get the current sticky note character limit
+   * @returns Current character limit
+   */
+  public static getStickyCharLimit(): number {
+    return this.STICKY_CHAR_LIMIT;
+  }
+
+  /**
+   * Split content into chunks of maximum length
+   * This helps handle Miro's character limit by creating multiple sticky notes
+   * @param content The content to split
+   * @param maxLength Maximum length per chunk
+   * @private
+   */
+  private static splitContentIntoChunks(content: string, maxLength: number): string[] {
+    // If content is already short enough, return it as a single chunk
+    if (content.length <= maxLength) {
+      return [content];
+    }
+    
+    const chunks: string[] = [];
+    let remaining = content;
+    
+    while (remaining.length > 0) {
+      if (remaining.length <= maxLength) {
+        // Last piece fits completely
+        chunks.push(remaining);
+        break;
+      }
+      
+      // Find the last space within the maxLength limit
+      const lastSpaceIndex = remaining.substring(0, maxLength).lastIndexOf(' ');
+      
+      // If no space found or very early in the string, force break at maxLength
+      // CONFIGURABLE: This threshold determines when to use the last space vs. forcing a break
+      // Increase this value (e.g., 0.7) to prefer breaking at spaces even if they're earlier in text
+      // Decrease this value (e.g., 0.3) to prefer using more of the available space
+      const minSplitThreshold = 0.1; // EASY-TO-CONFIGURE: Controls minimum useful chunk size (0.0-1.0)
+      const breakPoint = lastSpaceIndex > maxLength * minSplitThreshold ? lastSpaceIndex : maxLength;
+      
+      // Extract the chunk
+      const chunk = remaining.substring(0, breakPoint).trim();
+      chunks.push(chunk);
+      
+      // Update remaining content
+      remaining = remaining.substring(breakPoint).trim();
+    }
+    
+    return chunks;
+  }
+
+  /**
+   * Create sticky notes for long content that exceeds Miro's character limit
+   * @param frame The frame to place the sticky notes in
+   * @param content The full content to split into multiple sticky notes
+   * @param baseX Base X coordinate for the first sticky
+   * @param baseY Base Y coordinate for the first sticky
+   * @param color The color to use for all sticky notes
+   * @param width Width for the sticky notes
+   * @private
+   */
+  private static async createMultipleStickyNotes(
+    frame: Frame,
+    content: string,
+    baseX: number,
+    baseY: number,
+    color: string,
+    width: number
+  ): Promise<any[]> {
+    // CONFIGURABLE: Adjust this value to control spacing between connected sticky notes
+    const VERTICAL_GAP = 40; // Gap between vertical sticky notes
+    
+    // Split the content into chunks that fit within the character limit
+    const chunks = this.splitContentIntoChunks(content, this.STICKY_CHAR_LIMIT);
+    
+    const createdStickies: any[] = [];
+    let previousSticky = null;
+    
+    // Create sticky notes for each chunk
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      // No longer adding numbering for multiple chunks
+      const displayContent = chunk;
+      
+      // Calculate position - stack vertically with increasing Y offset
+      // This ensures each sticky note appears below the previous one
+      const yOffset = i * (VERTICAL_GAP + 60); // Add extra space based on typical sticky height
+      
+      try {
+        // For linked stickies, use slightly different shade to visually distinguish parts
+        // Darken the color slightly for each subsequent sticky note
+        let adjustedColor = color;
+        if (i > 0 && color.startsWith('#')) {
+          // Simple color adjustment - make subsequent stickies slightly darker
+          try {
+            const colorValue = parseInt(color.slice(1), 16);
+            const darkenAmount = Math.min(i * 5, 20); // Limit darkening
+            const adjustedValue = Math.max(0, colorValue - darkenAmount * 65536 - darkenAmount * 256 - darkenAmount);
+            adjustedColor = '#' + adjustedValue.toString(16).padStart(6, '0');
+          } catch (e) {
+            // If color manipulation fails, use original color
+            adjustedColor = color;
+          }
+        }
+        
+        const sticky = await MiroApiClient.createStickyNote({
+          content: displayContent,
+          x: baseX,
+          y: baseY + yOffset,
+          width: width,
+          style: {
+            fillColor: adjustedColor
+          }
+        });
+        
+        if (sticky) {
+          createdStickies.push(sticky);
+          
+          // Connect with previous sticky if this isn't the first one
+          if (previousSticky && i > 0) {
+            try {
+              // CONFIGURABLE: You can customize the connector style here
+              await miro.board.createConnector({
+                start: {
+                  item: previousSticky.id,
+                  position: { x: 0.5, y: 1 } // Bottom of previous sticky
+                },
+                end: {
+                  item: sticky.id,
+                  position: { x: 0.5, y: 0 } // Top of current sticky
+                },
+                style: {
+                  strokeColor: '#4262ff', // CONFIGURABLE: Connector color
+                  strokeWidth: 1,         // CONFIGURABLE: Connector width
+                  strokeStyle: 'dashed'   // CONFIGURABLE: Connector style ('straight', 'dashed', etc)
+                }
+              });
+            } catch (connError) {
+              console.error('Error creating connector between sticky notes:', connError);
+            }
+          }
+          
+          previousSticky = sticky;
+          
+          // Add a small delay between sticky note creations
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (error) {
+        console.error(`Error creating sticky note for chunk ${i+1}:`, error);
+      }
+    }
+    
+    return createdStickies;
+  }
+
   /**
    * Create a new sticky note with relevance score
    * @param frame The frame to place the sticky note in
@@ -89,27 +261,45 @@ export class StickyNoteService {
         return null;
       }
       
-      // Create the sticky note
-      const sticky = await MiroApiClient.createStickyNote({
-        content,
-        x: adjustedX,
-        y: adjustedY,
-        width: width,
-        style: {
-          fillColor: color
-        }
-      });
+      // HANDLE MIRO'S CHARACTER LIMIT
       
-      if (sticky) {
-        // Verify correct frame assignment
-        if (sticky.parentId !== frame.id) {
-          console.error(`WARNING: Sticky note created with incorrect parentId: ${sticky.parentId} instead of ${frame.id}`);
-        }
+      // Check if content exceeds the character limit
+      if (content.length > this.STICKY_CHAR_LIMIT) {
+        // Create multiple sticky notes for the long content
+        const stickies = await this.createMultipleStickyNotes(
+          frame,
+          content,
+          adjustedX,
+          adjustedY,
+          color,
+          width
+        );
         
-        return sticky;
+        // Return the first sticky from the set
+        return stickies.length > 0 ? stickies[0] : null;
       } else {
-        console.error(`Failed to create sticky note - null response from API`);
-        return null;
+        // Content fits within limit, create a single sticky note
+        const sticky = await MiroApiClient.createStickyNote({
+          content: content,
+          x: adjustedX,
+          y: adjustedY,
+          width: width,
+          style: {
+            fillColor: color
+          }
+        });
+        
+        if (sticky) {
+          // Verify correct frame assignment
+          if (sticky.parentId !== frame.id) {
+            console.error(`WARNING: Sticky note created with incorrect parentId: ${sticky.parentId} instead of ${frame.id}`);
+          }
+          
+          return sticky;
+        } else {
+          console.error(`Failed to create sticky note - null response from API`);
+          return null;
+        }
       }
     } catch (error) {
       console.error(`Error creating sticky note:`, error);
@@ -340,7 +530,7 @@ export class StickyNoteService {
         return;
       }
       
-      console.log(`📌 Creating ${processedPoints.length} sticky notes in ${frameName} frame`);
+      console.log(`Creating sticky notes in ${frameName} frame`);
       
       // Get or create the frame
       const frame = await this.ensureFrameExists(frameName);
@@ -396,8 +586,6 @@ export class StickyNoteService {
         const point = pointsWithRelevance[i];
         
         try {
-          console.log(`Creating sticky note for: "${point.proposal.substring(0, 40)}..." (score: ${point.relevanceScore})`);
-          
           // Use the StickyNoteService to create the sticky note in the frame
           const stickyNote = await this.createStickyWithRelevance(
             frame,
@@ -418,7 +606,7 @@ export class StickyNoteService {
         }
       }
       
-      console.log(`✅ Created ${pointsWithRelevance.length} sticky notes in "${frameName}" frame`);
+      console.log(`Created ${pointsWithRelevance.length} sticky notes in "${frameName}" frame`);
     } catch (error) {
       console.error('Error creating sticky notes from points:', error);
       throw error;

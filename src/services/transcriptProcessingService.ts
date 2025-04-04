@@ -12,17 +12,19 @@ export class TranscriptProcessingService {
    * Process raw transcript into meaningful design proposals
    */
   static async processTranscript(transcript: string): Promise<ProcessedDesignPoint[]> {
-    const systemPrompt = `You are a transcript formatter. Your task is to break the raw transcript into MULTIPLE logical segments optimized for sticky notes.
+    // CONFIGURABLE: System prompt for transcript formatting
+    // Adjust these rules to control how transcripts are formatted into sticky notes
+    const systemPrompt = `You are a transcript formatter. Your task is to convert raw transcript text into meaningful content for sticky notes.
     
     Rules:
-    1. DO NOT summarize, translate, or change the content's meaning
-    2. Split the text into 2-5 segments that would fit well on sticky notes
-    3. Each segment MUST be a complete thought (at least one full sentence)
-    4. Maximum length per segment: 300 characters (aim for 150-250 characters)
-    5. Make clean breaks at natural points in the conversation
-    6. Fix basic punctuation and remove filler words
-    7. VERY IMPORTANT: Do not combine the entire transcript into a single segment
-    8. Each segment should read naturally on its own in a sticky note format
+    1. Preserve the original meaning without summarizing or changing the content
+    2. Only split the text if necessary for clarity or if it contains distinct topics
+    3. Each segment must be a complete, coherent thought
+    4. Length guidelines: Aim for 150-250 characters per segment, but prioritize preserving the full thought
+    5. Only split at natural break points (topic shifts, completed thoughts)
+    6. Fix punctuation and remove filler words
+    7. Do not artificially create multiple segments if the content is best understood as a single unit
+    8. If the original text is already a single coherent point, keep it as one segment
     
     Format each segment as:
     content: [The formatted segment]
@@ -35,6 +37,7 @@ export class TranscriptProcessingService {
       });
 
       // Only remove basic filler sounds, keep all other words
+      // CONFIGURABLE: Filler words to remove from transcript
       const cleanedTranscript = transcript
         .replace(/\b(um|uh|hmm|like)\b/gi, '')  // Remove common fillers
         .replace(/\s+/g, ' ')  // Normalize whitespace
@@ -47,9 +50,10 @@ export class TranscriptProcessingService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          userPrompt: `Split this transcript into multiple segments optimized for sticky notes (2-5 segments): ${cleanedTranscript}`,
+          // CONFIGURABLE: User prompt for formatting transcript
+          userPrompt: `Format this text into clear, coherent segments for sticky notes, preserving complete thoughts and logical flow: ${cleanedTranscript}`,
           systemPrompt,
-          useGpt4: true
+          useGpt4: true  // CONFIGURABLE: Whether to use GPT-4 for transcript processing
         }),
       });
 

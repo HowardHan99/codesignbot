@@ -3,6 +3,12 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { DesignerModelType } from '../../../services/designerRolePlayService';
 
+// Add type declarations for thinking and decision arrays
+interface ScoredDecision {
+  decision: string;
+  similarity: number;
+}
+
 // Initialize OpenAI API with environment variables
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -17,7 +23,7 @@ const anthropic = new Anthropic({
 });
 
 // System prompt for the designer role play
-const DESIGNER_SYSTEM_PROMPT = `You are an experienced professional product designer specializing in creating innovative solutions to complex problems. You approach design challenges with a structured thinking process, considering user needs, context, constraints, and opportunities. You think through problems step by step, focusing on user-centered design principles.
+const DESIGNER_SYSTEM_PROMPT = `You are an experienced professional designer. You approach design challenges with a structured thinking process, considering user needs, context, constraints, and opportunities. You think through problems step by step, focusing on user-centered design principles.
 
 Your task is to think through the given design challenge as if you were solving it in real time, and provide:
 
@@ -34,6 +40,29 @@ The thinking process should be detailed and showcase your thought process, inclu
 - Any challenges you identify and how you might address them
 
 The design decisions should be concrete, actionable points that represent the key components of your solution.`;
+
+// Update Claude system prompt to be more explicit about format
+const CLAUDE_SYSTEM_PROMPT = `You are an experienced professional designer. You approach design challenges with a structured thinking process, considering user needs, context, constraints, and opportunities. You think through problems step by step, focusing on user-centered design principles.
+
+Your task is to think through the given design challenge as if you were solving it in real time.
+
+YOUR THINKING PROCESS will be captured in the "thinking" section of your response, where you should explore:
+- How you understand and frame the problem
+- Key questions you ask yourself
+- How you might research the problem
+- How you identify user needs and pain points
+- Your ideation and brainstorming process
+- How you evaluate and refine potential solutions
+- Any challenges you identify and how you might address them
+
+YOUR RESPONSE should ONLY include the final design decisions, presented as a concise, numbered list under the heading "## Design Decisions":
+
+## Design Decisions
+1. [First key design decision]
+2. [Second key design decision]
+...and so on
+
+Each design decision should be concrete, actionable, and represent the key components of your solution.`;
 
 /**
  * Designer Role Play API Route
@@ -83,7 +112,7 @@ Please show your complete thinking process as you work through this design chall
           // Log the API key presence (not the actual key)
           console.log('[DESIGNER ROLE PLAY API] Anthropic API Key present:', !!process.env.ANTHROPIC_API_KEY);
           
-          // Only use Claude 3.7 Sonnet with thinking process
+          // Use the Claude-specific system prompt
           const model = 'claude-3-7-sonnet-20250219';  
           console.log(`[DESIGNER ROLE PLAY API] Using Claude model: ${model}`);
           
@@ -91,7 +120,7 @@ Please show your complete thinking process as you work through this design chall
           let params: any = {
             model: model,
             max_tokens: 8000,
-            system: DESIGNER_SYSTEM_PROMPT,
+            system: CLAUDE_SYSTEM_PROMPT, // Use Claude-specific prompt
             messages: [
               { 
                 role: 'user', 
@@ -158,8 +187,9 @@ Please show your complete thinking process as you work through this design chall
             }
           }
           
-          // Extract thinking content from the response
-          let thinkingContent = '';
+          // Simplified extraction process for Claude
+          // 1. Extract thinking content directly from thinking blocks
+          const thinkingPoints: string[] = [];
           try {
             if (completion.content) {
               // Get thinking blocks
@@ -167,148 +197,105 @@ Please show your complete thinking process as you work through this design chall
               console.log(`[DESIGNER ROLE PLAY API] Processing ${thinkingBlocks.length} thinking blocks`);
               
               if (thinkingBlocks.length > 0) {
-                // Extract thinking content directly from the block text
-                thinkingContent = thinkingBlocks
-                  .map(block => {
-                    // Log the block structure for debugging
-                    console.log('[DESIGNER ROLE PLAY API] Thinking block structure:', 
-                      JSON.stringify(block).substring(0, 300) + '...');
+                // Extract and process each thinking block into separate points
+                thinkingBlocks.forEach(block => {
+                  const thinkingContent = (block as any).thinking || '';
+                  if (thinkingContent && thinkingContent.trim().length > 0) {
+                    // Split thinking content into separate points
+                    const points = thinkingContent
+                      .split(/\n(?=-|\d+\.)/)
+                      .map((point: string) => point.trim())
+                      .filter((point: string) => point.length > 0);
                     
-                    // Access the thinking property from the block
-                    // Claude 3.7 thinking blocks have their content in a property called 'thinking'
-                    return (block as any).thinking || '';
-                  })
-                  .filter(content => content.length > 0)
-                  .join('\n\n');
+                    // If we found clear points, add them
+                    if (points.length > 0) {
+                      thinkingPoints.push(...points);
+                    } else {
+                      // Otherwise add the whole content as one point
+                      thinkingPoints.push(thinkingContent.trim());
+                    }
+                  }
+                });
                 
-                console.log(`[DESIGNER ROLE PLAY API] Combined thinking content length: ${thinkingContent.length} characters`);
-                console.log('[DESIGNER ROLE PLAY API] Thinking content preview:', thinkingContent.substring(0, 150) + '...');
+                console.log(`[DESIGNER ROLE PLAY API] Extracted ${thinkingPoints.length} thinking points`);
+                if (thinkingPoints.length > 0) {
+                  console.log('[DESIGNER ROLE PLAY API] First thinking point:', thinkingPoints[0].substring(0, 100) + '...');
+                }
               } else {
                 console.log('[DESIGNER ROLE PLAY API] No thinking blocks found in response');
               }
             }
           } catch (error) {
             console.error('[DESIGNER ROLE PLAY API] Error extracting thinking content:', error);
-            if (error instanceof Error) {
-              console.error('Error details:', error.message);
-              console.error('Error stack:', error.stack);
-            }
           }
-
-          // Process the thinking content
-          const thinkingPoints = [];
-          if (thinkingContent && typeof thinkingContent === 'string') {
-            console.log('[DESIGNER ROLE PLAY API] Processing thinking content');
-            try {
-              // Clean the heading if present
-              thinkingContent = thinkingContent.replace(/^## Thinking\s*/i, '').trim();
-              
-              // Split the thinking content into points
-              const points = thinkingContent
-                .split(/\n(?=-|\d+\.)/)
-                .map(point => point.trim())
-                .filter(point => point.length > 0);
-              
-              console.log(`[DESIGNER ROLE PLAY API] Extracted ${points.length} thinking points`);
-              if (points.length > 0) {
-                console.log('[DESIGNER ROLE PLAY API] First thinking point:', points[0]);
-              }
-              
-              thinkingPoints.push(...points);
-            } catch (error) {
-              console.error('[DESIGNER ROLE PLAY API] Error processing thinking points:', error);
-              // Fallback - use the raw thinking content as a single point
-              if (thinkingContent.trim().length > 0) {
-                thinkingPoints.push(thinkingContent.trim());
-              }
-            }
-          } else {
-            console.log('[DESIGNER ROLE PLAY API] No valid thinking content to process');
-          }
-
-          // Extract text content (may include both thinking and design decisions)
-          const text = completion.content
-            ?.filter(block => block.type === 'text')
-            ?.map(block => (block as any).text)
-            ?.join('\n') || '';
-
-          console.log(`[DESIGNER ROLE PLAY API] Text content length: ${text.length} characters`);
-          console.log('[DESIGNER ROLE PLAY API] Text content preview:', text.substring(0, 150) + '...');
-
-          // Extract design decisions section
-          let designDecisions = [];
+          
+          // 2. Extract design decisions from text blocks
+          let designDecisions: string[] = [];
           try {
-            console.log('[DESIGNER ROLE PLAY API] Attempting to extract design decisions');
+            // Extract text content from text blocks
+            const text = completion.content
+              ?.filter(block => block.type === 'text')
+              ?.map(block => (block as any).text)
+              ?.join('\n') || '';
             
-            // Try to extract design decisions using regex
+            console.log(`[DESIGNER ROLE PLAY API] Text content length: ${text.length} characters`);
+            
+            // Extract design decisions section using regex
             const designDecisionsMatch = text.match(/## Design Decisions[\s\S]*?$/i);
             if (designDecisionsMatch) {
-              console.log('[DESIGNER ROLE PLAY API] Found design decisions section via regex');
-              
-              // Log the raw decisions section
-              const rawDecisions = designDecisionsMatch[0];
-              console.log('[DESIGNER ROLE PLAY API] Raw decisions section preview:', 
-                rawDecisions.substring(0, 150) + (rawDecisions.length > 150 ? '...' : ''));
+              console.log('[DESIGNER ROLE PLAY API] Found design decisions section');
               
               // Clean the heading and split into points
-              const decisionsText = rawDecisions.replace(/^## Design Decisions\s*/i, '').trim();
+              const decisionsText = designDecisionsMatch[0].replace(/^## Design Decisions\s*/i, '').trim();
               const decisions = decisionsText
                 .split(/\n(?=-|\d+\.)/)
                 .map(d => d.trim())
                 .filter(d => d.length > 0);
               
               console.log(`[DESIGNER ROLE PLAY API] Extracted ${decisions.length} design decisions`);
-              if (decisions.length > 0) {
-                console.log('[DESIGNER ROLE PLAY API] First design decision:', decisions[0]);
-              }
-              
               designDecisions = decisions;
             } else {
-              console.log('[DESIGNER ROLE PLAY API] No design decisions section found via regex, using fallback');
+              // Alternative: if no heading, look for numbered or bullet lists
+              console.log('[DESIGNER ROLE PLAY API] No design decisions heading found, looking for lists');
               
-              // Fallback: If we can't extract the Design Decisions section with regex,
-              // use the entire text as designDecisions if we have thinking content separately
-              if (thinkingPoints.length > 0) {
-                console.log('[DESIGNER ROLE PLAY API] Using fallback: using entire text as design decisions');
-                designDecisions = [text];
+              // Look for numbered lists (1. 2. 3.) or dashed lists (- item)
+              const listPattern = /(?:(?:\d+\.\s+[A-Z][^.\n]+[.\n])|(?:-\s+[A-Z][^.\n]+[.\n]))+/g;
+              const lists = text.match(listPattern);
+              
+              if (lists && lists.length > 0) {
+                // Use the last list which is likely decisions
+                const lastList = lists[lists.length - 1];
+                const listItems = lastList
+                  .split(/\n(?=\d+\.|-\s)/)
+                  .map(item => item.trim())
+                  .filter(item => item.length > 0);
+                
+                console.log(`[DESIGNER ROLE PLAY API] Extracted ${listItems.length} list items as decisions`);
+                designDecisions = listItems;
               } else {
-                // If no thinking content was found separately, try to extract design decisions
-                // by assuming second half of content is design decisions
-                console.log('[DESIGNER ROLE PLAY API] Using fallback: splitting content in half');
-                const lines = text.split('\n');
-                const midPoint = Math.floor(lines.length / 2);
-                const secondHalf = lines.slice(midPoint).join('\n');
-                designDecisions = [secondHalf];
+                // If no structured decisions found, use paragraphs
+                const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+                if (paragraphs.length > 0) {
+                  // Use the paragraphs as decisions
+                  designDecisions = paragraphs;
+                  console.log(`[DESIGNER ROLE PLAY API] Using ${paragraphs.length} paragraphs as decisions`);
+                } else {
+                  // Last resort: generic message
+                  designDecisions = ["Based on the analysis, a comprehensive design approach is recommended."];
+                }
               }
             }
           } catch (error) {
             console.error('[DESIGNER ROLE PLAY API] Error extracting design decisions:', error);
-            if (error instanceof Error) {
-              console.error('Error details:', error.message);
-            }
-            // Fallback for error case
-            designDecisions = [text];
+            designDecisions = ["A structured design approach is recommended based on the analysis."];
           }
-
-          // Log the final extracted content
-          const processingEndTime = Date.now();
-          const processingDuration = processingEndTime - processingStartTime;
-          console.log(`[DESIGNER ROLE PLAY API] Processing completed in ${processingDuration}ms`);
-          console.log(`[DESIGNER ROLE PLAY API] Final thinking points: ${thinkingPoints.length}`);
-          console.log(`[DESIGNER ROLE PLAY API] Final design decisions: ${designDecisions.length}`);
           
-          // Log samples of each
-          if (thinkingPoints.length > 0) {
-            console.log('[DESIGNER ROLE PLAY API] Sample thinking point:', thinkingPoints[0]);
-          }
-          if (designDecisions.length > 0) {
-            console.log('[DESIGNER ROLE PLAY API] Sample design decision:', designDecisions[0]);
-          }
-
+          // No filtering needed - thinking and decisions come from separate sources
+          
           // Set the thinking and decisions arrays
           thinking = thinkingPoints;
           decisions = designDecisions;
-
+          
           const claudeDuration = Date.now() - claudeStartTime;
           console.log(`[DESIGNER ROLE PLAY API] Claude API call completed in ${claudeDuration}ms`);
         } catch (error) {
