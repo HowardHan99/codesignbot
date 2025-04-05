@@ -340,8 +340,8 @@ export class StickyNoteService {
   }
   
   /**
-   * Calculate position of a sticky note based on score and existing stickies
-   * @param frame The frame to position within
+   * Calculate the position for a sticky note based on score and count
+   * @param frame The frame to place the sticky in
    * @param totalSoFar Number of stickies with this score so far
    * @param score The relevance score
    */
@@ -366,8 +366,9 @@ export class StickyNoteService {
     const effectiveWidth = frameWidth - (LEFT_MARGIN * 2);
     const sectionWidth = effectiveWidth / relevanceConfig.scale.max;
     
-    // Determine which section this sticky belongs to
-    const sectionIndex = score - 1; // Convert score to zero-based index
+    // REVERSED ORDER: Convert score to section index (3 → 0, 2 → 1, 1 → 2)
+    // This makes score 3 appear first (leftmost)
+    const sectionIndex = relevanceConfig.scale.max - score;
     
     // Calculate row and column within this score's section
     const col = Math.floor(totalSoFar / ITEMS_PER_COL);
@@ -375,10 +376,6 @@ export class StickyNoteService {
     
     // Calculate the base x position for this score's section
     const sectionBaseX = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth) + (sectionWidth / 2);
-    
-    // FIXED POSITIONING ALGORITHM:
-    // 1. Make sure we start well within the frame with proper margins
-    // 2. Ensure columns/rows don't overflow the frame dimensions
     
     // Calculate preliminary positions
     let x = sectionBaseX + (col * (STICKY_WIDTH + SPACING));
@@ -388,17 +385,48 @@ export class StickyNoteService {
     const rightBound = frameLeft + frameWidth - STICKY_WIDTH/2 - 20;
     const bottomBound = frameTop + frameHeight - STICKY_HEIGHT/2 - 20;
     
-    // If we'd overflow to the right, create a new row
+    // IMPROVED OVERFLOW HANDLING:
+    
+    // If we'd overflow to the right...
     if (x > rightBound) {
-      // Reset to left side and move down one row
-      x = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth/2);
-      y += STICKY_HEIGHT + SPACING;
+      // Check if this is score 3 - allow overflow into score 2 area if possible
+      if (score === 3 && sectionIndex < relevanceConfig.scale.max - 1) {
+        // Calculate new position in score 2 area
+        const nextSectionIndex = sectionIndex + 1; // Move to next section (score 2 area)
+        const overflowCol = 0; // Start at the leftmost column of score 2
+        
+        // Calculate new position in score 2 area
+        x = frameLeft + LEFT_MARGIN + (nextSectionIndex * sectionWidth) + (sectionWidth / 2);
+        
+        // Add some visual offset to indicate these are overflow items
+        y = frameTop + TOP_MARGIN + (row * (STICKY_HEIGHT + SPACING)) + 15;
+        
+        // Check if this position is also beyond the right bound
+        if (x > rightBound) {
+          // If score 2 area is also full, handle as normal overflow
+          x = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth/2);
+          y += STICKY_HEIGHT + SPACING;
+        }
+      } else {
+        // Traditional overflow handling for other scores
+        // Reset to left side and move down one row
+        x = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth/2);
+        y += STICKY_HEIGHT + SPACING;
+      }
     }
     
     // If we'd overflow the bottom, start a new column from the top
     if (y > bottomBound) {
       y = frameTop + TOP_MARGIN;
-      x += STICKY_WIDTH + SPACING;
+      
+      // For score 3, try to overflow into score 2 area if we're about to go below bottom
+      if (score === 3 && sectionIndex < relevanceConfig.scale.max - 1) {
+        const nextSectionIndex = sectionIndex + 1; // Move to next section (score 2 area)
+        x = frameLeft + LEFT_MARGIN + (nextSectionIndex * sectionWidth) + (sectionWidth / 2);
+      } else {
+        // Otherwise add another column in the current section
+        x += STICKY_WIDTH + SPACING;
+      }
     }
     
     // Final safety bounds check - ensure minimum margins from edges
