@@ -3,12 +3,6 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { DesignerModelType } from '../../../services/designerRolePlayService';
 
-// Add type declarations for thinking and decision arrays
-interface ScoredDecision {
-  decision: string;
-  similarity: number;
-}
-
 // Initialize OpenAI API with environment variables
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

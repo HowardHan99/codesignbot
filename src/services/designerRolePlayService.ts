@@ -5,7 +5,6 @@
 import { MiroService } from './miroService';
 import { TranscriptProcessingService } from './transcriptProcessingService';
 import { MiroFrameService } from './miro/frameService';
-import { ConfigurationService } from './configurationService';
 
 interface DesignerThinkingProcess {
   thinking: string[];         // Designer's thought process

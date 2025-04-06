@@ -354,7 +354,10 @@ export class StickyNoteService {
     const relevanceConfig = ConfigurationService.getRelevanceConfig();
     
     const { width: STICKY_WIDTH, height: STICKY_HEIGHT, spacing: SPACING } = stickyConfig.dimensions;
-    const { itemsPerColumn: ITEMS_PER_COL, topMargin: TOP_MARGIN, leftMargin: LEFT_MARGIN } = stickyConfig.layout;
+    const { itemsPerColumn: ITEMS_PER_COL } = stickyConfig.layout;
+    
+    // DRAMATICALLY REDUCED MARGINS - Almost eliminate them to use more space
+    const minimumMargin = 20; // Absolute minimum margin from frame edge
     
     // Frame dimensions
     const frameLeft = frame.x - frame.width/2;
@@ -362,77 +365,96 @@ export class StickyNoteService {
     const frameWidth = frame.width;
     const frameHeight = frame.height;
     
-    // Calculate section width (frame divided into N equal sections based on score range)
-    const effectiveWidth = frameWidth - (LEFT_MARGIN * 2);
-    const sectionWidth = effectiveWidth / relevanceConfig.scale.max;
+    // MAXIMIZED SPACE USAGE:
+    // Use nearly the full frame width, leaving only minimal margins
+    const effectiveWidth = frameWidth - (minimumMargin * 2); // Fixed: multiply by 2 for both sides
     
-    // REVERSED ORDER: Convert score to section index (3 → 0, 2 → 1, 1 → 2)
-    // This makes score 3 appear first (leftmost)
-    const sectionIndex = relevanceConfig.scale.max - score;
+    // EQUAL WIDTH SECTIONS: Divide available space equally between the 3 scores
+    const maxScore = relevanceConfig.scale.max;
+    const sectionWidth = effectiveWidth / maxScore;
+    
+    // REVERSED ORDER: Score 3 on left (now using the full score value)
+    // This version ensures we use more of the left side
+    const reversedScore = maxScore - score + 1; // Example: For score=3, section=1 (leftmost)
+    const sectionIndex = reversedScore - 1; // Convert to 0-based
+    
+    // OPTIMIZE ROW DISTRIBUTION:
+    // Increase items per column for better vertical distribution
+    const effectiveItemsPerCol = ITEMS_PER_COL + 3; // Add 3 more items per column for better vertical usage
     
     // Calculate row and column within this score's section
-    const col = Math.floor(totalSoFar / ITEMS_PER_COL);
-    const row = totalSoFar % ITEMS_PER_COL;
+    const col = Math.floor(totalSoFar / effectiveItemsPerCol);
+    const row = totalSoFar % effectiveItemsPerCol;
     
-    // Calculate the base x position for this score's section
-    const sectionBaseX = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth) + (sectionWidth / 2);
+    // REDUCED SPACING FOR DENSITY:
+    // Horizontal spacing can be tighter than vertical to prevent overlap
+    const effectiveHorizontalSpacing = SPACING * 0.85; // 85% of original spacing horizontally
+    const effectiveVerticalSpacing = SPACING * 1.2; // INCREASED to 120% of original spacing vertically
     
-    // Calculate preliminary positions
-    let x = sectionBaseX + (col * (STICKY_WIDTH + SPACING));
-    let y = frameTop + TOP_MARGIN + (row * (STICKY_HEIGHT + SPACING));
+    // Start sticky notes much closer to the left edge
+    // Calculate the base x position for this score's section - start at left edge + minimum margin
+    const sectionBaseX = frameLeft + minimumMargin + (sectionIndex * sectionWidth) + (STICKY_WIDTH / 2);
     
-    // Safety checks to ensure we stay within frame bounds
-    const rightBound = frameLeft + frameWidth - STICKY_WIDTH/2 - 20;
-    const bottomBound = frameTop + frameHeight - STICKY_HEIGHT/2 - 20;
+    // Start very close to the top edge
+    const topStart = frameTop + minimumMargin;
     
-    // IMPROVED OVERFLOW HANDLING:
+    // Calculate initial position with adjusted spacing
+    let x = sectionBaseX + (col * (STICKY_WIDTH + effectiveHorizontalSpacing));
+    let y = topStart + (row * (STICKY_HEIGHT + effectiveVerticalSpacing));
     
-    // If we'd overflow to the right...
+    // EXTENDED BOUNDS:
+    // Allow sticky notes to get much closer to frame edges
+    const rightBound = frameLeft + frameWidth - (STICKY_WIDTH/2) - 10;
+    
+    // SIMPLIFIED BOTTOM BOUND:
+    // Leave space for exactly one sticky note's height from the bottom
+    const bottomBound = frameTop + frameHeight - STICKY_HEIGHT - 5; // Allow very close to the bottom - just 5px margin
+    
+    // Handle overflow with priority on using all available space
     if (x > rightBound) {
-      // Check if this is score 3 - allow overflow into score 2 area if possible
-      if (score === 3 && sectionIndex < relevanceConfig.scale.max - 1) {
-        // Calculate new position in score 2 area
-        const nextSectionIndex = sectionIndex + 1; // Move to next section (score 2 area)
-        const overflowCol = 0; // Start at the leftmost column of score 2
+      // SMARTER SECTION OVERFLOW:
+      // If this is score 3 or 2, try to use the next section's space
+      if ((score === 3 || score === 2) && sectionIndex < maxScore - 1) {
+        // Move to next section (score 2 or 1 area)
+        const nextSectionIndex = sectionIndex + 1;
         
-        // Calculate new position in score 2 area
-        x = frameLeft + LEFT_MARGIN + (nextSectionIndex * sectionWidth) + (sectionWidth / 2);
+        // Start at the left edge of the next section
+        x = frameLeft + minimumMargin + (nextSectionIndex * sectionWidth) + (STICKY_WIDTH / 2);
         
-        // Add some visual offset to indicate these are overflow items
-        y = frameTop + TOP_MARGIN + (row * (STICKY_HEIGHT + SPACING)) + 15;
-        
-        // Check if this position is also beyond the right bound
+        // If that's also beyond the right bound, use standard overflow
         if (x > rightBound) {
-          // If score 2 area is also full, handle as normal overflow
-          x = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth/2);
-          y += STICKY_HEIGHT + SPACING;
+          // Go back to the first column but next row
+          x = sectionBaseX;
+          y += STICKY_HEIGHT + effectiveVerticalSpacing;
         }
       } else {
-        // Traditional overflow handling for other scores
-        // Reset to left side and move down one row
-        x = frameLeft + LEFT_MARGIN + (sectionIndex * sectionWidth/2);
-        y += STICKY_HEIGHT + SPACING;
+        // Standard overflow - next row
+        x = sectionBaseX;
+        y += STICKY_HEIGHT + effectiveVerticalSpacing;
       }
     }
     
-    // If we'd overflow the bottom, start a new column from the top
+    // SIMPLIFIED VERTICAL OVERFLOW:
     if (y > bottomBound) {
-      y = frameTop + TOP_MARGIN;
+      // First try a new column in the same section
+      x += STICKY_WIDTH + effectiveHorizontalSpacing;
+      y = topStart; // Reset to the top
       
-      // For score 3, try to overflow into score 2 area if we're about to go below bottom
-      if (score === 3 && sectionIndex < relevanceConfig.scale.max - 1) {
-        const nextSectionIndex = sectionIndex + 1; // Move to next section (score 2 area)
-        x = frameLeft + LEFT_MARGIN + (nextSectionIndex * sectionWidth) + (sectionWidth / 2);
-      } else {
-        // Otherwise add another column in the current section
-        x += STICKY_WIDTH + SPACING;
+      // If that would overflow the right edge...
+      if (x > rightBound) {
+        // Start from the far left edge but position closer to the bottom
+        x = frameLeft + minimumMargin + (STICKY_WIDTH / 2);
+        // Position at 80% of frame height to use the bottom space effectively
+        //THIS IS THE KEY LINE THAT CHANGES THE BOTTOM BOUND
+        y = frameTop + (frameHeight * 0.9);
       }
     }
     
-    // Final safety bounds check - ensure minimum margins from edges
-    const margin = 30; // Safe margin from frame edge
-    x = Math.max(frameLeft + STICKY_WIDTH/2 + margin, Math.min(frameLeft + frameWidth - STICKY_WIDTH/2 - margin, x));
-    y = Math.max(frameTop + STICKY_HEIGHT/2 + margin, Math.min(frameTop + frameHeight - STICKY_HEIGHT/2 - margin, y));
+    // Final safety bounds check - absolute minimum margins
+    // This is just to prevent overlap with frame borders
+    const safetyMargin = 5; // Absolute minimum safety margin 
+    x = Math.max(frameLeft + (STICKY_WIDTH/2) + safetyMargin, Math.min(frameLeft + frameWidth - (STICKY_WIDTH/2) - safetyMargin, x));
+    y = Math.max(frameTop + (STICKY_HEIGHT/2) + safetyMargin, Math.min(frameTop + frameHeight - (STICKY_HEIGHT/2) - safetyMargin, y));
     
     return { x, y };
   }
