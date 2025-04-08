@@ -1059,29 +1059,79 @@ export function MainBoard({
                     <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🎨</span>
                     Design Themes & Groups
                   </h3>
-                  <button
-                    onClick={handleGenerateThemes}
-                    className="button button-secondary"
-                    disabled={isGeneratingThemes}
-                    style={{
-                      padding: '8px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid #e0e0e0',
-                      backgroundColor: '#ffffff',
-                      color: '#555',
-                      fontWeight: 500,
-                      fontSize: '14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      cursor: isGeneratingThemes ? 'not-allowed' : 'pointer',
-                      width: '100%',
-                      justifyContent: 'flex-start'
-                    }}
-                  >
-                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🔍</span>
-                    {isGeneratingThemes ? 'Generating Themes...' : 'Generate Design Themes'}
-                  </button>
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '8px',
+                    alignItems: 'center' 
+                  }}>
+                    <button
+                      onClick={handleGenerateThemes}
+                      className="button button-secondary"
+                      disabled={isGeneratingThemes}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #e0e0e0',
+                        backgroundColor: '#ffffff',
+                        color: '#555',
+                        fontWeight: 500,
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: isGeneratingThemes ? 'not-allowed' : 'pointer',
+                        width: '100%',
+                        justifyContent: 'flex-start'
+                      }}
+                    >
+                      <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>✨</span>
+                      {isGeneratingThemes ? 'Generating...' : 'Generate Design Themes'}
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Knowledge Base Management Section */}
+                <div style={{ marginBottom: '8px' }}>
+                  <h3 style={{ 
+                    margin: '0 0 6px 0', 
+                    fontSize: '14px', 
+                    color: '#555',
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>📚</span>
+                    Knowledge Base
+                  </h3>
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '8px',
+                    alignItems: 'center' 
+                  }}>
+                    <button
+                      onClick={() => window.open('/knowledge', '_blank')}
+                      className="button button-secondary"
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #e0e0e0',
+                        backgroundColor: '#ffffff',
+                        color: '#555',
+                        fontWeight: 500,
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: 'pointer',
+                        width: '100%',
+                        justifyContent: 'flex-start'
+                      }}
+                    >
+                      <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>💾</span>
+                      Manage Knowledge Base
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

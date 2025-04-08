@@ -1,7 +1,6 @@
 'use client';
 import React, { useState, useCallback } from 'react';
 import { MainBoard } from './DesignDecisions';
-import Link from 'next/link';
 
 interface SerializedBoard {
   id: string;
@@ -40,28 +39,7 @@ export function BoardDisplay({ boards }: BoardDisplayProps) {
   }, []);
 
   return (
-    <div>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'flex-end', 
-        padding: '10px', 
-        marginBottom: '20px',
-        borderBottom: '1px solid #eee'
-      }}>
-        <Link href="/knowledge">
-          <div style={{
-            padding: '8px 16px',
-            backgroundColor: '#4262ff',
-            color: 'white',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            display: 'inline-block'
-          }}>
-            Knowledge Base Manager
-          </div>
-        </Link>
-      </div>
-      
+    <div>      
       <MainBoard 
         showAnalysis={showAnalysis}
         isAnalyzing={isAnalyzing}
