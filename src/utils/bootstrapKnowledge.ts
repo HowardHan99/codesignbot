@@ -2,6 +2,85 @@ import { KnowledgeService } from '../services/knowledgeService';
 
 const designPrinciples = [
   {
+    title: 'What is a Wicked Problem',
+    content: `A wicked problem is a social or cultural problem that's difficult or impossible to solve because of its complex and interconnected nature. Wicked problems lack clarity in both their aims and solutions, and are subject to real-world constraints which hinder risk-free attempts to find a solution.
+
+Classic examples of wicked problems include:
+- Poverty
+- Climate change
+- Education
+- Homelessness
+- Sustainability
+
+Many design problems we face are wicked problems, where clarifying the problem is often as big a task as solving it. What makes them particularly challenging is how they're intertwined with one another - if you try to address an element of one problem, you'll likely cause unexpected consequences in another.`,
+    type: 'design_principle' as const,
+    tags: ['wicked-problems', 'complexity', 'problem-solving']
+  },
+  {
+    title: '10 Characteristics of Wicked Problems',
+    content: `According to Horst W.J. Rittel and Melvin M. Webber from UC Berkeley, wicked problems have ten defining characteristics:
+
+1. There is no definitive formula for a wicked problem
+2. Wicked problems have no stopping rule—there's no way to know whether your solution is final
+3. Solutions to wicked problems are not true or false (right or wrong); they can only be good or bad
+4. You cannot immediately test a solution to a wicked problem
+5. Every solution to a wicked problem is a "one-shot operation" because there is no opportunity to learn by trial and error
+6. Wicked problems do not have a set number of potential solutions
+7. Every wicked problem is essentially unique
+8. Every wicked problem can be considered a symptom of another problem
+9. There is always more than one explanation for a wicked problem because explanations vary greatly depending on individual perspective
+10. The planner/designer has no right to be wrong and must be fully responsible for their actions
+
+Business strategy is often classed as a wicked problem because strategy-related issues typically meet at least five of these characteristics.`,
+    type: 'design_principle' as const,
+    tags: ['wicked-problems', 'characteristics', 'problem-solving']
+  },
+  {
+    title: 'Complex Socio-Technical Systems',
+    content: `The rapid technological advancement of the 21st century has mutated wicked problems. In today's hyperconnected world, problems cannot be looked at in isolation. Don Norman refers to these as complex socio-technical systems.
+
+Take sustainability and recycling as an example. Recycling itself presents complex challenges with different rules for different materials (paper, plastics, glass, metals) and varying processes across locations. However, the need for recycling stems from deeper systemic issues - the use of non-reusable materials in manufacturing, planned obsolescence in product design, and lack of circular economy practices.
+
+Complex socio-technical systems are intertwined within multiple existing systems:
+- Manufacturing systems
+- Economic systems
+- Political systems
+- Social and cultural systems
+- Technological systems
+- Legal systems
+
+Each of these systems is connected with the others, making it impossible to address one aspect without considering its impact on the entire system.`,
+    type: 'design_principle' as const,
+    tags: ['socio-technical-systems', 'sustainability', 'systems-thinking']
+  },
+  {
+    title: 'Tackling Wicked Problems with Systems Thinking and Agile Methodology',
+    content: `To address wicked problems effectively, a combination of systems thinking and agile methodology is recommended:
+
+Systems Thinking:
+- Understanding how components of a system influence each other and other systems
+- Considering the broader context and interconnections
+- Identifying feedback loops and patterns
+- Recognizing emergence and unintended consequences
+
+Agile Methodology:
+- Taking an iterative approach to design and development
+- Improving solutions through collaboration
+- Adapting to change rather than following a rigid plan
+- Breaking down complex problems into manageable pieces
+
+This combined approach allows teams to:
+1. Understand the broader context of the problem
+2. Identify key stakeholders and their relationships
+3. Recognize patterns and interconnections
+4. Test and iterate solutions in a controlled manner
+5. Adapt strategies based on feedback and learning
+
+The key is to avoid seeking perfect solutions and instead focus on creating positive change while being mindful of potential ripple effects throughout the system.`,
+    type: 'design_principle' as const,
+    tags: ['systems-thinking', 'agile-methodology', 'problem-solving']
+  },
+  {
     title: 'Design Thinking Process',
     content: `Design Thinking is a non-linear, iterative process that teams use to understand users, challenge assumptions, redefine problems and create innovative solutions to prototype and test. The five phases of Design Thinking are: Empathize, Define, Ideate, Prototype, and Test. This approach is particularly valuable for tackling complex problems that are ill-defined or unknown.
 

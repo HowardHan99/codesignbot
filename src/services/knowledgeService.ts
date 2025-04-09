@@ -1,4 +1,4 @@
-import { getDatabase, ref, push, get, set, serverTimestamp } from 'firebase/database';
+import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, limit, DocumentData, CollectionReference, Query } from 'firebase/firestore';
 import { EmbeddingService } from './embeddingService';
 
 /**
@@ -10,7 +10,7 @@ export interface KnowledgeDocument {
   title: string;
   content: string;
   tags: string[];
-  timestamp: any; // Firebase timestamp
+  timestamp: any; // Firestore timestamp
   embedding: number[]; // Vector representation
 }
 
@@ -20,6 +20,7 @@ export interface KnowledgeDocument {
 export class KnowledgeService {
   private static readonly CHUNK_SIZE = 500; // Characters per chunk
   private static readonly CHUNK_OVERLAP = 100; // Characters of overlap
+  private static readonly COLLECTION_NAME = 'knowledge';
 
   /**
    * Add a document to the knowledge base with automatic chunking and embedding
@@ -36,7 +37,8 @@ export class KnowledgeService {
       const docIds: string[] = [];
       
       // Generate embeddings and store chunks in parallel
-      const db = getDatabase();
+      const db = getFirestore();
+      const knowledgeCollection = collection(db, this.COLLECTION_NAME);
       
       const storePromises = chunks.map(async (chunk, index) => {
         // Generate embedding for this chunk
@@ -48,16 +50,13 @@ export class KnowledgeService {
           content: chunk,
           type,
           tags,
-          timestamp: serverTimestamp(),
+          timestamp: new Date(),
           embedding
         };
         
-        // Store in Firebase
-        const knowledgeRef = ref(db, 'knowledge');
-        const newDocRef = push(knowledgeRef);
-        await set(newDocRef, docData);
-        
-        return newDocRef.key;
+        // Store in Firestore
+        const docRef = await addDoc(knowledgeCollection, docData);
+        return docRef.id;
       });
       
       const ids = await Promise.all(storePromises);
@@ -122,63 +121,51 @@ export class KnowledgeService {
    * Retrieve relevant knowledge for a query
    */
   public static async retrieveRelevantKnowledge(
-    query: string, 
+    queryText: string, 
     filter?: { types?: string[], tags?: string[] },
-    limit: number = 5
+    maxResults: number = 5
   ): Promise<KnowledgeDocument[]> {
     try {
       // Generate embedding for the query
-      const queryEmbedding = await EmbeddingService.getEmbedding(query);
+      const queryEmbedding = await EmbeddingService.getEmbedding(queryText);
       
-      // Get knowledge documents from Firebase
-      const db = getDatabase();
-      const knowledgeRef = ref(db, 'knowledge');
-      const snapshot = await get(knowledgeRef);
+      // Get Firestore instance
+      const db = getFirestore();
+      const knowledgeCollection = collection(db, this.COLLECTION_NAME) as CollectionReference<KnowledgeDocument>;
       
-      if (!snapshot.exists()) {
-        return [];
+      // Build the base query
+      let baseQuery: Query<KnowledgeDocument> = query(knowledgeCollection);
+      
+      // Apply filters if provided
+      if (filter?.types) {
+        baseQuery = query(baseQuery, where('type', 'in', filter.types));
       }
       
-      // Filter and rank by similarity
-      const documents: (KnowledgeDocument & { similarity: number })[] = [];
+      if (filter?.tags && filter.tags.length > 0) {
+        baseQuery = query(baseQuery, where('tags', 'array-contains-any', filter.tags));
+      }
+
+      // Execute query with vector search
+      const snapshot = await getDocs(baseQuery);
       
-      snapshot.forEach((doc) => {
-        const data = doc.val();
-        
-        // Apply type and tag filters if provided
-        if (filter?.types && !filter.types.includes(data.type)) {
-          return;
-        }
-        
-        if (filter?.tags && filter.tags.length > 0) {
-          const hasMatchingTag = data.tags.some((tag: string) => 
-            filter.tags!.includes(tag)
-          );
-          if (!hasMatchingTag) {
-            return;
-          }
-        }
-        
-        // Calculate similarity
-        const similarity = EmbeddingService.cosineSimilarity(
-          queryEmbedding,
-          data.embedding
-        );
-        
-        // Add to results if similarity is above threshold
-        if (similarity > 0.3) {
-          documents.push({
-            id: doc.key as string,
+      // Perform vector similarity ranking in memory
+      const results = await Promise.all(
+        snapshot.docs.map(async (doc) => {
+          const data = doc.data();
+          const similarity = EmbeddingService.cosineSimilarity(queryEmbedding, data.embedding);
+          return {
             ...data,
+            id: doc.id,
             similarity
-          });
-        }
-      });
+          };
+        })
+      );
       
-      // Sort by similarity and limit results
-      return documents
+      // Sort by similarity and return top results
+      return results
         .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, limit);
+        .slice(0, maxResults)
+        .map(({ similarity, ...doc }) => doc); // Remove similarity from final results
     } catch (error) {
       console.error('Error retrieving knowledge:', error);
       return [];
@@ -224,46 +211,28 @@ ${analysis.map((a, i) => `${i+1}. ${a}`).join('\n')}
    */
   public static async listDocuments(
     filter?: { types?: string[], tags?: string[] },
-    limit: number = 50
+    maxResults: number = 50
   ): Promise<KnowledgeDocument[]> {
     try {
-      const db = getDatabase();
-      const knowledgeRef = ref(db, 'knowledge');
-      const snapshot = await get(knowledgeRef);
+      const db = getFirestore();
+      const knowledgeCollection = collection(db, this.COLLECTION_NAME) as CollectionReference<KnowledgeDocument>;
       
-      if (!snapshot.exists()) {
-        return [];
+      let baseQuery: Query<KnowledgeDocument> = query(knowledgeCollection, orderBy('timestamp', 'desc'), limit(maxResults));
+      
+      if (filter?.types) {
+        baseQuery = query(baseQuery, where('type', 'in', filter.types));
       }
       
-      const documents: KnowledgeDocument[] = [];
+      if (filter?.tags && filter.tags.length > 0) {
+        baseQuery = query(baseQuery, where('tags', 'array-contains-any', filter.tags));
+      }
       
-      snapshot.forEach((doc) => {
-        const data = doc.val();
-        
-        // Apply type and tag filters if provided
-        if (filter?.types && !filter.types.includes(data.type)) {
-          return;
-        }
-        
-        if (filter?.tags && filter.tags.length > 0) {
-          const hasMatchingTag = data.tags.some((tag: string) => 
-            filter.tags!.includes(tag)
-          );
-          if (!hasMatchingTag) {
-            return;
-          }
-        }
-        
-        documents.push({
-          id: doc.key as string,
-          ...data
-        });
-      });
+      const snapshot = await getDocs(baseQuery);
       
-      // Sort by timestamp (newest first) and limit results
-      return documents
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, limit);
+      return snapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id
+      }));
     } catch (error) {
       console.error('Error listing documents:', error);
       return [];
