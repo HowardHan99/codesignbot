@@ -1,6 +1,14 @@
 import { KnowledgeService } from '../services/knowledgeService';
 import { bootstrapKnowledgeBase } from './bootstrapKnowledge';
 
+// Test queries for validating knowledge retrieval
+const TEST_QUERIES = [
+  'What is a wicked problem and what are some examples?',
+  'What are the characteristics of wicked problems?',
+  'How do complex socio-technical systems relate to wicked problems?',
+  'How can systems thinking and agile methodology help with wicked problems?'
+];
+
 /**
  * Test utility for the knowledge service
  * This can be called from a component or the browser console for testing
@@ -26,15 +34,7 @@ export async function testKnowledgeService() {
     // Step 3: Test document retrieval
     console.log('Step 3: Testing knowledge retrieval...');
     
-    const testQueries = [
-      'How can I improve accessibility in my design?',
-      'What are some principles for creating a good visual hierarchy?',
-      'How should I implement consistent interface design?',
-      'What is the design thinking process?',
-      'How can I provide better feedback in my UI?'
-    ];
-    
-    for (const query of testQueries) {
+    for (const query of TEST_QUERIES) {
       console.log(`\nQuery: "${query}"`);
       const start = performance.now();
       const results = await KnowledgeService.retrieveRelevantKnowledge(query, undefined, 2);
@@ -66,4 +66,24 @@ export async function testKnowledgeService() {
 if (typeof window !== 'undefined') {
   (window as any).testKnowledgeService = testKnowledgeService;
   console.log('Knowledge service test utility added to window. Run testKnowledgeService() in console to test.');
+}
+
+/**
+ * Run test queries against the knowledge base
+ */
+export async function testKnowledgeRetrieval(): Promise<void> {
+  console.log('Testing knowledge retrieval...\n');
+  
+  for (const query of TEST_QUERIES) {
+    try {
+      console.log(`Query: "${query}"`);
+      const results = await KnowledgeService.retrieveRelevantKnowledge(query);
+      console.log('Results:', results);
+      console.log('\n---\n');
+    } catch (error) {
+      console.error(`Error testing query "${query}":`, error);
+    }
+  }
+  
+  console.log('Knowledge retrieval testing complete!');
 } 
