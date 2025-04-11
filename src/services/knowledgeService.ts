@@ -31,38 +31,81 @@ export class KnowledgeService {
     type: 'design_principle' | 'past_analysis' | 'industry_pattern' | 'user_feedback',
     tags: string[] = []
   ): Promise<string[]> {
+    console.log(`📝 Adding document: "${title}" (${content.length} chars)`);
+    console.log(`Type: ${type}, Tags: ${tags.join(', ')}`);
+    
     try {
       // Chunk the document content
+      console.log('🔄 Chunking document...');
       const chunks = this.chunkText(content);
+      console.log(`✓ Created ${chunks.length} chunks`);
+      console.log(`Average chunk size: ${Math.round(chunks.reduce((sum, chunk) => sum + chunk.length, 0) / chunks.length)} chars`);
+      
       const docIds: string[] = [];
       
       // Generate embeddings and store chunks in parallel
       const db = getFirestore();
       const knowledgeCollection = collection(db, this.COLLECTION_NAME);
       
+      console.log('🧮 Generating embeddings and storing chunks...');
       const storePromises = chunks.map(async (chunk, index) => {
-        // Generate embedding for this chunk
-        const embedding = await EmbeddingService.getEmbedding(chunk);
-        
-        // Prepare document data
-        const docData = {
-          title: `${title} ${chunks.length > 1 ? `(${index + 1}/${chunks.length})` : ''}`,
-          content: chunk,
-          type,
-          tags,
-          timestamp: new Date(),
-          embedding
-        };
-        
-        // Store in Firestore
-        const docRef = await addDoc(knowledgeCollection, docData);
-        return docRef.id;
+        try {
+          // Generate embedding for this chunk
+          console.log(`Processing chunk ${index + 1}/${chunks.length} (${chunk.length} chars)`);
+          const embedding = await EmbeddingService.getEmbedding(chunk);
+          console.log(`✓ Generated embedding for chunk ${index + 1}`);
+          
+          // Prepare document data
+          const docData = {
+            title: `${title} ${chunks.length > 1 ? `(${index + 1}/${chunks.length})` : ''}`,
+            content: chunk,
+            type,
+            tags,
+            timestamp: new Date(),
+            embedding
+          };
+          
+          // Store in Firestore
+          console.log(`📥 Storing chunk ${index + 1} in Firestore...`);
+          const docRef = await addDoc(knowledgeCollection, docData);
+          console.log(`✓ Stored chunk ${index + 1}, ID: ${docRef.id}`);
+          return docRef.id;
+        } catch (error) {
+          console.error(`❌ Error processing chunk ${index + 1}:`, error);
+          console.error('Chunk content:', chunk.substring(0, 100) + '...');
+          if (error instanceof Error) {
+            console.error('Error details:', {
+              message: error.message,
+              stack: error.stack,
+              name: error.name
+            });
+          }
+          return null;
+        }
       });
       
       const ids = await Promise.all(storePromises);
-      return ids.filter(Boolean) as string[];
+      const successfulIds = ids.filter(Boolean) as string[];
+      
+      console.log('\n📊 Document processing summary:');
+      console.log(`Total chunks: ${chunks.length}`);
+      console.log(`Successfully processed: ${successfulIds.length}`);
+      console.log(`Failed: ${chunks.length - successfulIds.length}`);
+      
+      if (successfulIds.length === 0) {
+        throw new Error('Failed to process any chunks successfully');
+      }
+      
+      return successfulIds;
     } catch (error) {
-      console.error('Error adding document to knowledge base:', error);
+      console.error('❌ Error adding document to knowledge base:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
+      }
       throw error;
     }
   }
