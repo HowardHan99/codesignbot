@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow anyone to read knowledge documents
+    match /knowledge/{document=**} {
+      allow read: if true;
+      // For development purposes, allow writing without authentication
+      // In production, you should restrict this to authenticated users
+      allow write: if true;
+    }
+    
+    // Default rule - deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+} 

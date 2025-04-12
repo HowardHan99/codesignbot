@@ -1,5 +1,20 @@
-import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, limit, DocumentData, CollectionReference, Query } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, limit, DocumentData, CollectionReference, Query, QueryDocumentSnapshot } from 'firebase/firestore';
+import { initializeApp } from 'firebase/app';
 import { EmbeddingService } from './embeddingService';
+import { firebaseConfig } from '../utils/config';
+
+// Initialize Firebase if it hasn't been already
+let firestoreDb: any;
+try {
+  // Try to initialize Firebase (will throw if already initialized)
+  const app = initializeApp(firebaseConfig);
+  firestoreDb = getFirestore(app);
+  console.log('Firestore initialized in knowledgeService');
+} catch (error) {
+  // Firebase already initialized, just get Firestore
+  firestoreDb = getFirestore();
+  console.log('Using existing Firestore instance');
+}
 
 /**
  * Knowledge document interface for RAG implementation
@@ -12,6 +27,7 @@ export interface KnowledgeDocument {
   tags: string[];
   timestamp: any; // Firestore timestamp
   embedding: number[]; // Vector representation
+  metadata?: Record<string, any>;
 }
 
 /**
@@ -20,7 +36,7 @@ export interface KnowledgeDocument {
 export class KnowledgeService {
   private static readonly CHUNK_SIZE = 500; // Characters per chunk
   private static readonly CHUNK_OVERLAP = 100; // Characters of overlap
-  private static readonly COLLECTION_NAME = 'knowledge';
+  private static readonly COLLECTION_NAME = 'DesignKnowledge';
 
   /**
    * Add a document to the knowledge base with automatic chunking and embedding
@@ -29,7 +45,8 @@ export class KnowledgeService {
     title: string,
     content: string,
     type: 'design_principle' | 'past_analysis' | 'industry_pattern' | 'user_feedback',
-    tags: string[] = []
+    tags: string[] = [],
+    metadata: Record<string, any> = {}
   ): Promise<string[]> {
     console.log(`📝 Adding document: "${title}" (${content.length} chars)`);
     console.log(`Type: ${type}, Tags: ${tags.join(', ')}`);
@@ -44,10 +61,12 @@ export class KnowledgeService {
       const docIds: string[] = [];
       
       // Generate embeddings and store chunks in parallel
-      const db = getFirestore();
-      const knowledgeCollection = collection(db, this.COLLECTION_NAME);
+      const knowledgeCollection = collection(firestoreDb, this.COLLECTION_NAME);
       
       console.log('🧮 Generating embeddings and storing chunks...');
+      let hasStorageError = false;
+      let firstStorageError = null;
+      
       const storePromises = chunks.map(async (chunk, index) => {
         try {
           // Generate embedding for this chunk
@@ -62,14 +81,80 @@ export class KnowledgeService {
             type,
             tags,
             timestamp: new Date(),
-            embedding
+            embedding,
+            metadata: {
+              ...metadata,
+              chunkIndex: index,
+              totalChunks: chunks.length
+            }
           };
           
           // Store in Firestore
           console.log(`📥 Storing chunk ${index + 1} in Firestore...`);
-          const docRef = await addDoc(knowledgeCollection, docData);
-          console.log(`✓ Stored chunk ${index + 1}, ID: ${docRef.id}`);
-          return docRef.id;
+          try {
+            const docRef = await addDoc(knowledgeCollection, docData);
+            console.log(`✓ Stored chunk ${index + 1}, ID: ${docRef.id}`);
+            return docRef.id;
+          } catch (error) {
+            console.error(`❌ ERROR STORING CHUNK ${index + 1} IN FIRESTORE:`, error);
+            
+            // Check if it's a size-related error
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const isSizeError = errorMessage.includes('too large') || 
+                               errorMessage.includes('deadline exceeded') || 
+                               errorMessage.includes('400');
+            
+            if (isSizeError) {
+              console.error('🚨 Likely document size issue. Trying with reduced content size...');
+              
+              try {
+                // Create a document with reduced content but full embedding
+                const minimalDocData = {
+                  title: docData.title,
+                  content: chunk.substring(0, Math.min(chunk.length, 1000)), // Limit content to 1000 chars
+                  type,
+                  tags,
+                  timestamp: new Date(),
+                  embedding, // Keep the full embedding
+                  metadata: {
+                    isReduced: true,
+                    chunkIndex: index,
+                    totalChunks: chunks.length,
+                    fullContentLength: chunk.length
+                  }
+                };
+                
+                console.log(`📥 Attempting to store with reduced content (${minimalDocData.content.length} chars)...`);
+                const docRef = await addDoc(knowledgeCollection, minimalDocData);
+                console.log(`✓ Stored reduced content chunk ${index + 1}, ID: ${docRef.id}`);
+                return docRef.id;
+              } catch (fallbackError) {
+                console.error(`❌ Failed to store chunk ${index + 1} even with reduced content:`, fallbackError);
+              }
+            }
+            
+            // Track first error for later display
+            if (!hasStorageError) {
+              hasStorageError = true;
+              firstStorageError = error;
+            }
+            if (error instanceof Error) {
+              console.error('🔥 FIRESTORE ERROR DETAILS:', {
+                message: error.message,
+                name: error.name,
+                stack: error.stack,
+                code: (error as any).code
+              });
+            }
+            console.error('📄 DOCUMENT DATA SIZE INFO:', {
+              title: docData.title,
+              contentLength: docData.content.length,
+              embeddingLength: docData.embedding.length,
+              embeddingSize: docData.embedding.length * 8 + ' bytes',
+              estimatedTotalSize: (JSON.stringify(docData).length * 2) + ' bytes' // Rough estimation
+            });
+            return null;
+          }
         } catch (error) {
           console.error(`❌ Error processing chunk ${index + 1}:`, error);
           console.error('Chunk content:', chunk.substring(0, 100) + '...');
@@ -93,7 +178,11 @@ export class KnowledgeService {
       console.log(`Failed: ${chunks.length - successfulIds.length}`);
       
       if (successfulIds.length === 0) {
-        throw new Error('Failed to process any chunks successfully');
+        console.error('❗ CRITICAL ERROR: Failed to process any chunks successfully');
+        if (firstStorageError) {
+          console.error('❗ FIRST STORAGE ERROR:', firstStorageError);
+        }
+        throw new Error('Failed to process any chunks successfully. Check Firestore permissions and rules.');
       }
       
       return successfulIds;
@@ -164,55 +253,58 @@ export class KnowledgeService {
    * Retrieve relevant knowledge for a query
    */
   public static async retrieveRelevantKnowledge(
-    queryText: string, 
-    filter?: { types?: string[], tags?: string[] },
-    maxResults: number = 5
+    embedding: number[],
+    maxResults: number = 5,
+    filters?: { [key: string]: any }
   ): Promise<KnowledgeDocument[]> {
-    try {
-      // Generate embedding for the query
-      const queryEmbedding = await EmbeddingService.getEmbedding(queryText);
-      
-      // Get Firestore instance
-      const db = getFirestore();
-      const knowledgeCollection = collection(db, this.COLLECTION_NAME) as CollectionReference<KnowledgeDocument>;
-      
-      // Build the base query
-      let baseQuery: Query<KnowledgeDocument> = query(knowledgeCollection);
-      
-      // Apply filters if provided
-      if (filter?.types) {
-        baseQuery = query(baseQuery, where('type', 'in', filter.types));
-      }
-      
-      if (filter?.tags && filter.tags.length > 0) {
-        baseQuery = query(baseQuery, where('tags', 'array-contains-any', filter.tags));
-      }
+    const knowledgeCollection = collection(firestoreDb, this.COLLECTION_NAME);
 
-      // Execute query with vector search
-      const snapshot = await getDocs(baseQuery);
-      
-      // Perform vector similarity ranking in memory
-      const results = await Promise.all(
-        snapshot.docs.map(async (doc) => {
-          const data = doc.data();
-          const similarity = EmbeddingService.cosineSimilarity(queryEmbedding, data.embedding);
-          return {
-            ...data,
-            id: doc.id,
-            similarity
-          };
-        })
-      );
-      
-      // Sort by similarity and return top results
-      return results
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, maxResults)
-        .map(({ similarity, ...doc }) => doc); // Remove similarity from final results
-    } catch (error) {
-      console.error('Error retrieving knowledge:', error);
-      return [];
+    // Build base query with filters
+    let baseQuery: Query<DocumentData> = knowledgeCollection;
+    if (filters) {
+      Object.entries(filters).forEach(([field, value]) => {
+        baseQuery = query(baseQuery, where(field, '==', value));
+      });
     }
+
+    // Fetch documents
+    const querySnapshot = await getDocs(baseQuery);
+    const documents: QueryDocumentSnapshot<DocumentData>[] = [];
+    querySnapshot.forEach((doc) => {
+      documents.push(doc);
+    });
+
+    // Calculate similarity scores and rank in memory
+    const scoredDocs = documents.map((doc) => {
+      const data = doc.data();
+      const docEmbedding = data.embedding as number[];
+      
+      // Calculate cosine similarity between embeddings
+      const dotProduct = embedding.reduce((sum, val, i) => sum + val * docEmbedding[i], 0);
+      const mag1 = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+      const mag2 = Math.sqrt(docEmbedding.reduce((sum, val) => sum + val * val, 0));
+      const similarity = dotProduct / (mag1 * mag2);
+      
+      return { 
+        doc: {
+          id: doc.id,
+          title: data.title as string,
+          content: data.content as string,
+          type: data.type as string,
+          tags: data.tags as string[],
+          embedding: docEmbedding,
+          timestamp: data.timestamp as number
+        } as KnowledgeDocument, 
+        similarity 
+      };
+    });
+
+    // Sort by similarity and take top results
+    const sortedDocs = scoredDocs
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, maxResults);
+
+    return sortedDocs.map(({ doc }) => doc);
   }
   
   /**
@@ -257,23 +349,27 @@ ${analysis.map((a, i) => `${i+1}. ${a}`).join('\n')}
     maxResults: number = 50
   ): Promise<KnowledgeDocument[]> {
     try {
-      const db = getFirestore();
-      const knowledgeCollection = collection(db, this.COLLECTION_NAME) as CollectionReference<KnowledgeDocument>;
+      const knowledgeCollection = collection(firestoreDb, this.COLLECTION_NAME) as CollectionReference<KnowledgeDocument>;
       
-      let baseQuery: Query<KnowledgeDocument> = query(knowledgeCollection, orderBy('timestamp', 'desc'), limit(maxResults));
+      // Start with a basic query
+      let baseQuery = query(knowledgeCollection);
       
-      if (filter?.types) {
+      // Add filters if provided
+      if (filter?.types?.length) {
         baseQuery = query(baseQuery, where('type', 'in', filter.types));
       }
       
-      if (filter?.tags && filter.tags.length > 0) {
+      if (filter?.tags?.length) {
         baseQuery = query(baseQuery, where('tags', 'array-contains-any', filter.tags));
       }
+      
+      // Add ordering and limit at the end
+      baseQuery = query(baseQuery, orderBy('timestamp', 'desc'), limit(maxResults));
       
       const snapshot = await getDocs(baseQuery);
       
       return snapshot.docs.map(doc => ({
-        ...doc.data(),
+        ...doc.data() as KnowledgeDocument,
         id: doc.id
       }));
     } catch (error) {

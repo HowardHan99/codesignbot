@@ -188,7 +188,16 @@ export async function bootstrapKnowledgeBase(): Promise<string[]> {
       allDocIds.push(...docIds);
       console.log(`Added ${docIds.length} chunks for ${principle.title}`);
     } catch (error) {
-      console.error(`Error adding ${principle.title}:`, error);
+      console.error(`❌ ERROR ADDING ${principle.title}:`, error);
+      if (error instanceof Error) {
+        console.error('🔥 ERROR DETAILS:', {
+          message: error.message,
+          name: error.name,
+          stack: error.stack
+        });
+      }
+      // Log the first 100 characters of the principle content for debugging
+      console.error('Content preview:', principle.content.substring(0, 100) + '...');
     }
   }
   
