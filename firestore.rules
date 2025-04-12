@@ -9,6 +9,16 @@ service cloud.firestore {
       allow write: if true;
     }
     
+    match /AgentMemory/{document=**} {
+      allow read, write: if true;  // For testing only!
+    }
+    match /DesignKnowledge/{document=**} {
+      allow read, write: if true;  // For testing only!
+    }
+    match /agent_memory/{document=**} {
+      allow read, write: if true;  // For testing only!
+    }
+    
     // Default rule - deny all other access
     match /{document=**} {
       allow read, write: if false;

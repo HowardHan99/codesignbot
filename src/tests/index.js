@@ -9,6 +9,7 @@ import { testVectorSearch } from './testVectorSearch';
 import { testAgentMemory } from './testAgentMemory';
 import { testDirectFirestore } from './testDirectFirestore';
 import { testFirestoreAuth } from './testFirestoreAuth';
+import { runAgentMemoryTest } from './runAgentMemoryTest';
 
 /**
  * Available test modules
@@ -36,6 +37,11 @@ const TESTS = {
     name: 'Agent Memory Test',
     description: 'Tests storing and retrieving agent memories of various types',
     run: testAgentMemory
+  },
+  agentMemoryComprehensive: {
+    name: 'Comprehensive Agent Memory Test',
+    description: 'An extensive test suite for the complete agent memory system',
+    run: runAgentMemoryTest
   }
 };
 
@@ -93,4 +99,13 @@ if (typeof window !== 'undefined' && window.document) {
   console.log('runTest("agentMemory");');
 }
 
-export { listTests, runTest, TESTS, testVectorSearch, testAgentMemory, testDirectFirestore, testFirestoreAuth }; 
+export { 
+  listTests, 
+  runTest, 
+  TESTS, 
+  testVectorSearch, 
+  testAgentMemory, 
+  testDirectFirestore, 
+  testFirestoreAuth,
+  runAgentMemoryTest
+}; 

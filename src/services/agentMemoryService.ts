@@ -1,13 +1,12 @@
 /**
  * Service for storing and retrieving agent memories
- * Uses the same vector storage infrastructure as the knowledge base
+ * Uses a dedicated collection for agent memories
  */
 
 import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, limit, DocumentData } from 'firebase/firestore';
 import { initializeApp } from 'firebase/app';
 import { firebaseConfig } from '../utils/config';
 import { EmbeddingService } from './embeddingService';
-import { KnowledgeService } from './knowledgeService';
 
 // Initialize Firebase if it hasn't been already
 let firestoreDb: any;
@@ -45,9 +44,8 @@ export interface AgentMemory {
  * Service for storing and managing agent memories
  */
 export class AgentMemoryService {
-  // Using the same collection as knowledge but with different tags and types
-  private static readonly COLLECTION_NAME = 'DesignKnowledge';
-  private static readonly MEMORY_TAG = 'agent_memory';
+  // Using a dedicated collection for agent memories
+  private static readonly COLLECTION_NAME = 'AgentMemory';
   
   /**
    * Store a new memory for the agent
@@ -71,7 +69,7 @@ export class AgentMemoryService {
         title: `Memory: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`,
         content: content,
         type: type, 
-        tags: [this.MEMORY_TAG, `memory_${type}`, ...extraTags],
+        tags: [`memory_${type}`, ...extraTags],
         timestamp: new Date(),
         embedding: embedding,
         metadata: {
@@ -81,7 +79,7 @@ export class AgentMemoryService {
         }
       };
       
-      // Store in Firestore
+      // Store in dedicated agent_memory collection
       console.log('Storing memory in Firestore...');
       const memoryCollection = collection(firestoreDb, this.COLLECTION_NAME);
       const docRef = await addDoc(memoryCollection, memoryData);
@@ -114,9 +112,10 @@ export class AgentMemoryService {
       const memoryCollection = collection(firestoreDb, this.COLLECTION_NAME);
       
       // Build query for the specified memory type
+      // Note: You may need to create a composite index for this query
       const memoryQuery = query(
         memoryCollection,
-        where('tags', 'array-contains', `memory_${type}`),
+        where('type', '==', type),
         orderBy('timestamp', 'desc'),
         limit(maxResults)
       );
@@ -143,6 +142,78 @@ export class AgentMemoryService {
       return memories;
     } catch (error) {
       console.error(`❌ Error retrieving ${type} memories:`, error);
+      
+      // Fallback to simpler query without ordering if we hit an index error
+      if (error instanceof Error && error.message?.includes('index')) {
+        console.log('Index error detected. Using fallback query without ordering...');
+        return this.getMemoriesByTypeFallback(type, maxResults);
+      }
+      
+      return [];
+    }
+  }
+  
+  /**
+   * Fallback method to retrieve memories without requiring a composite index
+   * (Useful during development)
+   */
+  private static async getMemoriesByTypeFallback(
+    type: MemoryType,
+    maxResults: number = 10
+  ): Promise<AgentMemory[]> {
+    try {
+      const memoryCollection = collection(firestoreDb, this.COLLECTION_NAME);
+      
+      // Simpler query that doesn't require a composite index
+      const memoryQuery = query(
+        memoryCollection,
+        where('type', '==', type)
+      );
+      
+      const querySnapshot = await getDocs(memoryQuery);
+      
+      // Process results
+      const memories: AgentMemory[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        memories.push({
+          id: doc.id,
+          content: data.content,
+          type: type,
+          timestamp: data.timestamp,
+          tags: data.tags,
+          metadata: data.metadata,
+          embedding: data.embedding
+        });
+      });
+      
+      // Sort by timestamp in memory
+      memories.sort((a, b) => {
+        // Handle various timestamp formats
+        const getTimestampMs = (timestamp: any): number => {
+          if (timestamp instanceof Date) {
+            return timestamp.getTime();
+          } else if (typeof timestamp === 'object' && timestamp !== null) {
+            // Handle Firestore Timestamp
+            if ('seconds' in timestamp && typeof timestamp.seconds === 'number') {
+              return timestamp.seconds * 1000;
+            }
+          }
+          // Default value if timestamp is invalid
+          return 0;
+        };
+        
+        const timeA = getTimestampMs(a.timestamp);
+        const timeB = getTimestampMs(b.timestamp);
+        
+        return timeB - timeA; // Descending order (newest first)
+      });
+      
+      const limitedMemories = memories.slice(0, maxResults);
+      console.log(`✓ Retrieved ${limitedMemories.length} ${type} memories with fallback method`);
+      return limitedMemories;
+    } catch (error) {
+      console.error(`❌ Error retrieving ${type} memories with fallback method:`, error);
       return [];
     }
   }
@@ -161,33 +232,63 @@ export class AgentMemoryService {
       // Generate embedding for the context
       const embedding = await EmbeddingService.getEmbedding(context);
       
-      // Create tags filter based on memory types
-      const typeTags = types.map(type => `memory_${type}`);
+      // Filter by memory types if specified
+      let memoryQuery;
+      if (types && types.length > 0) {
+        memoryQuery = query(
+          collection(firestoreDb, this.COLLECTION_NAME),
+          where('type', 'in', types)
+        );
+      } else {
+        memoryQuery = query(
+          collection(firestoreDb, this.COLLECTION_NAME)
+        );
+      }
       
-      // Use KnowledgeService's similarity search with memory-specific filters
-      const filters = { 
-        tags: [this.MEMORY_TAG] // We only want documents tagged as memories
-      };
+      const querySnapshot = await getDocs(memoryQuery);
       
-      const relevantDocuments = await KnowledgeService.retrieveRelevantKnowledge(
-        embedding,
-        maxResults,
-        filters
-      );
+      // Calculate similarity and rank the memories
+      const scoredMemories: {memory: AgentMemory, similarity: number}[] = [];
       
-      // Convert knowledge documents to agent memories
-      const memories: AgentMemory[] = relevantDocuments.map(doc => ({
-        id: doc.id,
-        content: doc.content,
-        type: (doc.metadata?.memoryType as MemoryType) || 'long_term',
-        timestamp: doc.timestamp,
-        tags: doc.tags,
-        metadata: doc.metadata,
-        embedding: doc.embedding
-      }));
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        
+        // Skip if the document doesn't have an embedding
+        if (!data.embedding || !Array.isArray(data.embedding)) {
+          return;
+        }
+        
+        // Calculate cosine similarity
+        const docEmbedding = data.embedding;
+        const dotProduct = embedding.reduce((sum, val, i) => sum + val * docEmbedding[i], 0);
+        const mag1 = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+        const mag2 = Math.sqrt(docEmbedding.reduce((sum, val) => sum + val * val, 0));
+        const similarity = dotProduct / (mag1 * mag2);
+        
+        // Add to scored memories
+        scoredMemories.push({
+          memory: {
+            id: doc.id,
+            content: data.content,
+            type: data.type as MemoryType,
+            timestamp: data.timestamp,
+            tags: data.tags,
+            metadata: data.metadata,
+            relevance: similarity,
+            embedding: data.embedding
+          },
+          similarity
+        });
+      });
       
-      console.log(`✓ Retrieved ${memories.length} relevant memories`);
-      return memories;
+      // Sort by similarity score (highest first)
+      const sortedMemories = scoredMemories
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, maxResults)
+        .map(item => item.memory);
+      
+      console.log(`✓ Retrieved ${sortedMemories.length} relevant memories`);
+      return sortedMemories;
     } catch (error) {
       console.error('❌ Error retrieving relevant memories:', error);
       return [];
@@ -198,9 +299,9 @@ export class AgentMemoryService {
    * Clear all memories of a specific type
    */
   public static async clearMemoriesByType(type: MemoryType): Promise<boolean> {
-    // This would require a delete operation, which we're leaving out for now
-    // as it would need to delete multiple documents via a transaction or batch
-    console.warn('Memory deletion not implemented yet');
+    console.warn(`Clearing all memories of type: ${type}`);
+    console.warn('This operation is not implemented with batched deletes.');
+    console.warn('You should implement a server-side function to do this safely.');
     return false;
   }
 }
