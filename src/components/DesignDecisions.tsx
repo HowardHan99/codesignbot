@@ -15,6 +15,7 @@ import { DesignThemeService } from '../services/designThemeService';
 import { MiroFrameService } from '../services/miro/frameService';
 import { DesignThemeDisplay } from './DesignThemeDisplay';
 import { StickyNoteService } from '../services/miro/stickyNoteService';
+import { logUserActivity, saveDesignProposals, saveThinkingDialogues, saveDesignThemes } from '../utils/firebase';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   loading: () => <div>Loading...</div>,
@@ -326,6 +327,22 @@ export function MainBoard({
       setThemeRefreshTrigger(prev => prev + 1);
       console.log('Triggered design theme refresh');
       
+      logUserActivity({
+        action: 'refresh_design_decisions'
+      });
+      
+      // Save design proposals to Firebase
+      try {
+        const proposalTexts = notes.map(note => note.content);
+        await saveDesignProposals({
+          proposals: proposalTexts,
+          boardId: await getCurrentBoardId()
+        });
+        console.log(`Saved ${proposalTexts.length} design proposals to Firebase`);
+      } catch (error) {
+        console.error('Error saving design proposals to Firebase:', error);
+      }
+      
     } catch (error) {
       console.error('Error refreshing design decisions:', error);
       miro.board.notifications.showError('Failed to refresh design decisions. Please try again.');
@@ -371,6 +388,13 @@ export function MainBoard({
         setCurrentResponses([]);
         setShouldRefreshAnalysis(true);
       }
+
+      logUserActivity({
+        action: 'analysis_click',
+        additionalData: {
+          showAnalysis
+        }
+      });
     } catch (error) {
       console.error('Error during analysis:', error);
       miro.board.notifications.showError('Failed to refresh analysis. Please try again.');
@@ -513,6 +537,30 @@ export function MainBoard({
       
       // Show success notification
       miro.board.notifications.showInfo('Designer role play completed successfully!');
+
+      logUserActivity({
+        action: 'designer_role_play',
+        additionalData: {
+          modelType: selectedDesignerModel,
+          transcriptLength: designerThinking?.thinking?.length > 0 ? designerThinking.thinking[0].length : 0,
+          hasThinking: designerThinking?.thinking?.length > 0,
+          duration: Date.now() - startTime
+        }
+      });
+
+      // Save thinking dialogues to Firebase
+      if (designerThinking && designerThinking.thinking && designerThinking.thinking.length > 0) {
+        try {
+          await saveThinkingDialogues({
+            dialogues: designerThinking.thinking,
+            boardId: await getCurrentBoardId(),
+            modelType: selectedDesignerModel
+          });
+          console.log(`Saved ${designerThinking.thinking.length} thinking dialogues to Firebase`);
+        } catch (error) {
+          console.error('Error saving thinking dialogues to Firebase:', error);
+        }
+      }
     } catch (error) {
       const duration = Date.now() - startTime;
       console.error(`[DESIGNER ROLE PLAY UI] Error role playing designer after ${duration}ms:`, error);
@@ -592,6 +640,31 @@ export function MainBoard({
       
       // Show success notification
       miro.board.notifications.showInfo('Design themes generated successfully!');
+
+      logUserActivity({
+        action: 'generate_themes',
+        additionalData: {
+          duration: Date.now() - startTime
+        }
+      });
+
+      // Get the generated themes and save to Firebase
+      try {
+        const generatedThemes = await DesignThemeService.getCurrentThemesFromBoard();
+        if (generatedThemes.length > 0) {
+          await saveDesignThemes({
+            themes: generatedThemes.map(theme => ({
+              name: theme.name,
+              color: theme.color,
+              description: theme.description || ''
+            })),
+            boardId: await getCurrentBoardId()
+          });
+          console.log(`Saved ${generatedThemes.length} design themes to Firebase`);
+        }
+      } catch (error) {
+        console.error('Error saving design themes to Firebase:', error);
+      }
     } catch (error) {
       const duration = Date.now() - startTime;
       console.error(`[DESIGN THEMES UI] Error generating themes after ${duration}ms:`, error);
@@ -724,6 +797,17 @@ export function MainBoard({
       }
       
       throw new Error(errorMessage);
+    }
+  };
+
+  // Add a helper function to get the current board ID
+  const getCurrentBoardId = async (): Promise<string> => {
+    try {
+      const boardInfo = await miro.board.getInfo();
+      return boardInfo.id;
+    } catch (error) {
+      console.error('Error getting board ID:', error);
+      return 'unknown-board';
     }
   };
 
