@@ -64,52 +64,110 @@ export class OpenAIService {
    * @returns Processed array of points
    */
   private static processOpenAIResponse(result: OpenAIResponse, pointCount: number, fallbackText: string): string[] {
-    // Clean and validate the response
+    // First attempt: Try basic delimiter parsing
     let points = result.response
-      .replace(/•/g, '')
-      .replace(/\d+\./g, '')
-      .replace(/\n+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .replace(/\*\*\s+\*\*/g, '**')
+      .replace(/\*\*\s+\*\*/g, '**') // Fix spacing in delimiters
       .trim()
       .split('**')
       .map(point => point.trim())
       .filter(point => point.length > 0);
-
-    // If we have no points at all, create a minimum set with the fallback text
-    if (points.length === 0) {
-      console.warn('No valid points found in API response, using fallback text');
-      return Array(pointCount).fill(null).map((_, i) => 
-        `${fallbackText} ${i + 1}`
-      );
+    
+    // If we got a good number of points, just return them
+    if (points.length >= pointCount) {
+      console.log(`Found ${points.length} well-formatted points`);
+      return points.slice(0, pointCount);
     }
     
-    // If we have fewer points than required, generate additional unique fallbacks
-    if (points.length < pointCount) {
-      console.warn(`Only ${points.length} points found, adding ${pointCount - points.length} fallback points`);
-      
-      // Generate additional fallbacks with unique suffixes
+    // Simple fallback for when we just need one or two more points
+    if (points.length >= pointCount - 2) {
+      console.log(`Found ${points.length} points, adding ${pointCount - points.length} fallbacks`);
       const fallbacks = [
-        `${fallbackText} with more context.`,
         `${fallbackText} with user needs in mind.`,
-        `${fallbackText} to identify edge cases.`,
         `${fallbackText} considering implementation constraints.`,
-        `${fallbackText} from different perspectives.`,
-        `${fallbackText} to ensure usability.`,
-        `${fallbackText} for consistency.`,
-        `${fallbackText} considering accessibility.`,
-        `${fallbackText} with attention to detail.`,
-        `${fallbackText} before finalizing.`
       ];
       
-      // Add unique fallbacks until we reach pointCount
       while (points.length < pointCount) {
-        const fallbackIndex = points.length % fallbacks.length;
-        points.push(fallbacks[fallbackIndex]);
+        points.push(fallbacks[points.length - (pointCount - fallbacks.length)]);
       }
+      
+      return points;
     }
     
-    return points.slice(0, pointCount);
+    // For more seriously malformed responses, we'll let GPT fix it
+    return points;
+  }
+
+  /**
+   * Uses GPT to reformat a malformed response into properly formatted points
+   * @param malformedResponse - The original malformed response
+   * @param pointCount - Number of points to extract
+   * @returns Promise resolving to array of properly formatted points
+   */
+  private static async reformatWithGPT(malformedResponse: string, pointCount: number): Promise<string[]> {
+    console.log('Reformatting malformed response with GPT');
+    
+    const systemPrompt = `You are helping to extract and format analysis points from a malformed response.
+
+The original response should have contained exactly ${pointCount} distinct critical points about a design, but the formatting was incorrect.
+
+Your task:
+1. Identify ${pointCount} distinct critical points from the text
+2. Format each point as a clear, standalone criticism
+3. Return exactly ${pointCount} points, numbered 1-${pointCount}
+4. If there aren't enough distinct points, create additional relevant ones based on the context
+5. Each point should be concise but complete
+
+Format your response as exactly ${pointCount} numbered points, with one point per line:
+1. First point
+2. Second point
+...and so on.
+
+Do not include any introduction, explanation, or conclusion. Just the ${pointCount} numbered points.`;
+
+    try {
+      const result = await this.makeRequest('/api/openaiwrap', {
+        userPrompt: `Malformed response that needs reformatting into ${pointCount} distinct points:\n\n${malformedResponse}`,
+        systemPrompt,
+        useGpt4: true 
+      });
+      
+      // Extract the numbered points from the response
+      const lines = result.response.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+      const formattedPoints: string[] = [];
+      
+      for (const line of lines) {
+        // Remove numbering and any bullet points
+        const cleanedLine = line.replace(/^\d+[\.\)]\s*/, '').replace(/^[-•]\s*/, '').trim();
+        if (cleanedLine.length > 10) { // Ensure it's a substantial point
+          formattedPoints.push(cleanedLine);
+        }
+      }
+      
+      console.log(`Reformatting succeeded: extracted ${formattedPoints.length} points`);
+      
+      // If we still don't have enough points, add generic fallbacks
+      if (formattedPoints.length < pointCount) {
+        const fallbacks = [
+          "This design decision requires further analysis with user needs in mind.",
+          "This design approach needs evaluation from different perspectives.",
+          "The proposed solution should be reconsidered with implementation constraints in mind.",
+          "This aspect of the design may benefit from additional user testing.",
+          "The current approach could be improved through iterative refinement.",
+        ];
+        
+        while (formattedPoints.length < pointCount) {
+          formattedPoints.push(fallbacks[(formattedPoints.length - 1) % fallbacks.length]);
+        }
+      }
+      
+      return formattedPoints.slice(0, pointCount);
+    } catch (error) {
+      console.error('Error in reformatting response:', error);
+      // If reformatting fails, return generic fallbacks
+      return Array(pointCount).fill(null).map((_, i) => 
+        `This design element needs further analysis. ${i + 1}`
+      );
+    }
   }
 
   /**
@@ -140,20 +198,32 @@ Rules:
 3. Always provide EXACTLY 10 points, no more, no less
 4. Each point should be a complete, self-contained criticism
 5. Keep each point focused on a single issue
+6. CRITICALLY IMPORTANT: Format your response as 10 distinct points separated by double asterisks " ** "
 
-Format your response as exactly 10 points separated by ** **. Example:
-First point here ** ** Second point here ** ** Third point here ** ** Fourth point here ** ** Fifth point here ** ** Sixth point here ** ** Seventh point here ** ** Eighth point here ** ** Ninth point here ** ** Tenth point here${consensusPointsText}`;
+Format example (10 points exactly):
+1. First problem: The design lacks consideration for accessibility, potentially excluding users with disabilities. ** 2. Second problem: The color scheme might cause readability issues in different lighting conditions. ** 3. Third problem: The login flow requires too many steps, increasing user frustration. ** 4. Fourth problem: [etc...] ** 5. Fifth problem: [etc...] ** 6. Sixth problem: [etc...] ** 7. Seventh problem: [etc...] ** 8. Eighth problem: [etc...] ** 9. Ninth problem: [etc...] ** 10. Tenth problem: [etc...]
+
+The numbers are optional but the " ** " separators are REQUIRED. Do not include any other text before or after the 10 points. Each point must be a complete, standalone criticism.${consensusPointsText}`;
 
     try {
       console.log('Making OpenAI API request for standard analysis');
+      
       const result = await this.makeRequest('/api/openaiwrap', {
         userPrompt,
         systemPrompt,
         useGpt4: true // Use GPT-4 for generating analysis
       });
+      
       console.log('Successfully received response from OpenAI API');
 
-      const points = this.processOpenAIResponse(result, 10, 'This design decision requires further analysis');
+      // Try to process with basic delimiter parsing
+      let points = this.processOpenAIResponse(result, 10, 'This design decision requires further analysis');
+      
+      // If we didn't get enough points with basic parsing, use GPT to reformat
+      if (points.length < 10) {
+        console.log('Response format not ideal, using GPT to reformat');
+        points = await this.reformatWithGPT(result.response, 10);
+      }
 
       // Filter for conflicts and preserve all 10 points
       const filteredPoints = await this.filterNonConflictingPoints(points, consensusPoints);
