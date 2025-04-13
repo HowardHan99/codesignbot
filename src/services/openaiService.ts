@@ -17,43 +17,19 @@ export class OpenAIService {
    * @returns Promise resolving to the API response
    */
   private static async makeRequest(endpoint: string, data: any): Promise<OpenAIResponse> {
-    try {
-      console.log(`Making request to ${endpoint} with data:`, { 
-        systemPromptLength: data.systemPrompt?.length || 0,
-        userPromptLength: data.userPrompt?.length || 0,
-        useGpt4: data.useGpt4 || false
-      });
-      
-      // Create an AbortController for timeout handling
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-      
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-        signal: controller.signal
-      });
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
 
-      // Clear the timeout
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'No error text available');
-        throw new Error(`API error (${response.status}): ${errorText}`);
-      }
-
-      const jsonResponse = await response.json();
-      return jsonResponse;
-    } catch (error: any) {
-      console.error('Error in OpenAI API request:', error);
-      if (error.name === 'AbortError') {
-        throw new Error('API request timed out after 60 seconds');
-      }
-      throw error; // Re-throw for handling upstream
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
+
+    return await response.json();
   }
 
   /**
@@ -76,37 +52,9 @@ export class OpenAIService {
       .map(point => point.trim())
       .filter(point => point.length > 0);
 
-    // If we have no points at all, create a minimum set with the fallback text
-    if (points.length === 0) {
-      console.warn('No valid points found in API response, using fallback text');
-      return Array(pointCount).fill(null).map((_, i) => 
-        `${fallbackText} ${i + 1}`
-      );
-    }
-    
-    // If we have fewer points than required, generate additional unique fallbacks
-    if (points.length < pointCount) {
-      console.warn(`Only ${points.length} points found, adding ${pointCount - points.length} fallback points`);
-      
-      // Generate additional fallbacks with unique suffixes
-      const fallbacks = [
-        `${fallbackText} with more context.`,
-        `${fallbackText} with user needs in mind.`,
-        `${fallbackText} to identify edge cases.`,
-        `${fallbackText} considering implementation constraints.`,
-        `${fallbackText} from different perspectives.`,
-        `${fallbackText} to ensure usability.`,
-        `${fallbackText} for consistency.`,
-        `${fallbackText} considering accessibility.`,
-        `${fallbackText} with attention to detail.`,
-        `${fallbackText} before finalizing.`
-      ];
-      
-      // Add unique fallbacks until we reach pointCount
-      while (points.length < pointCount) {
-        const fallbackIndex = points.length % fallbacks.length;
-        points.push(fallbacks[fallbackIndex]);
-      }
+    // Ensure we have exactly the required number of points
+    while (points.length < pointCount) {
+      points.push(points.length > 0 ? points[points.length - 1] : fallbackText);
     }
     
     return points.slice(0, pointCount);
@@ -126,8 +74,6 @@ export class OpenAIService {
     existingPoints: string[] = [],
     consensusPoints: string[] = []
   ): Promise<string> {
-    console.log('Starting generateAnalysis call to OpenAI API');
-    
     const consensusPointsText = consensusPoints.length > 0
       ? `\n\nConsensus points that should NOT be questioned or criticized:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
       : '';
@@ -144,26 +90,18 @@ Rules:
 Format your response as exactly 10 points separated by ** **. Example:
 First point here ** ** Second point here ** ** Third point here ** ** Fourth point here ** ** Fifth point here ** ** Sixth point here ** ** Seventh point here ** ** Eighth point here ** ** Ninth point here ** ** Tenth point here${consensusPointsText}`;
 
-    try {
-      console.log('Making OpenAI API request for standard analysis');
-      const result = await this.makeRequest('/api/openaiwrap', {
-        userPrompt,
-        systemPrompt,
-        useGpt4: true // Use GPT-4 for generating analysis
-      });
-      console.log('Successfully received response from OpenAI API');
+    const result = await this.makeRequest('/api/openaiwrap', {
+      userPrompt,
+      systemPrompt,
+      useGpt4: true // Use GPT-4 for generating analysis
+    });
 
-      const points = this.processOpenAIResponse(result, 10, 'This design decision requires further analysis');
+    const points = this.processOpenAIResponse(result, 10, 'This design decision requires further analysis');
 
-      // Filter for conflicts and preserve all 10 points
-      const filteredPoints = await this.filterNonConflictingPoints(points, consensusPoints);
-      console.log('Analysis generation completed successfully');
-      
-      return filteredPoints.join(' ** ');
-    } catch (error) {
-      console.error('Error in generateAnalysis:', error);
-      throw error; // Re-throw to be caught by caller
-    }
+    // Filter for conflicts and preserve all 10 points
+    const filteredPoints = await this.filterNonConflictingPoints(points, consensusPoints);
+    
+    return filteredPoints.join(' ** ');
   }
 
   /**

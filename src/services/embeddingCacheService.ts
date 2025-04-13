@@ -1,5 +1,4 @@
-// Remove Firebase import
-// import { getDatabase, ref, get, set } from 'firebase/database';
+import { getDatabase, ref, get, set } from 'firebase/database';
 
 interface EmbeddingCache {
   [key: string]: {
@@ -9,14 +8,13 @@ interface EmbeddingCache {
 }
 
 /**
- * Service for caching embeddings in memory
- * Previously also cached to Firebase Realtime Database, but that has been removed
+ * Service for caching embeddings both in memory and Firebase
  */
 export class EmbeddingCacheService {
   private static instance: EmbeddingCacheService;
   private memoryCache: EmbeddingCache = {};
   private readonly CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-  private readonly MEMORY_CACHE_SIZE = 2000; // Increased maximum number of items in memory cache
+  private readonly MEMORY_CACHE_SIZE = 1000; // Maximum number of items in memory cache
 
   private constructor() {}
 
@@ -49,22 +47,41 @@ export class EmbeddingCacheService {
   }
 
   /**
-   * Gets an embedding from memory cache
+   * Gets an embedding from cache (memory or Firebase)
    */
   public async getFromCache(text: string): Promise<number[] | null> {
     const key = this.generateKey(text);
 
-    // Check memory cache
+    // Check memory cache first
     if (this.memoryCache[key] && this.isValid(this.memoryCache[key].timestamp)) {
       console.log('Cache hit: Memory cache');
       return this.memoryCache[key].embedding;
+    }
+
+    // Check Firebase cache
+    try {
+      const db = getDatabase();
+      const cacheRef = ref(db, `embeddings/${key}`);
+      const snapshot = await get(cacheRef);
+
+      if (snapshot.exists()) {
+        const data = snapshot.val();
+        if (this.isValid(data.timestamp)) {
+          console.log('Cache hit: Firebase cache');
+          // Update memory cache
+          this.memoryCache[key] = data;
+          return data.embedding;
+        }
+      }
+    } catch (error) {
+      console.error('Error reading from Firebase cache:', error);
     }
 
     return null;
   }
 
   /**
-   * Saves an embedding to memory cache
+   * Saves an embedding to both memory and Firebase cache
    */
   public async saveToCache(text: string, embedding: number[]): Promise<void> {
     const key = this.generateKey(text);
@@ -84,35 +101,51 @@ export class EmbeddingCacheService {
       );
       delete this.memoryCache[oldestKey];
     }
+
+    // Save to Firebase
+    try {
+      const db = getDatabase();
+      const cacheRef = ref(db, `embeddings/${key}`);
+      await set(cacheRef, data);
+    } catch (error) {
+      console.error('Error saving to Firebase cache:', error);
+    }
   }
 
   /**
-   * Clears expired items from memory cache
+   * Clears expired items from both memory and Firebase cache
    */
   public async clearExpiredCache(): Promise<void> {
+    const now = Date.now();
+
     // Clear memory cache
     Object.entries(this.memoryCache).forEach(([key, value]) => {
       if (!this.isValid(value.timestamp)) {
         delete this.memoryCache[key];
       }
     });
-  }
 
-  /**
-   * MIGRATION: Clears Firebase embeddings cache
-   * Call this once to clear out Firebase cache
-   * @requires Firebase imports to be temporarily restored
-   */
-  public static async clearFirebaseEmbeddingsCache(): Promise<void> {
+    // Clear Firebase cache
     try {
-      // Implement when needed by temporarily restoring imports
-      console.log('Firebase embeddings migration is not implemented in this version');
-      // For implementation, uncomment and use:
-      // const db = getDatabase();
-      // const cacheRef = ref(db, 'embeddings');
-      // await set(cacheRef, null);
+      const db = getDatabase();
+      const cacheRef = ref(db, 'embeddings');
+      const snapshot = await get(cacheRef);
+
+      if (snapshot.exists()) {
+        const updates: { [key: string]: null } = {};
+        Object.entries(snapshot.val()).forEach(([key, value]: [string, any]) => {
+          if (!this.isValid(value.timestamp)) {
+            updates[key] = null;
+          }
+        });
+
+        // Batch remove expired items
+        if (Object.keys(updates).length > 0) {
+          await set(cacheRef, updates);
+        }
+      }
     } catch (error) {
-      console.error('Error clearing Firebase embeddings cache:', error);
+      console.error('Error clearing Firebase cache:', error);
     }
   }
 } 

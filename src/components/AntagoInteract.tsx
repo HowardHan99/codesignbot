@@ -9,7 +9,7 @@ import { MiroService } from '../services/miroService';
 import { AnalysisControls } from './AnalysisControls';
 import { AnalysisResults } from './AnalysisResults';
 import ResponseStore from '../utils/responseStore';
-import { saveAnalysis, getSynthesizedPoints, logUserActivity, saveDesignThemes } from '../utils/firebase';
+import { saveAnalysis, getSynthesizedPoints } from '../utils/firebase';
 import { splitResponse } from '../utils/textProcessing';
 import { EmbeddingService } from '../services/embeddingService';
 import { VoiceRecorder } from './VoiceRecorder';
@@ -123,40 +123,24 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
    * Process sticky notes to generate analysis
    */
   const processNotes = useCallback(async (notes: string[], forceProcess: boolean = false) => {
-    // If forcing process, reset state flags first
-    if (forceProcess) {
-      console.log('Force processing requested, resetting processing state');
-      processedRef.current = false;
-      processingRef.current = false;
-    }
-    
     // Don't process if already processed and not forcing
     if (processedRef.current && !forceProcess) {
-      console.log('Notes already processed and not forcing, skipping processing');
       return;
     }
-    
-    // Prevent concurrent processing
-    if (processingRef.current) {
-      console.log('Already processing notes, skipping duplicate processing');
+
+    // Don't process if no notes or already processing
+    if (notes.length === 0 || processingRef.current) {
       return;
     }
-    
-    console.log(`Starting to process ${notes.length} notes, forceProcess=${forceProcess}`);
-    console.log('Current state:', {
-      processedRef: processedRef.current,
-      processingRef: processingRef.current,
-      designChallenge: designChallenge?.length > 0 ? 'set' : 'not set',
-      consensusPoints: consensusPoints?.length || 0,
-      synthesizedPoints: synthesizedPoints?.length || 0
-    });
+
+    processedRef.current = true;
+    processingRef.current = true;
+    setLoading(true);
+    setSelectedTone('');
     
     try {
-      // Mark as processing
-      processingRef.current = true;
-      processedRef.current = true;
-      setLoading(true);
-      setSelectedTone('');
+      const startTime = performance.now();
+      const miroStartTime = performance.now();
       
       const frames = await miro.board.get({ type: 'frame' });
       const designFrame = frames.find(f => f.title === 'Design-Proposal');
@@ -172,7 +156,11 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       const designStickyNotes = stickyNotes.filter(
         note => note.parentId === designFrame.id
       );
-
+      
+      const miroEndTime = performance.now();
+      
+      // Format data for OpenAI
+      const formatStartTime = performance.now();
       
       const combinedMessage = designStickyNotes.map((note, index) => 
         `Design Decision ${index + 1}: ${note.content || ''}`
@@ -183,6 +171,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         ? `${combinedMessage}\n\nRelevant visual context from design sketches:\n${imageContext}`
         : combinedMessage;
       
+      const formatEndTime = performance.now();
+      
       // Simply read existing themes from the board and their selection state
       console.log('Reading themes from the board...');
       const existingThemes = await DesignThemeService.getCurrentThemesFromBoard();
@@ -192,63 +182,19 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       if (existingThemes.length === 0) {
         console.log('No themes found on board. Using standard analysis without themes.');
         // Generate standard analysis
-        try {
-          const response = await OpenAIService.generateAnalysis(
-            messageWithContext, 
-            designChallenge,
-            synthesizedPoints,
-            consensusPoints
-          );
-          
-          setResponses([response]);
-          setStoredFullResponses({ normal: response });
-          
-          // Update UI with response
-          const splitResponses = splitResponse(response);
-          onResponsesUpdate?.(splitResponses);
-          
-          // Save to Firebase in the background
-          try {
-            // Save analysis data
-            const analysisData = {
-              timestamp: null,
-              designChallenge: designChallenge,
-              decisions: designStickyNotes.map(note => note.content || ''),
-              analysis: {
-                full: splitResponse(response),
-                simplified: []
-              },
-              tone: selectedTone || 'normal',
-              consensusPoints: consensusPoints
-            };
-            await saveAnalysis(analysisData);
-            
-            // Log user activity
-            logUserActivity({
-              action: 'generate_analysis',
-              additionalData: {
-                hasThemes: false,
-                themedDisplay: false,
-                challengeLength: designChallenge?.length || 0,
-                consensusCount: consensusPoints?.length || 0
-              }
-            });
-          } catch (saveError) {
-            console.error('Error saving analysis data to Firebase:', saveError);
-            // Error handled silently to not disrupt user experience
-          }
-          
-          // Complete the loading state
-          setLoading(false);
-          processingRef.current = false;
-          onComplete?.();
-        } catch (error) {
-          console.error('Error generating standard analysis:', error);
-          setError('Failed to generate analysis. Please try again.');
-          setLoading(false);
-          processingRef.current = false;
-          onComplete?.();
-        }
+        const response = await OpenAIService.generateAnalysis(
+          messageWithContext, 
+          designChallenge,
+          synthesizedPoints,
+          consensusPoints
+        );
+        
+        setResponses([response]);
+        setStoredFullResponses({ normal: response });
+        
+        // Update UI with response
+        const splitResponses = splitResponse(response);
+        onResponsesUpdate?.(splitResponses);
         
         // Skip the rest of the themed processing
         return;
@@ -297,8 +243,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       }
       
       // No need to regenerate themes or recalculate positions - the existing themes already have positions
- 
-
+      
+      // Generate theme-specific antagonistic points in parallel
+      const openaiStartTime = performance.now();
+      
       // Run both the theme-specific analyses and the original response generation in parallel
       const [themedResponsesData, response] = await Promise.all([
         // Generate all theme analyses in parallel
@@ -317,7 +265,11 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           consensusPoints
         )
       ]);
-
+      
+      const openaiEndTime = performance.now();
+      
+      // Update UI with the response
+      const uiStartTime = performance.now();
       
       setResponses([response]);
       setThemedResponses(themedResponsesData);
@@ -336,14 +288,19 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         onResponsesUpdate?.(splitResponses);
       }
       
-   
+      const uiEndTime = performance.now();
+      
+      // Handle background operations
+      const bgStartTime = performance.now();
+      
       // Create a tracking variable for background operations
       const backgroundPromises = [];
       
       // Always save to Firebase in the background
+      const saveStartTime = performance.now();
+      
       const savePromise = (async () => {
         try {
-          // First save the main analysis data
           const analysisData = {
             timestamp: null,
             designChallenge: designChallenge,
@@ -356,26 +313,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             consensusPoints: consensusPoints
           };
           await saveAnalysis(analysisData);
-          
-          // If we have themed responses, also save them as design themes
-          if (themedResponsesData.length > 0) {
-            await saveDesignThemes({
-              themes: themedResponsesData.map(theme => ({
-                name: theme.name,
-                color: theme.color,
-                description: theme.points.join(' | ')
-              }))
-            });
-          }
         } catch (error) {
-          console.error('Error saving analysis data to Firebase:', error);
-          // Error handled silently to not disrupt user experience
+          // Error handled silently
         }
       })();
       backgroundPromises.push(savePromise);
       
       // Generate simplified version immediately if in simplified mode
       if (isSimplifiedMode) {
+        const simplifyStartTime = performance.now();
         
         const simplifyPromise = (async () => {
           try {
@@ -403,17 +349,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setLoading(false);
       processingRef.current = false;
       onComplete?.();
-      
-      // Log user activity
-      logUserActivity({
-        action: 'generate_analysis',
-        additionalData: {
-          hasThemes: existingThemes.length > 0, 
-          themedDisplay: useThemedDisplay,
-          challengeLength: designChallenge?.length || 0,
-          consensusCount: consensusPoints?.length || 0
-        }
-      });
       
     } catch (error) {
       setError('Failed to process notes: ' + (error as Error).message);
@@ -465,20 +400,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         onResponsesUpdate?.(splitResponse(currentResponses[0]));
       }
       
-      // Log user activity
-      try {
-        logUserActivity({
-          action: 'toggle_simplified_mode',
-          additionalData: {
-            newMode: !prev,
-            responseLength: responses[0]?.length || 0,
-            simplifiedLength: simplifiedResponses[0]?.length || 0
-          }
-        });
-      } catch (error) {
-        console.error('Error logging mode change:', error);
-      }
-      
       return newMode;
     });
   }, [responses, simplifiedResponses, onResponsesUpdate, useThemedDisplay]);
@@ -488,6 +409,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
    */
   const handleDisplayToggle = useCallback(() => {
     // Keep track of current settings before toggle
+    const prevTone = selectedTone;
+    const prevSimplifiedMode = isSimplifiedMode;
     
     setUseThemedDisplay(prev => {
       const newDisplayMode = !prev;
@@ -529,14 +452,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           onResponsesUpdate?.(splitResponse(currentResponses[0]));
         }
       }
-      
-      // Log user activity
-      logUserActivity({
-        action: 'toggle_themed_display',
-        additionalData: {
-          newMode: !useThemedDisplay
-        }
-      });
       
       return newDisplayMode;
     });
@@ -600,39 +515,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       if (!useThemedDisplay) {
         onResponsesUpdate?.(splitResponse(adjustedResponse));
       }
-
-      // Save tone change to Firebase
-      try {
-        await saveAnalysis({
-          timestamp: null,
-          designChallenge: designChallenge,
-          decisions: stickyNotes,
-          analysis: {
-            full: splitResponse(isSimplifiedMode ? simplifiedResponses[0] : responses[0]),
-            simplified: splitResponse(isSimplifiedMode ? simplifiedResponses[0] : responses[0])
-          },
-          tone: newTone,
-          consensusPoints: consensusPoints
-        });
-        
-        // Log the tone change
-        logUserActivity({
-          action: 'change_tone',
-          additionalData: {
-            newTone: newTone,
-            isSimplifiedMode,
-            analysisLength: (isSimplifiedMode ? simplifiedResponses[0] : responses[0])?.length || 0
-          }
-        });
-      } catch (error) {
-        console.error('Error saving tone change to Firebase:', error);
-      }
     } catch (error) {
       console.error('Error updating tone:', error);
     } finally {
       setIsChangingTone(false);
     }
-  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, storedFullResponses, storedSimplifiedResponses, useThemedDisplay, designChallenge, stickyNotes, consensusPoints]);
+  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, storedFullResponses, storedSimplifiedResponses, useThemedDisplay]);
 
   // Store responses in local storage
   useEffect(() => {
