@@ -5,6 +5,7 @@ import { ConfigurationService } from './configurationService';
 import { ProcessedDesignPoint, ProcessedPointWithRelevance } from '../types/common';
 import { StickyNoteService } from './miro/stickyNoteService';
 import { MiroApiClient } from './miro/miroApiClient';
+import { saveConsensusPoints } from '../utils/firebase';
 
 /**
  * Main service class for Miro operations
@@ -39,7 +40,21 @@ export class MiroService {
    * @returns Promise resolving to an array of consensus points
    */
   public static async getConsensusPoints(): Promise<string[]> {
-    return MiroDesignService.getConsensusPoints();
+    try {
+      const points = await MiroDesignService.getConsensusPoints();
+      if (points.length > 0) {
+        const boardInfo = await miro.board.getInfo();
+        await saveConsensusPoints({
+          points,
+          boardId: boardInfo.id
+        });
+        console.log(`Saved ${points.length} consensus points to Firebase`);
+      }
+      return points;
+    } catch (err) {
+      console.error('Error getting consensus points:', err);
+      return [];
+    }
   }
 
   /**
@@ -70,6 +85,18 @@ export class MiroService {
         processedPoints,
         'decision'  // Use decision mode for styling
       );
+      
+      // After adding new consensus points, save them to Firebase
+      try {
+        const boardInfo = await miro.board.getInfo();
+        await saveConsensusPoints({
+          points,
+          boardId: boardInfo.id
+        });
+        console.log(`Saved ${points.length} new consensus points to Firebase`);
+      } catch (error) {
+        console.error('Error saving new consensus points to Firebase:', error);
+      }
       
       console.log(`Added ${points.length} consensus points`);
     } catch (error) {
