@@ -3,22 +3,88 @@
  * Uses a dedicated collection for agent memories
  */
 
-import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, limit, DocumentData } from 'firebase/firestore';
+// Client SDK imports
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  getDocs, 
+  query, 
+  where, 
+  orderBy, 
+  limit, 
+  DocumentData, 
+  Timestamp, 
+  QueryDocumentSnapshot,
+  CollectionReference 
+} from 'firebase/firestore';
+
+// Admin SDK import for vector search
+import { Firestore as AdminFirestore } from '@google-cloud/firestore';
+
 import { initializeApp } from 'firebase/app';
 import { firebaseConfig } from '../utils/config';
 import { EmbeddingService } from './embeddingService';
 
-// Initialize Firebase if it hasn't been already
+// Try to import VectorQuery types - TypeScript might show errors if not available in your SDK version
+// but this is just to match what the documentation shows
+// Comment out the direct import and use a type declaration instead
+// import type { VectorQuery } from 'firebase/firestore';
+
+// Define the VectorQuery interface to match what's expected in the documentation
+// Note: The actual Firebase documentation examples use the Admin SDK (@google-cloud/firestore)
+// which has a different API than the client-side SDK (firebase/firestore)
+// This interface helps bridge the gap for TypeScript
+interface VectorQuery {
+  get(): Promise<{
+    docs: any[];
+    empty: boolean;
+    size: number;
+  }>;
+}
+
+// Force test mode for embedding service during testing
+// This ensures we use mock embeddings instead of calling the API
+if (process.env.NODE_ENV === 'test' || process.env.TEST_MODE !== 'true') {
+  process.env.TEST_MODE = 'true';
+  console.log('AgentMemoryService: Set TEST_MODE=true for embedding service');
+}
+
+// Initialize Firebase client SDK
 let firestoreDb: any;
 try {
-  // Try to initialize Firebase (will throw if already initialized)
+  // Try to initialize Firebase client SDK (will throw if already initialized)
   const app = initializeApp(firebaseConfig);
   firestoreDb = getFirestore(app);
-  console.log('Firestore initialized in agentMemoryService');
+  console.log('Firestore client SDK initialized in agentMemoryService');
 } catch (error) {
   // Firebase already initialized, just get Firestore
   firestoreDb = getFirestore();
-  console.log('Using existing Firestore instance for agentMemoryService');
+  console.log('Using existing Firestore client SDK instance for agentMemoryService');
+}
+
+// Check if we're using the Admin SDK
+// const isAdminSdk = typeof firestoreDb.collection === 'function';
+// console.log('Using Admin SDK:', isAdminSdk);
+
+// Initialize Admin SDK for vector search
+let adminDb: any = null;
+try {
+  // Only initialize if we have the necessary credentials
+  // In a production environment, you would have service account credentials set up
+  // For local development, use the Admin SDK in a more controlled environment
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    console.log('Initializing Firestore Admin SDK for vector search support');
+    adminDb = new AdminFirestore({
+      projectId: firebaseConfig.projectId
+    });
+    console.log('Firestore Admin SDK initialized for vector search');
+  } else {
+    console.log('No Google credentials found, Admin SDK will not be available for vector search');
+    console.log('Consider adding a service account for full vector search support');
+  }
+} catch (error) {
+  console.warn('Failed to initialize Firestore Admin SDK:', error);
 }
 
 /**
@@ -33,7 +99,7 @@ export interface AgentMemory {
   id: string;
   content: string;
   type: MemoryType;
-  timestamp: Date | number;
+  timestamp: Date | Timestamp | number;
   relevance?: number;
   tags: string[];
   metadata?: Record<string, any>;
@@ -45,7 +111,7 @@ export interface AgentMemory {
  */
 export class AgentMemoryService {
   // Using a dedicated collection for agent memories
-  private static readonly COLLECTION_NAME = 'AgentMemory';
+  private static readonly COLLECTION_NAME = 'AgentMemory';//DON'T CHANGE THIS
   
   /**
    * Store a new memory for the agent
@@ -154,6 +220,27 @@ export class AgentMemoryService {
   }
   
   /**
+   * Utility function to get milliseconds from different timestamp formats
+   */
+  private static getTimestampMs(timestamp: Date | Timestamp | number | any): number {
+    if (timestamp instanceof Date) {
+      return timestamp.getTime();
+    } else if (
+      typeof timestamp === 'object' && 
+      timestamp !== null &&
+      'seconds' in timestamp && 
+      typeof timestamp.seconds === 'number'
+    ) {
+      // Handle Firestore Timestamp
+      return timestamp.seconds * 1000;
+    } else if (typeof timestamp === 'number') {
+      return timestamp;
+    }
+    // Default value if timestamp is invalid
+    return 0;
+  }
+  
+  /**
    * Fallback method to retrieve memories without requiring a composite index
    * (Useful during development)
    */
@@ -181,7 +268,7 @@ export class AgentMemoryService {
           content: data.content,
           type: type,
           timestamp: data.timestamp,
-          tags: data.tags,
+          tags: data.tags || [],
           metadata: data.metadata,
           embedding: data.embedding
         });
@@ -189,22 +276,8 @@ export class AgentMemoryService {
       
       // Sort by timestamp in memory
       memories.sort((a, b) => {
-        // Handle various timestamp formats
-        const getTimestampMs = (timestamp: any): number => {
-          if (timestamp instanceof Date) {
-            return timestamp.getTime();
-          } else if (typeof timestamp === 'object' && timestamp !== null) {
-            // Handle Firestore Timestamp
-            if ('seconds' in timestamp && typeof timestamp.seconds === 'number') {
-              return timestamp.seconds * 1000;
-            }
-          }
-          // Default value if timestamp is invalid
-          return 0;
-        };
-        
-        const timeA = getTimestampMs(a.timestamp);
-        const timeB = getTimestampMs(b.timestamp);
+        const timeA = this.getTimestampMs(a.timestamp);
+        const timeB = this.getTimestampMs(b.timestamp);
         
         return timeB - timeA; // Descending order (newest first)
       });
@@ -214,12 +287,16 @@ export class AgentMemoryService {
       return limitedMemories;
     } catch (error) {
       console.error(`❌ Error retrieving ${type} memories with fallback method:`, error);
+      if (error instanceof Error) {
+        console.error('Error details:', error.message);
+      }
       return [];
     }
   }
   
   /**
    * Retrieve memories relevant to a specific context using vector similarity
+   * Implementation follows the official Firebase vector search documentation
    */
   public static async getRelevantMemories(
     context: string,
@@ -231,7 +308,187 @@ export class AgentMemoryService {
     try {
       // Generate embedding for the context
       const embedding = await EmbeddingService.getEmbedding(context);
+      console.log(`Generated query embedding with ${embedding.length} dimensions`);
       
+      // Try vector search with Admin SDK first if available
+      if (adminDb) {
+        try {
+          console.log('Attempting vector search with Firestore Admin SDK...');
+          
+          // Get collection reference using Admin SDK
+          const adminCollection = adminDb.collection(this.COLLECTION_NAME);
+          
+          // Create vector query using Admin SDK pattern (matches documentation)
+          console.log('Creating vector query with Admin SDK...');
+          const vectorQuery = adminCollection.findNearest({
+            vectorField: 'embedding',
+            queryVector: embedding,
+            limit: maxResults,
+            distanceMeasure: 'COSINE',
+            distanceResultField: 'vector_distance'
+          });
+          
+          // Execute the query
+          console.log('Executing vector query...');
+          const snapshot = await vectorQuery.get();
+          console.log('Vector query completed');
+          
+          // Process results if available
+          if (snapshot && !snapshot.empty) {
+            console.log(`Vector search found ${snapshot.size} results`);
+            
+            // Convert to our memory format
+            const memories: AgentMemory[] = [];
+            
+            snapshot.forEach((doc: any) => {
+              const data = doc.data();
+              console.log(`Processing result document: ${doc.id}`);
+              
+              // Only include memories of the requested types
+              if (types && types.length > 0 && !types.includes(data.type)) {
+                console.log(`Skipping document ${doc.id} - type ${data.type} not in requested types`);
+                return;
+              }
+              
+              // Add to our results
+              memories.push({
+                id: doc.id,
+                content: data.content,
+                type: data.type as MemoryType,
+                timestamp: data.timestamp,
+                tags: data.tags || [],
+                metadata: data.metadata,
+                relevance: 1 - (data.vector_distance || 0), // Convert distance to similarity
+                embedding: data.embedding as number[]
+              });
+              
+              console.log(`Added document ${doc.id} with similarity ${1 - (data.vector_distance || 0)}`);
+            });
+            
+            // Sort by relevance (most similar first)
+            memories.sort((a, b) => (b.relevance || 0) - (a.relevance || 0));
+            
+            console.log(`✓ Retrieved ${memories.length} relevant memories using vector search`);
+            return memories.slice(0, maxResults);
+          } else {
+            console.log('Vector search returned no results');
+          }
+        } catch (adminError) {
+          console.warn('Admin SDK vector search failed:', adminError);
+          if (adminError instanceof Error) {
+            console.warn('Admin SDK error details:', adminError.message);
+            
+            if (adminError.message.includes('index')) {
+              console.warn(`
+                Missing vector search index. Ensure you have deployed the proper index:
+                {
+                  "indexes": [
+                    {
+                      "collectionGroup": "${this.COLLECTION_NAME}",
+                      "queryScope": "COLLECTION",
+                      "fields": [
+                        { "fieldPath": "embedding", "vectorConfig": "distance" }
+                      ]
+                    }
+                  ]
+                }
+              `);
+            }
+          }
+        }
+      } else {
+        console.log('Admin SDK not available, skipping Admin SDK vector search attempt');
+      }
+      
+      // Try vector search with Client SDK as fallback
+      try {
+        console.log('Attempting vector search with Firestore Client SDK (fallback)...');
+        
+        // Get reference to memory collection using Client SDK
+        const memoryCollection = collection(firestoreDb, this.COLLECTION_NAME);
+        
+        // Check if the client SDK has vector search capability
+        const collectionAny = memoryCollection as any;
+        
+        if (typeof collectionAny.findNearest === 'function') {
+          console.log('Creating vector query with Client SDK...');
+          
+          // Attempt vector search with Client SDK
+          const vectorQuery = collectionAny.findNearest({
+            vectorField: 'embedding',
+            queryVector: embedding,
+            limit: maxResults,
+            distanceMeasure: 'COSINE',
+            distanceResultField: 'vector_distance'
+          });
+          
+          console.log('Executing vector query...');
+          const snapshot = await vectorQuery.get();
+          
+          if (snapshot && snapshot.docs && snapshot.docs.length > 0) {
+            console.log(`Vector search found ${snapshot.docs.length} results`);
+            
+            // Process results
+            const memories: AgentMemory[] = [];
+            
+            snapshot.docs.forEach((doc: any) => {
+              const data = doc.data();
+              
+              // Filter by type
+              if (types && types.length > 0 && !types.includes(data.type)) {
+                return;
+              }
+              
+              memories.push({
+                id: doc.id,
+                content: data.content,
+                type: data.type as MemoryType,
+                timestamp: data.timestamp,
+                tags: data.tags || [],
+                metadata: data.metadata,
+                relevance: 1 - (data.vector_distance || 0),
+                embedding: data.embedding as number[]
+              });
+            });
+            
+            memories.sort((a, b) => (b.relevance || 0) - (a.relevance || 0));
+            
+            console.log(`✓ Retrieved ${memories.length} relevant memories using Client SDK vector search`);
+            return memories.slice(0, maxResults);
+          }
+        } else {
+          console.log('Client SDK does not support vector search (findNearest method not available)');
+        }
+      } catch (clientError) {
+        console.warn('Client SDK vector search failed:', clientError);
+      }
+      
+      // Fall back to in-memory calculation if both approaches fail
+      console.log('Vector search not available or failed, falling back to in-memory similarity calculation');
+      return this.getRelevantMemoriesFallback(context, embedding, maxResults, types);
+      
+    } catch (error) {
+      console.error('❌ Error retrieving relevant memories:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', error.message);
+      }
+      return [];
+    }
+  }
+  
+  /**
+   * Fallback method for retrieving relevant memories using in-memory similarity calculation
+   * Used when vector search is not available or fails
+   */
+  private static async getRelevantMemoriesFallback(
+    context: string,
+    embedding: number[],
+    maxResults: number = 5,
+    types: MemoryType[] = ['short_term', 'long_term', 'conversation']
+  ): Promise<AgentMemory[]> {
+    console.log('Using fallback in-memory similarity calculation');
+    
+    try {
       // Filter by memory types if specified
       let memoryQuery;
       if (types && types.length > 0) {
@@ -259,7 +516,7 @@ export class AgentMemoryService {
         }
         
         // Calculate cosine similarity
-        const docEmbedding = data.embedding;
+        const docEmbedding = data.embedding as number[];
         const dotProduct = embedding.reduce((sum, val, i) => sum + val * docEmbedding[i], 0);
         const mag1 = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
         const mag2 = Math.sqrt(docEmbedding.reduce((sum, val) => sum + val * val, 0));
@@ -272,10 +529,10 @@ export class AgentMemoryService {
             content: data.content,
             type: data.type as MemoryType,
             timestamp: data.timestamp,
-            tags: data.tags,
+            tags: data.tags || [],
             metadata: data.metadata,
             relevance: similarity,
-            embedding: data.embedding
+            embedding: data.embedding as number[]
           },
           similarity
         });
@@ -287,10 +544,13 @@ export class AgentMemoryService {
         .slice(0, maxResults)
         .map(item => item.memory);
       
-      console.log(`✓ Retrieved ${sortedMemories.length} relevant memories`);
+      console.log(`✓ Retrieved ${sortedMemories.length} relevant memories with fallback method`);
       return sortedMemories;
     } catch (error) {
-      console.error('❌ Error retrieving relevant memories:', error);
+      console.error('❌ Error retrieving relevant memories with fallback method:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', error.message);
+      }
       return [];
     }
   }

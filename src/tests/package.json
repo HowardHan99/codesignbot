@@ -1,5 +1,8 @@
 {
   "name": "codesignbot-tests",
   "type": "module",
-  "private": true
-} 
+  "private": true,
+  "dependencies": {
+    "firebase": "^11.6.0"
+  }
+}

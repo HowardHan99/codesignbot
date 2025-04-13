@@ -1,8 +1,3 @@
-interface BoardToken {
-  boardId: string;
-  token: string;
-}
-
 class BoardTokenManager {
   private static readonly STORAGE_KEY = 'miro_board_tokens';
 

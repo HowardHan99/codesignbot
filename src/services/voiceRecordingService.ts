@@ -1,7 +1,6 @@
 import { ProcessingStatus } from '../types/common';
 import { AudioRecordingClient } from './audio/audioRecordingClient';
 import { safeApiCall } from '../utils/errorHandlingUtils';
-import { TranscriptProcessingService } from './transcriptProcessingService';
 
 /**
  * Service that handles voice recording state management and UI interactions

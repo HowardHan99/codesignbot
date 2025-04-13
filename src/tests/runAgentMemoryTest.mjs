@@ -1,12 +1,15 @@
 /**
  * Standalone test runner for Agent Memory functionality
- * This script provides a more comprehensive test of the agent memory system
+ * This script provides a comprehensive test of the agent memory system
  * 
- * Run with: node --experimental-modules src/tests/runAgentMemoryTest.mjs
+ * Run with: npx tsx src/tests/runAgentMemoryTest.mjs
  */
 
+// Set test mode for embedding service
+process.env.TEST_MODE = 'true';
+
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { AgentMemoryService } from '../services/agentMemoryService.js';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -21,188 +24,10 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+initializeApp(firebaseConfig);
 
-// Since we can't directly import the services (they use imports without extensions),
-// we'll implement the minimal functionality needed for the test here
-import { collection, addDoc, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
-
-// Memory types supported
-const MemoryTypes = ['short_term', 'long_term', 'conversation', 'reflection'];
-
-// Collection name for agent memories
-const MEMORY_COLLECTION = 'AgentMemory';
-
-/**
- * Store a memory in Firestore
- */
-async function storeMemory(content, type, metadata = {}) {
-  console.log(`Storing memory: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`);
-  
-  const memoryData = {
-    title: `Memory: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`,
-    content,
-    type,
-    tags: [`memory_${type}`],
-    timestamp: new Date(),
-    // Simple mock embedding for testing
-    embedding: Array(10).fill(0).map(() => Math.random()),
-    metadata: {
-      memoryType: type,
-      createdAt: new Date().toISOString(),
-      ...metadata
-    }
-  };
-  
-  const memoryCollection = collection(db, MEMORY_COLLECTION);
-  const docRef = await addDoc(memoryCollection, memoryData);
-  console.log(`✓ Memory stored with ID: ${docRef.id}`);
-  
-  return docRef.id;
-}
-
-/**
- * Get memories of a specific type
- */
-async function getMemoriesByType(type, maxResults = 10) {
-  console.log(`Retrieving ${type} memories...`);
-  
-  const memoryCollection = collection(db, MEMORY_COLLECTION);
-  
-  try {
-    // Try with orderBy first (requires index)
-    const memoryQuery = query(
-      memoryCollection,
-      where('type', '==', type),
-      orderBy('timestamp', 'desc'),
-      limit(maxResults)
-    );
-    
-    const querySnapshot = await getDocs(memoryQuery);
-    
-    const memories = [];
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      memories.push({
-        id: doc.id,
-        content: data.content,
-        type,
-        timestamp: data.timestamp,
-        tags: data.tags,
-        metadata: data.metadata
-      });
-    });
-    
-    console.log(`✓ Retrieved ${memories.length} ${type} memories`);
-    return memories;
-  } catch (error) {
-    // If we get an index error, fall back to simpler query
-    console.log('Error with ordered query, falling back to simple query:', error.message);
-    
-    // Simpler query without orderBy
-    const simpleQuery = query(
-      memoryCollection,
-      where('type', '==', type)
-    );
-    
-    const querySnapshot = await getDocs(simpleQuery);
-    
-    const memories = [];
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      memories.push({
-        id: doc.id,
-        content: data.content,
-        type,
-        timestamp: data.timestamp,
-        tags: data.tags,
-        metadata: data.metadata
-      });
-    });
-    
-    // Sort in memory
-    memories.sort((a, b) => {
-      // Handle various timestamp formats
-      const getTimestampMs = (timestamp) => {
-        if (timestamp instanceof Date) {
-          return timestamp.getTime();
-        } else if (typeof timestamp === 'object' && timestamp !== null) {
-          // Handle Firestore Timestamp
-          if ('seconds' in timestamp) {
-            return timestamp.seconds * 1000;
-          }
-        }
-        // Default value if timestamp is invalid
-        return 0;
-      };
-      
-      const timeA = getTimestampMs(a.timestamp);
-      const timeB = getTimestampMs(b.timestamp);
-      
-      return timeB - timeA; // Descending order (newest first)
-    });
-    
-    // Apply limit after sorting
-    const limitedMemories = memories.slice(0, maxResults);
-    
-    console.log(`✓ Retrieved ${limitedMemories.length} ${type} memories (in-memory sort)`);
-    return limitedMemories;
-  }
-}
-
-/**
- * Retrieve memories relevant to a specific context
- */
-async function getRelevantMemories(context, maxResults = 5) {
-  console.log(`Retrieving memories relevant to: "${context.substring(0, 50)}${context.length > 50 ? '...' : ''}"`);
-  
-  // Get all memories
-  const memoryCollection = collection(db, MEMORY_COLLECTION);
-  const querySnapshot = await getDocs(memoryCollection);
-  
-  const memories = [];
-  querySnapshot.forEach((doc) => {
-    const data = doc.data();
-    // Skip documents with missing content
-    if (!data.content) {
-      console.log(`Skipping document ${doc.id} - missing content property`);
-      return;
-    }
-    memories.push({
-      id: doc.id,
-      content: data.content,
-      type: data.type || 'unknown',
-      timestamp: data.timestamp,
-      tags: data.tags || [],
-      metadata: data.metadata || {}
-    });
-  });
-  
-  // Primitive "similarity" - check if memory contains any words from the context
-  const keywords = context.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-  
-  const scoredMemories = memories.map(memory => {
-    const text = memory.content.toLowerCase();
-    let score = 0;
-    
-    keywords.forEach(keyword => {
-      if (text.includes(keyword)) score += 1;
-    });
-    
-    return { memory, score };
-  });
-  
-  // Sort and limit results
-  const relevantMemories = scoredMemories
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxResults)
-    .filter(item => item.score > 0)
-    .map(item => item.memory);
-  
-  console.log(`✓ Found ${relevantMemories.length} relevant memories`);
-  return relevantMemories;
-}
+// Collection name constant
+const MEMORY_COLLECTION = 'agent_memory';
 
 /**
  * Comprehensive test of Agent Memory functionality
@@ -238,7 +63,7 @@ async function runAgentMemoryTest() {
     // Store each conversation turn
     const conversationIds = [];
     for (const [index, memory] of conversationMemories.entries()) {
-      const id = await storeMemory(
+      const id = await AgentMemoryService.storeMemory(
         memory,
         "conversation",
         {
@@ -263,7 +88,7 @@ async function runAgentMemoryTest() {
     
     const reflectionIds = [];
     for (const reflection of reflections) {
-      const id = await storeMemory(
+      const id = await AgentMemoryService.storeMemory(
         reflection,
         "reflection",
         {
@@ -279,7 +104,7 @@ async function runAgentMemoryTest() {
     
     // Store a long-term memory about the user
     console.log('\nStoring long-term user memory...');
-    const longTermId = await storeMemory(
+    const longTermId = await AgentMemoryService.storeMemory(
       "This user consistently engages with topics related to systems thinking, design methodology, and social impact.",
       "long_term",
       {
@@ -302,7 +127,7 @@ async function runAgentMemoryTest() {
     
     // Get conversation history
     console.log('\nRetrieving conversation history...');
-    const retrievedConversations = await getMemoriesByType("conversation", 10);
+    const retrievedConversations = await AgentMemoryService.getMemoriesByType("conversation", 10);
     console.log(`✅ Retrieved ${retrievedConversations.length} conversation memories`);
     
     // Display a few conversation memories
@@ -317,7 +142,7 @@ async function runAgentMemoryTest() {
     
     // Get reflections
     console.log('\nRetrieving agent reflections...');
-    const retrievedReflections = await getMemoriesByType("reflection", 5);
+    const retrievedReflections = await AgentMemoryService.getMemoriesByType("reflection", 5);
     console.log(`✅ Retrieved ${retrievedReflections.length} reflection memories`);
     
     if (retrievedReflections.length > 0) {
@@ -343,19 +168,34 @@ async function runAgentMemoryTest() {
     for (const query of searchQueries) {
       console.log(`\nSearch query: "${query}"`);
       
-      const relevantMemories = await getRelevantMemories(query, 3);
-      console.log(`✅ Found ${relevantMemories.length} relevant memories`);
-      
-      if (relevantMemories.length > 0) {
-        console.log('\nTop relevant memories:');
-        relevantMemories.forEach((memory, i) => {
-          console.log(`${i+1}. [${memory.type}] ${memory.content}`);
-        });
+      try {
+        const relevantMemories = await AgentMemoryService.getRelevantMemories(
+          query,
+          3,
+          ["conversation", "reflection", "long_term"]
+        );
+        console.log(`✅ Found ${relevantMemories.length} relevant memories`);
         
-        results.searchResults.push({ 
-          query, 
-          results: relevantMemories 
-        });
+        if (relevantMemories.length > 0) {
+          console.log('\nTop relevant memories:');
+          relevantMemories.forEach((memory, i) => {
+            console.log(`${i+1}. [${memory.type}] ${memory.content}`);
+          });
+          
+          results.searchResults.push({ 
+            query, 
+            results: relevantMemories 
+          });
+        }
+      } catch (error) {
+        console.error(`❌ Error searching for query "${query}":`, error);
+        if (error instanceof Error) {
+          console.error('Error details:', {
+            message: error.message,
+            name: error.name,
+            stack: error.stack
+          });
+        }
       }
     }
     
@@ -382,7 +222,7 @@ async function runAgentMemoryTest() {
     
     return {
       error: true,
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: error instanceof Error ? error.message : String(error),
       ...results
     };
   } finally {

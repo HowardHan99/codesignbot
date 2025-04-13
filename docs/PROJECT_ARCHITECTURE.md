@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project implements a voice recording and transcription system that integrates with Miro for collaborative design work. The system processes spoken design decisions and responses, evaluates their relevance to existing design decisions, and creates sticky notes in Miro frames to visualize the design thinking process.
+This project implements a voice recording and transcription system that integrates with Miro for collaborative design work. The system processes spoken design decisions and responses, evaluates their relevance to existing design decisions, and creates sticky notes in Miro frames to visualize the design thinking process. It also includes an Agent Memory system for persisting and retrieving contextual information using vector search capabilities.
 
 ## Directory Structure
 
@@ -38,12 +38,14 @@ Services are organized in a hierarchical structure:
    - `MiroService`: Facade for all Miro-related operations
    - `OpenAIService`: Handles AI model interactions
    - `VoiceRecordingService`: Manages voice recording state and processing
+   - `AgentMemoryService`: Manages storage and retrieval of agent memories using vector search
 
 2. **Mid-level Services**:
    - `StickyNoteService`: Creates and positions sticky notes 
    - `TranscriptProcessingService`: Processes transcripts into design points
    - `InclusiveDesignCritiqueService`: Analyzes designs for inclusivity issues
    - `RelevanceService`: Evaluates the relevance of content to design decisions
+   - `KnowledgeService`: Manages storage and retrieval of knowledge documents
 
 3. **Low-level Services/Clients**:
    - `MiroApiClient`: Direct client for Miro API calls
@@ -88,6 +90,22 @@ TranscriptProcessingService → Processed Points → RelevanceService
 StickyNoteService → MiroApiClient → Miro Board
 ```
 
+### Agent Memory Flow
+
+1. User interacts with the system, generating conversations or reflections
+2. `AgentMemoryService` processes interactions and classifies into memory types
+3. Memory is stored in Firestore with appropriate tags and embeddings
+4. When context is needed, relevant memories are retrieved using vector search
+5. Retrieved memories inform agent responses, creating continuity in interactions
+
+```
+User Interaction → AgentMemoryService → Memory Classification
+     ↓
+OpenAI Embeddings API → Vector Generation → Firestore Storage
+     ↓
+Query → Vector Search → Relevant Memories → Agent Context
+```
+
 ## State Management
 
 1. **Component-level State**:
@@ -102,6 +120,26 @@ StickyNoteService → MiroApiClient → Miro Board
 3. **Configuration**:
    - `ConfigurationService` provides centralized access to application settings
    - Runtime configuration overrides are supported
+
+## Firebase Integration
+
+The project integrates with Firebase for several critical functions:
+
+1. **Firestore Database**:
+   - Stores agent memories in the `agent_memory` collection
+   - Stores knowledge documents in the `knowledge` collection
+   - Leverages vector search capabilities for semantic retrieval
+
+2. **Vector Search**:
+   - Implements dual-approach vector search with Admin SDK and Client SDK
+   - Provides fallback mechanisms for environments where vector search is unavailable
+   - Uses custom indexes for efficient similarity search
+
+3. **Authentication**:
+   - Uses Firebase authentication for service access
+   - Leverages Admin SDK for privileged operations
+
+For detailed information on the vector search implementation, see [VECTOR_SEARCH.md](./VECTOR_SEARCH.md).
 
 ## Error Handling Strategy
 
@@ -131,11 +169,13 @@ The codebase heavily uses async/await for asynchronous operations:
    - Design decisions are cached to avoid repeated fetching
    - OpenAI API responses are cached with TTL
    - Embeddings are cached for faster similarity calculations
+   - Memory retrievals use optimized query patterns to reduce database load
 
 2. **Throttling and Debouncing**:
    - Voice processing is done in intervals rather than real-time
    - API calls are rate-limited to prevent overloading
    - UI updates are debounced for smoother user experience
+   - Vector operations are optimized for performance
 
 3. **Batching**:
    - Multiple sticky notes are created in batches where possible
@@ -145,6 +185,8 @@ The codebase heavily uses async/await for asynchronous operations:
 
 1. **Manual Testing Scripts**:
    - `testThemeGeneration.ts` for design theme generation testing
+   - `runAgentMemoryTest.mjs` for testing agent memory functionality
+   - `runKnowledgeTest.js` for testing knowledge retrieval
    - Browser console utilities for development testing
 
 2. **Recommended Testing Approach**:
@@ -219,6 +261,13 @@ The codebase heavily uses async/await for asynchronous operations:
 3. Implement static class with clear method signatures
 4. Use existing error handling patterns and logging
 
+### Extending Agent Memory
+
+1. Define memory structure with appropriate type and tags
+2. Use `AgentMemoryService.storeMemory()` method for persistence
+3. Retrieve memories using type-based or semantic search methods
+4. Consider adding custom metadata for filtering capabilities
+
 ### Modifying Existing Features
 
 1. Understand the current implementation thoroughly
@@ -235,6 +284,8 @@ The codebase heavily uses async/await for asynchronous operations:
    - NEXT_PUBLIC_MIRO_OAUTH_TOKEN
    - NEXT_PUBLIC_MIRO_BOARD_ID
    - OPENAI_API_KEY
+   - GOOGLE_APPLICATION_CREDENTIALS (for Firebase Admin SDK)
+   - FIREBASE_PROJECT_ID
 
 2. Browser Compatibility:
    - Application relies on modern browser APIs
@@ -244,4 +295,9 @@ The codebase heavily uses async/await for asynchronous operations:
 3. Miro App Installation:
    - Install as a Miro app with appropriate permissions
    - Configure OAuth tokens and redirect URLs
-   - Set up appropriate board access permissions 
+   - Set up appropriate board access permissions
+
+4. Firebase Configuration:
+   - Deploy vector search indexes using `firebase deploy --only firestore:indexes`
+   - Set up appropriate security rules for collections
+   - Configure service account with appropriate permissions 
