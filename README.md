@@ -6,6 +6,186 @@
 - OAuth token for the board (if not using the default board)
 - OpenAI API key (for GPT-4 model access)
 - Anthropic API key (for Claude model access, optional)
+- Node.js and npm installed on your machine
+
+## Installation and Running the Application
+
+1. Clone the repository
+```
+git clone https://github.com/yourusername/codesignbot.git
+cd codesignbot
+```
+
+2. Install dependencies
+```
+npm install
+```
+
+3. Set up environment variables (as described in the next section)
+
+4. Start the development server
+```
+npm start
+```
+
+5. Open your browser and navigate to `http://localhost:3000`
+
+6. For production builds, use:
+```
+npm run build
+```
+
+## Miro Integration Setup
+
+### Creating a Miro App
+
+1. [Sign in](https://miro.com/login/) to Miro, and create a [Developer team](https://developers.miro.com/docs/create-a-developer-team) under your account.
+
+2. [Create an app in Miro](https://developers.miro.com/docs/build-your-first-hello-world-app#step-2-create-your-app-in-miro):
+   - Click the **Create new app** button.
+   - On the **Create new app** modal, give your app a name, assign it to your Developer team, and click **Create**.
+
+3. Configure the app:
+   - In your account profile, go to **Your apps**, and select the app you just created.
+   - On the app configuration page, go to **App Credentials**, and copy the **Client ID** and **Client secret** values.
+   - Go to **App URL** and enter: `http://localhost:3000` (for development) or your production URL.
+   - Go to **Redirect URI for OAuth2.0**, and enter: `http://localhost:3000/api/redirect` (for development) or your production redirect URL.
+   - Click **Options** and select **Use this URI for SDK authorization**.
+   - Go to **Permissions**, and select the following permissions:
+     - `board:read`
+     - `board:write`
+
+4. Add these credentials to your `.env` file:
+```env
+MIRO_CLIENT_ID="your_client_id"
+MIRO_CLIENT_SECRET="your_client_secret"
+MIRO_REDIRECT_URL="http://localhost:3000/api/redirect"
+```
+
+### Setting Up Your Miro Board
+
+1. Create a new board in Miro with the following frames:
+   - `Design-Proposal`: For design decision sticky notes
+   - `Antagonistic-Response`: For analysis responses
+   - `Thinking-Dialogue`: For AI thinking process
+   - `Real-time-response`: For real-time responses
+   - `Consensus`: For consensus decisions
+   - `Design-Challenge`: For defining the design challenge
+   - `Sketch-Reference`: For design sketches and images
+   - `Incorporate suggestions`: For additional suggestions
+
+2. Get your Board ID from the URL:
+   - Open your Miro board
+   - Copy the ID from the URL (e.g., `uXjVNzqQxNs=` from `https://miro.com/app/board/uXjVNzqQxNs=/`)
+
+3. Add the Board ID to your `.env` file:
+```env
+NEXT_PUBLIC_MIRO_BOARD_ID="your_board_id"
+```
+
+4. When the application runs, it will connect to this board automatically.
+
+### Verifying the Miro Integration
+
+To verify that your Miro integration is working correctly:
+
+1. Start the application with `npm start`
+2. Open your browser to `http://localhost:3000`
+3. You should see an option to connect to your Miro board
+4. Click the "Login to Board" button and authorize the application when prompted
+5. Once authorized, the application should connect to your board and display confirmation
+6. If you open your Miro board in another tab, you should see the app icon in the left toolbar
+7. Click the app icon to interact with the application directly from Miro
+
+### Troubleshooting Miro Integration
+
+If you encounter issues with the Miro integration:
+
+1. Ensure all required environment variables are set correctly
+2. Check that your Miro app has the correct permissions (`board:read` and `board:write`)
+3. Verify that the redirect URL in your Miro app configuration matches your environment setup
+4. Clear browser cookies and local storage if you encounter authentication issues
+5. Check the browser console for any error messages related to the Miro SDK
+6. Ensure your Miro board contains all the required frames as specified above
+7. For more detailed guidance, visit the [Miro Developer Platform documentation](https://developers.miro.com/docs/guided-onboarding)
+
+## Firebase Integration Setup
+
+This application uses Firebase for data storage, vector search, and agent memory. Follow these steps to set up Firebase:
+
+### Creating a Firebase Project
+
+1. Go to the [Firebase Console](https://console.firebase.google.com/) and sign in with your Google account
+2. Click **Add project** and follow the setup wizard to create a new Firebase project
+3. Give your project a name and complete the setup process
+
+### Setting Up Firestore Database
+
+1. In your Firebase project dashboard, click on **Firestore Database** in the left sidebar
+2. Click **Create database** if you haven't already set up Firestore
+3. Choose a starting mode for your security rules (start with **Test mode** for development)
+4. Select a location for your Firestore database that's closest to your users
+5. Click **Enable**
+
+### Deploying Firebase Indexes
+
+The application requires specific indexes for vector search and other queries:
+
+1. Install the Firebase CLI if you haven't already:
+   ```
+   npm install -g firebase-tools
+   ```
+
+2. Log in to Firebase from the CLI:
+   ```
+   firebase login
+   ```
+
+3. Initialize Firebase in your project directory (if not already done):
+   ```
+   firebase init
+   ```
+   - Select **Firestore** and **Hosting** when prompted
+   - Choose your Firebase project
+   - Use the default options for the rest of the setup
+
+4. Deploy the Firestore indexes using:
+   ```
+   firebase deploy --only firestore:indexes
+   ```
+
+### Setting Up Firebase Authentication
+
+1. In your Firebase project dashboard, click on **Authentication** in the left sidebar
+2. Click **Get started** if you haven't already set up Authentication
+3. Enable the authentication methods you want to use (Anonymous authentication is used for testing)
+
+### Configuring Environment Variables
+
+Add the following Firebase configuration to your `.env` file:
+
+```env
+GOOGLE_APPLICATION_CREDENTIALS="path_to_your_service_account_key.json"
+FIREBASE_PROJECT_ID="your_firebase_project_id"
+```
+
+### Generating a Service Account Key (For Server-Side Access)
+
+1. In your Firebase project dashboard, go to **Project settings** > **Service accounts**
+2. Click **Generate new private key** to download a JSON file containing your service account credentials
+3. Store this file securely and set the path in your `GOOGLE_APPLICATION_CREDENTIALS` environment variable
+
+### Testing Firebase Integration
+
+To verify your Firebase setup is working correctly:
+
+1. Run the Firebase authentication test:
+   ```
+   npx tsx src/tests/testFirestoreAuth.js
+   ```
+
+2. If all tests pass, your Firebase integration is configured correctly
+3. If you encounter errors, check your service account permissions and Firestore rules
 
 ## Method 1: Using Environment Variables (Recommended for Development)
 
@@ -131,8 +311,13 @@ The Claude API has specific formatting requirements:
 
 Your Miro board should have the following frames:
 - `Design-Proposal`: For design decision sticky notes
-- `Analysis-Response`: For analysis responses
+- `Antagonistic-Response`: For analysis responses
+- `Thinking-Dialogue`: For AI thinking process
+- `Real-time-response`: For real-time responses
+- `Consensus`: For consensus decisions
+- `Design-Challenge`: For defining the design challenge
 - `Sketch-Reference`: For design sketches and images
+- `Incorporate suggestions`: For additional suggestions
 
 ## Troubleshooting
 
