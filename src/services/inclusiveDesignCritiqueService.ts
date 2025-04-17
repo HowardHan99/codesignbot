@@ -155,35 +155,21 @@ export class InclusiveDesignCritiqueService {
         return;
       }
       
-      // Get existing stickies count for positioning
-      const existingStickies = await MiroApiClient.getStickiesInFrame(frame.id);
-      const stickyCount = existingStickies ? existingStickies.length : 0;
+      // Convert critiques to ProcessedDesignPoint format
+      const processedCritiques = critiques.map(critique => ({
+        proposal: `🔍 INCLUSIVE DESIGN CRITIQUE:\n\n${critique}`,
+        category: 'critique'
+      }));
       
-      // Create sticky notes for each critique
-      for (let i = 0; i < critiques.length; i++) {
-        const stickyConfig = ConfigurationService.getStickyConfig();
-        const position = {
-          x: frame.x + (stickyCount + i) % 3 * (stickyConfig.dimensions.width + stickyConfig.dimensions.spacing),
-          y: frame.y + Math.floor((stickyCount + i) / 3) * (stickyConfig.dimensions.height + stickyConfig.dimensions.spacing) + stickyConfig.layout.topMargin
-        };
-        
-        await MiroApiClient.createStickyNote({
-          content: `🔍 INCLUSIVE DESIGN CRITIQUE:\n\n${critiques[i]}`,
-          x: position.x,
-          y: position.y,
-          width: stickyConfig.dimensions.width,
-          style: {
-            fillColor: stickyConfig.colors.critique.inclusivity,
-            textAlign: 'left',
-            textAlignVertical: 'top'
-          }
-        });
-        
-        console.log(`Created critique sticky note: ${critiques[i].substring(0, 50)}...`);
-        
-        // Brief delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, ConfigurationService.getRelevanceConfig().delayBetweenCreations));
-      }
+      // Use StickyNoteService's createStickyNotesFromPoints method
+      // which internally uses the proper positioning logic
+      await StickyNoteService.createStickyNotesFromPoints(
+        this.REAL_TIME_FRAME,
+        processedCritiques,
+        'response' // Use response mode for consistent styling
+      );
+      
+      console.log(`Created ${critiques.length} critique sticky notes in Real-time response frame`);
     } catch (error) {
       console.error('Error sending critiques to board:', error);
     }

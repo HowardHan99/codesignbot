@@ -1,116 +1,105 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { OpenAI } from 'openai';
+import OpenAI from 'openai';
+import { Logger } from '../../../utils/logger';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// List of supported audio formats by OpenAI
-const SUPPORTED_FORMATS = ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm'];
+// Support all formats that OpenAI supports
+const SUPPORTED_FORMATS = [
+  'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'
+];
+
+// Minimum file size to avoid "too short" errors (1KB)
+const MIN_FILE_SIZE = 1000;
+
+// Domain-specific prompt to improve transcription quality
+const TRANSCRIPTION_PROMPT = "This is a design meeting discussing user interface concepts, inclusive design principles, and technical implementation details. The conversation might include technical terms like APIs, UI components, frameworks, and design patterns.";
 
 export async function POST(request: NextRequest) {
   try {
-    // Get the form data from the request
+    Logger.log('TRANSCRIBE-API', 'Received transcription request');
+    
     const formData = await request.formData();
-    const audio = formData.get('audio');
-
-    if (!audio || !(audio instanceof Blob)) {
-      console.error('Audio file is missing or invalid');
-      return NextResponse.json(
-        { error: 'Audio file is required' },
-        { status: 400 }
-      );
+    const receivedAudioFile = formData.get('audio') as File | null;
+    const chunkNumber = formData.get('chunkNumber') as string || '0';
+    
+    if (!receivedAudioFile) {
+      Logger.error('TRANSCRIBE-API', 'No audio file provided in form data.');
+      return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
     }
-
-    // Log audio file details for debugging
-    const audioType = audio.type;
-    const audioSize = audio.size;
-    console.log(`Received audio file: ${audioSize} bytes, type: ${audioType}`);
-
-    // Check if the file is likely a valid audio file (basic check)
-    if (audioSize < 100) {
-      console.error(`Audio file too small: ${audioSize} bytes`);
-      return NextResponse.json(
-        { error: 'Audio file is too small or empty' },
-        { status: 400 }
-      );
+    
+    Logger.log('TRANSCRIBE-API', `Received chunk #${chunkNumber}: Name=${receivedAudioFile.name}, Size=${receivedAudioFile.size}, Type=${receivedAudioFile.type}`);
+    
+    if (receivedAudioFile.size < MIN_FILE_SIZE) {
+      Logger.error('TRANSCRIBE-API', `Audio file too small: ${receivedAudioFile.size} bytes`);
+      return NextResponse.json({ error: 'Audio file is too small.' }, { status: 400 });
     }
-
-    // Extract the format from the MIME type
-    let format = audioType.split('/')[1];
-    if (format && format.includes(';')) {
-      // Handle "audio/webm;codecs=opus" type formats
-      format = format.split(';')[0];
+    
+    // Basic validation of file extension
+    const originalExtension = receivedAudioFile.name.split('.').pop()?.toLowerCase();
+    if (!originalExtension || !SUPPORTED_FORMATS.includes(originalExtension)) {
+      Logger.warn('TRANSCRIBE-API', `Received file with extension: .${originalExtension}. Checking if format is supported.`);
     }
-
-    // Check if the format is supported
-    if (!SUPPORTED_FORMATS.includes(format)) {
-      console.error(`Unsupported audio format: ${format}`);
-      return NextResponse.json(
-        { 
-          error: `Unsupported audio format: ${format}. Supported formats: ${SUPPORTED_FORMATS.join(', ')}`,
-          supportedFormats: SUPPORTED_FORMATS
-        },
-        { status: 400 }
-      );
-    }
-
-    // Convert the Blob to ArrayBuffer
-    const audioBuffer = await audio.arrayBuffer();
-    const audioFile = new Uint8Array(audioBuffer);
-
-    // Create a temporary file name with the correct extension
-    const fileName = `audio-${Date.now()}.${format}`;
-    console.log(`Created temporary file: ${fileName}`);
-
-    // Create a temporary file for OpenAI
-    const file = new File([audioFile], fileName, { type: audioType });
-
-    // Track time for metrics
-    const startTime = Date.now();
-    console.log('Calling OpenAI Whisper API...');
 
     try {
-      // Send the audio to OpenAI for transcription
+      if (!process.env.OPENAI_API_KEY) {
+        Logger.error('TRANSCRIBE-API', 'Missing OpenAI API key on server.');
+        return NextResponse.json({ error: 'Server configuration error: Missing API key' }, { status: 500 });
+      }
+      
+      Logger.log('TRANSCRIBE-API', 'Sending audio to OpenAI GPT-4o transcription API...');
+
+      // Using the latest gpt-4o-mini-transcribe model with improved options
       const transcription = await openai.audio.transcriptions.create({
-        file: file,
-        model: 'whisper-1',
-        language: 'en',
+        file: receivedAudioFile,
+        model: 'gpt-4o-mini-transcribe', // Using the newer, faster model
+        response_format: 'text', // Explicitly request text format
+        prompt: TRANSCRIPTION_PROMPT, // Providing context to improve accuracy
+        language: 'en', // Still specifying English
       });
-
-      const endTime = Date.now();
-      const duration = (endTime - startTime) / 1000; // in seconds
-      console.log(`Transcription successful, ${transcription.text.length} chars, took ${duration}s`);
-
-      // Return the transcription
+      
+      Logger.log('TRANSCRIBE-API', `Transcription successful: ${transcription.length} chars`);
       return NextResponse.json({
-        transcription: transcription.text,
-        duration,
+        transcription: transcription,
+        duration: 0, // Duration still not provided by OpenAI
       });
-    } catch (apiError: any) {
-      console.error('OpenAI API error:', apiError);
 
-      // Return a more detailed error for API issues
-      return NextResponse.json(
-        { 
-          error: `OpenAI API error: ${apiError.message}`,
-          details: apiError.response?.data || 'No additional details'
-        },
-        { status: 400 }
-      );
+    } catch (error: any) {
+      // Log the detailed error from OpenAI
+      Logger.error('TRANSCRIBE-API', 'OpenAI API Error:', {
+        status: error.status,
+        message: error.message,
+        code: error.code,
+        param: error.param,
+        type: error.type
+      });
+      
+      let errorMessage = `Transcription failed via OpenAI: ${error.message || 'Unknown API error'}`;
+      let status = error.status || 500;
+
+      // Better error handling with specific messages
+      if (status === 400) {
+        if (error.message?.includes('too short')) {
+          errorMessage = 'The audio recording is too short.';
+        } else if (error.message?.includes('format') || error.message?.includes('decode')) {
+          errorMessage = `OpenAI could not decode the audio data. The recording might be corrupted or in an unexpected format.`; 
+        } else if (error.message?.includes('file size')) {
+          errorMessage = 'The audio file exceeds the maximum size limit.';
+        } else {
+          errorMessage = `Invalid request to OpenAI: ${error.status} ${error.message}`;
+        }
+      } else if (status === 401) {
+        errorMessage = 'API authentication failed. Please contact support.';
+        status = 500; // This is a server issue, not client
+      }
+      
+      return NextResponse.json({ error: errorMessage }, { status });
     }
-
   } catch (error: any) {
-    console.error('Error transcribing audio:', error);
-    
-    // Return detailed error information
-    return NextResponse.json(
-      { 
-        error: error.message || 'Error transcribing audio',
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      },
-      { status: 500 }
-    );
+    Logger.error('TRANSCRIBE-API', 'Unexpected Server Error:', error);
+    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 } 

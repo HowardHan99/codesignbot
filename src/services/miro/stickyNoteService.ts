@@ -5,6 +5,7 @@ import { safeApiCall } from '../../utils/errorHandlingUtils';
 import { ProcessedDesignPoint, ProcessedPointWithRelevance } from '../../types/common';
 import { RelevanceService } from '../relevanceService';
 import { delay } from '../../utils/fileProcessingUtils';
+import { Logger } from '../../utils/logger';
 
 /**
  * Type for sticky note color categories
@@ -228,6 +229,7 @@ export class StickyNoteService {
     totalsByScore: number[]
   ): Promise<{ sticky: any, rowSpacesUsed: number }> {
     try {
+      Logger.log('VR-STICKY', `StickyNoteService: Creating sticky with content preview: "${content.substring(0, 30)}..."}`, { score, mode });
       // Validate score is in range
       const relevanceConfig = ConfigurationService.getRelevanceConfig();
       const { min, max } = relevanceConfig.scale;
@@ -243,6 +245,7 @@ export class StickyNoteService {
       let position;
       const frameName = frame.title;
       const totalSoFar = totalsByScore[score - 1];
+      Logger.log('STICKY-POS', `Total stickies so far for score ${score}: ${totalSoFar}`);
       
       // For general frames that need multi-column layout, use the new positioning algorithm
       if (frameName === 'Design-Proposal' || 
@@ -251,12 +254,14 @@ export class StickyNoteService {
           frameName === 'Analysis-Response' ||
           frameName === 'Antagonistic-Response' ||
           frameName === 'Designer-Thinking') {
-        console.log(`Using general multi-column layout for ${frameName} frame`);
+        Logger.log('STICKY-POS', `Using general multi-column layout for frame "${frameName}"`);
         position = this.calculateGeneralStickyPosition(frame, totalSoFar);
       } else {
-        // Use score-based positioning for other frames (Consensus, etc.)
+        Logger.log('STICKY-POS', `Using score-based layout for frame "${frameName}"`);
         position = this.calculateStickyPosition(frame, totalSoFar, score);
       }
+      
+      Logger.log('STICKY-POS', `Calculated position: X=${position.x.toFixed(0)}, Y=${position.y.toFixed(0)}`);
       
       // Get sticky dimensions from config
       const { width, height } = ConfigurationService.getStickyConfig().dimensions;
@@ -298,10 +303,12 @@ export class StickyNoteService {
         adjustedY < frameBottom;
       
       if (!isInFrame) {
-        console.error(`CRITICAL ERROR: Position (${adjustedX}, ${adjustedY}) is outside frame bounds!`);
+        Logger.error('STICKY-POS', `CRITICAL ERROR: Calculated Position (${adjustedX}, ${adjustedY}) is OUTSIDE frame bounds! Frame: ${frame.title} (${frameLeft}, ${frameTop}) -> (${frameRight}, ${frameBottom})`);
+        // Return early to prevent Miro error
         return { sticky: null, rowSpacesUsed: 0 };
       }
       
+      Logger.log('STICKY-POS', `Adjusted position (within frame bounds): X=${adjustedX.toFixed(0)}, Y=${adjustedY.toFixed(0)}`);
       // HANDLE MIRO'S CHARACTER LIMIT
       
       // Check if content exceeds the character limit
@@ -334,10 +341,11 @@ export class StickyNoteService {
           }
         });
         
+        Logger.log('VR-STICKY', `StickyNoteService: Single sticky note created. ID: ${sticky?.id}`, { content: content.substring(0,50) });
         return { sticky, rowSpacesUsed: 1 };
       }
     } catch (error) {
-      console.error('Error creating sticky note:', error);
+      Logger.error('VR-STICKY', 'Error creating sticky note:', error);
       return { sticky: null, rowSpacesUsed: 0 };
     }
   }
@@ -610,8 +618,9 @@ export class StickyNoteService {
     relevanceThreshold?: number
   ): Promise<void> {
     try {
+      Logger.log('VR-STICKY', `StickyNoteService: createStickyNotesFromPoints called for frame "${frameName}" with ${processedPoints.length} points.`);
       if (!processedPoints || processedPoints.length === 0) {
-        console.log(`No points to create sticky notes from`);
+        Logger.warn('VR-STICKY', `No points provided to createStickyNotesFromPoints for frame "${frameName}".`);
         return;
       }
       
@@ -631,6 +640,23 @@ export class StickyNoteService {
       
       // Initialize counter array for tracking stickies by score
       const countsByScore = this.getInitialCounters();
+      
+      // NEW: Get existing stickies in the frame to use as starting count
+      try {
+        const existingStickies = await MiroApiClient.getStickiesInFrame(frame.id);
+        const existingCount = existingStickies.length;
+        
+        if (existingCount > 0) {
+          Logger.log('STICKY-POS', `Found ${existingCount} existing stickies in frame "${frameName}", using as starting count.`);
+          const maxScore = relevanceConfig.scale.max;
+          for (let i = 0; i < maxScore; i++) {
+            countsByScore[i] = existingCount;
+          }
+        }
+      } catch (error) {
+        // Note: Using console.error directly as Logger might not be initialized or error occurs before setup
+        Logger.error('STICKY-POS', 'Error getting existing stickies count, using default counters:', error);
+      }
       
       // Process for relevance if design decisions are provided
       let pointsWithRelevance: ProcessedPointWithRelevance[] = [];
@@ -680,6 +706,12 @@ export class StickyNoteService {
             countsByScore
           );
           
+          if (!sticky) {
+            Logger.warn('VR-STICKY', `Failed to create sticky note for point index ${i}, proposal: "${point.proposal.substring(0,30)}..."`);
+          } else {
+            Logger.log('VR-STICKY', `Successfully created sticky (ID: ${sticky.id}) for point index ${i}`);
+          }
+          
           // Increment the counter by the number of row spaces used
           // This ensures we track the actual vertical space used by connected notes
           countsByScore[point.relevanceScore - 1] += rowSpacesUsed;
@@ -688,13 +720,13 @@ export class StickyNoteService {
           const delayTime = ConfigurationService.getRelevanceConfig().delayBetweenCreations;
           await delay(delayTime);
         } catch (error) {
-          console.error(`Error creating sticky note:`, error);
+          Logger.error('VR-STICKY', `Error creating sticky note inside loop for point index ${i}:`, error);
         }
       }
       
-      console.log(`Created ${pointsWithRelevance.length} sticky notes in "${frameName}" frame`);
+      Logger.log('VR-STICKY', `Finished creating ${pointsWithRelevance.length} sticky notes in "${frameName}" frame`);
     } catch (error) {
-      console.error('Error creating sticky notes from points:', error);
+      Logger.error('VR-STICKY', `Error in createStickyNotesFromPoints for frame "${frameName}":`, error);
       throw error;
     }
   }

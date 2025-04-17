@@ -465,24 +465,31 @@ export function MainBoard({
     if (!points.length) return;
     
     try {
-      // Get the design frame ID if we don't have it yet
-      let frameId = designFrameId;
-      if (!frameId) {
-        frameId = await getDesignFrameId();
-      }
+      // The VoiceRecorder component now handles creating stickies in "Thinking-Dialogue"
+      // This callback might be used just to know *that* new points were generated
+      // or to trigger a refresh if needed, but shouldn't duplicate sticky creation.
       
-      // Process each point and create sticky notes in the Design-Proposal frame
-      await TranscriptProcessingService.createDesignProposalStickies(
-        points.map(point => ({ proposal: point })),
-        'Design-Proposal'
-      );
+      // // Get the design frame ID if we don't have it yet
+      // let frameId = designFrameId;
+      // if (!frameId) {
+      //   frameId = await getDesignFrameId();
+      // }
       
-      // Refresh the design decisions after adding new notes
-      await handleRefreshDesignDecisions();
+      // // Process each point and create sticky notes in the Design-Proposal frame - REMOVED
+      // await TranscriptProcessingService.createDesignProposalStickies(
+      //   points.map(point => ({ proposal: point })),
+      //   'Design-Proposal'
+      // );
+      
+      console.log(`[DesignDecisions] handleNewDesignPoints received ${points.length} points (sticky creation handled by VoiceRecorder).`);
+      
+      // Optional: Trigger refresh if necessary, but seems redundant as it's called below?
+      // Consider if handleRefreshDesignDecisions is still needed here or if it's implicitly covered.
+      // await handleRefreshDesignDecisions(); 
     } catch (error) {
-      console.error('Error processing design points:', error);
+      console.error('Error processing design points callback:', error);
     }
-  }, [designFrameId, getDesignFrameId, handleRefreshDesignDecisions]);
+  }, [/* keep relevant dependencies like handleRefreshDesignDecisions if needed */ handleRefreshDesignDecisions]);
 
   // New function to handle designer role play
   const handleDesignerRolePlay = async () => {
