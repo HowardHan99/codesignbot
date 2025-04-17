@@ -4,7 +4,7 @@
  * Connects the recorder with the transcription service.
  */
 import { SimpleAudioRecorder, AudioRecorderChunk } from './audio/simpleAudioRecorder';
-import { WhisperTranscriptionService, TranscriptionResult } from './TranscriptionService';
+import { VoiceRecordingTranscriptionService, TranscriptionResult } from './voiceRecordingTranscription';
 import { Logger } from '../utils/logger';
 
 // Log context for this module
@@ -97,7 +97,7 @@ export class SimplifiedVoiceService {
       this.status.isProcessing = true;
       
       // Transcribe this chunk
-      const result = await WhisperTranscriptionService.transcribeAudio(chunk.blob);
+      const result = await VoiceRecordingTranscriptionService.transcribeAudio(chunk.blob);
       
       // Update status
       this.status.isProcessing = false;
@@ -157,7 +157,7 @@ export class SimplifiedVoiceService {
       Logger.log(LOG_CONTEXT, `Transcribing final audio: ${(finalAudio.size/1024).toFixed(1)}KB`);
       
       // Transcribe the final audio
-      const result = await WhisperTranscriptionService.transcribeAudio(finalAudio);
+      const result = await VoiceRecordingTranscriptionService.transcribeAudio(finalAudio);
       
       // Reset status
       this.resetStatus();

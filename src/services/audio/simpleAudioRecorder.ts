@@ -1,10 +1,10 @@
 /**
  * SimpleAudioRecorder
- * A streamlined recorder using Web Audio API with focus on generating reliable audio format.
- * Creates WAV format audio, which is well-supported by OpenAI's Whisper API.
+ * A streamlined audio recorder implementation using Web Audio API.
+ * Generates WAV format audio in real-time from raw audio samples.
  */
 import { Logger } from '../../utils/logger';
-import { WhisperTranscriptionService } from '../TranscriptionService';
+import { VoiceRecordingTranscriptionService } from '../voiceRecordingTranscription';
 
 // Log context for this module
 const LOG_CONTEXT = 'AUDIO-RECORDER';
@@ -17,14 +17,14 @@ export interface AudioRecorderChunk {
 export class SimpleAudioRecorder {
   private static mediaRecorder: MediaRecorder | null = null;
   private static audioStream: MediaStream | null = null;
-  private static chunks: Blob[] = []; // Keep for final recording blob
+  private static chunks: Blob[] = []; // For final recording
   private static isRecording = false;
   private static onChunkCallback: ((chunk: AudioRecorderChunk) => void) | null = null;
   private static chunkInterval: number = 20000; // Default to 20 seconds
   private static actualMimeType: string | null = null;
-  // New audio context for processing
+  // Audio processing components
   private static audioContext: AudioContext | null = null;
-  private static recorder: any = null; // ScriptProcessor recorder
+  private static scriptProcessor: ScriptProcessorNode | null = null;
   private static source: MediaStreamAudioSourceNode | null = null;
   private static chunkBuffer: Float32Array[] = [];
   private static chunkStartTime: number = 0;
@@ -48,8 +48,8 @@ export class SimpleAudioRecorder {
       this.onChunkCallback = options.onChunk || null;
       this.chunkInterval = options.chunkInterval || this.chunkInterval;
 
-      // Reset WhisperTranscriptionService chunk cache when starting new recording
-      WhisperTranscriptionService.resetChunkCache();
+      // Reset chunk tracking in VoiceRecordingTranscriptionService
+      VoiceRecordingTranscriptionService.resetChunkCache();
       
       Logger.log(LOG_CONTEXT, `Starting recording with ${this.chunkInterval/1000}s chunks`);
 
@@ -62,8 +62,11 @@ export class SimpleAudioRecorder {
         }
       });
 
+      // Initialize audio context and custom WAV generator
+      this.setupWavGenerator();
+      
+      // Also initialize a MediaRecorder as a backup for final recording
       try {
-        // Initialize a standard media recorder but use it primarily for the final recording
         const fallbackMimeType = MediaRecorder.isTypeSupported('audio/wav') ? 'audio/wav' : 'audio/webm';
         this.mediaRecorder = new MediaRecorder(this.audioStream, { 
           mimeType: fallbackMimeType,
@@ -71,9 +74,9 @@ export class SimpleAudioRecorder {
         });
         
         this.actualMimeType = this.mediaRecorder.mimeType;
-        Logger.log('VR-SETUP', `MediaRecorder initialized as fallback with type: ${this.actualMimeType}`);
+        Logger.log(LOG_CONTEXT, `Backup MediaRecorder initialized with type: ${this.actualMimeType}`);
         
-        // Start the recorder just to collect chunks for final output
+        // Only use this recorder for final recording
         this.mediaRecorder.ondataavailable = (event) => {
           if (event.data && event.data.size > 0) {
             this.chunks.push(event.data);
@@ -82,24 +85,14 @@ export class SimpleAudioRecorder {
             }
           }
         };
-
-        // Setup our custom audio processor for chunks
-        this.setupCustomAudioProcessor(options);
         
-        // Start the standard MediaRecorder for backup
         this.mediaRecorder.start(this.chunkInterval);
-        
-        Logger.log(LOG_CONTEXT, 'Recording started successfully with hybrid recording strategy');
-        return this.audioStream;
       } catch (error) {
-        Logger.error(LOG_CONTEXT, 'Failed to initialize MediaRecorder, trying fallback:', error);
-        
-        // If MediaRecorder fails, we'll just use the custom audio processor
-        this.setupCustomAudioProcessor(options);
-        
-        Logger.log(LOG_CONTEXT, 'Recording started with fallback mode');
-        return this.audioStream;
+        Logger.warn(LOG_CONTEXT, 'Backup MediaRecorder initialization failed:', error);
       }
+      
+      Logger.log(LOG_CONTEXT, 'Recording started successfully with WAV generator');
+      return this.audioStream;
     } catch (error) {
       Logger.error(LOG_CONTEXT, 'Error starting recording:', error);
       this.cleanup();
@@ -108,9 +101,9 @@ export class SimpleAudioRecorder {
   }
   
   /**
-   * Set up a custom audio processor that can create WAV files directly
+   * Set up our WAV generator using ScriptProcessorNode
    */
-  private static setupCustomAudioProcessor(options: any): void {
+  private static setupWavGenerator(): void {
     try {
       // Initialize audio context
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -118,22 +111,20 @@ export class SimpleAudioRecorder {
       // Create an audio source from the stream
       this.source = this.audioContext.createMediaStreamSource(this.audioStream!);
       
-      // Reset chunk buffer
+      // Reset chunk buffer and timing
       this.chunkBuffer = [];
       this.chunkStartTime = Date.now();
       
       // Create a script processor to handle the raw audio data
-      // NOTE: ScriptProcessorNode is deprecated but still widely supported
-      // The new AudioWorkletNode is the replacement but requires more setup
       const bufferSize = 4096;
-      this.recorder = this.audioContext.createScriptProcessor(
+      this.scriptProcessor = this.audioContext.createScriptProcessor(
         bufferSize, 
         1, // mono input
         1  // mono output
       );
       
-      // Process audio data
-      this.recorder.onaudioprocess = (e: AudioProcessingEvent) => {
+      // Set up audio processing event handler
+      this.scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
         if (!this.isRecording) return;
         
         // Get the raw audio data
@@ -149,28 +140,29 @@ export class SimpleAudioRecorder {
         // Check if we've reached the chunk interval
         const elapsed = Date.now() - this.chunkStartTime;
         if (elapsed >= this.chunkInterval) {
-          this.processAudioChunk();
+          this.generateWavChunk();
         }
       };
       
-      // Connect the nodes: source -> recorder -> destination
-      this.source.connect(this.recorder);
-      this.recorder.connect(this.audioContext.destination);
+      // Connect the nodes: source -> scriptProcessor -> destination
+      this.source.connect(this.scriptProcessor);
+      this.scriptProcessor.connect(this.audioContext.destination);
       
-      Logger.log(LOG_CONTEXT, 'Custom audio processor initialized successfully');
+      Logger.log(LOG_CONTEXT, 'WAV generator initialized successfully');
     } catch (error) {
-      Logger.error(LOG_CONTEXT, 'Failed to initialize custom audio processor:', error);
+      Logger.error(LOG_CONTEXT, 'Failed to initialize WAV generator:', error);
+      throw error;
     }
   }
   
   /**
-   * Process the current audio buffer and create a WAV chunk
+   * Generate a WAV chunk from the accumulated audio buffer
    */
-  private static processAudioChunk(): void {
+  private static generateWavChunk(): void {
     if (!this.audioContext || this.chunkBuffer.length === 0) return;
     
     try {
-      // Calculate total samples
+      // Calculate total samples from all buffer chunks
       let totalSamples = 0;
       for (const buffer of this.chunkBuffer) {
         totalSamples += buffer.length;
@@ -185,50 +177,50 @@ export class SimpleAudioRecorder {
       }
       
       // Create WAV file
-      const wavBlob = this.createWAVBlob(combinedBuffer, this.audioContext.sampleRate);
+      const wavBlob = this.createWavFile(combinedBuffer, this.audioContext.sampleRate);
       
       // Reset for next chunk
       this.chunkBuffer = [];
       this.chunkStartTime = Date.now();
       
-      // If we have a callback, send this chunk
+      // Send the WAV chunk to the callback
       if (this.onChunkCallback) {
         const chunk: AudioRecorderChunk = {
           blob: wavBlob,
           timestamp: Date.now()
         };
-        Logger.log('VR-CHUNK', `Custom chunk captured: ${(wavBlob.size/1024).toFixed(1)}KB, Type: audio/wav (custom)`);
+        Logger.log(LOG_CONTEXT, `WAV chunk generated: ${(wavBlob.size/1024).toFixed(1)}KB, Type: audio/wav`);
         this.onChunkCallback(chunk);
       }
     } catch (error) {
-      Logger.error(LOG_CONTEXT, 'Error processing audio chunk:', error);
+      Logger.error(LOG_CONTEXT, 'Error generating WAV chunk:', error);
     }
   }
   
   /**
    * Create a WAV blob from Float32Array audio data
    */
-  private static createWAVBlob(audioData: Float32Array, sampleRate: number): Blob {
-    // We'll create a 16-bit WAV file
-    const numChannels = 1; // Mono
+  private static createWavFile(audioData: Float32Array, sampleRate: number): Blob {
+    // WAV parameters - 16-bit mono PCM
+    const numChannels = 1;
     const bitsPerSample = 16;
     const bytesPerSample = bitsPerSample / 8;
     const blockAlign = numChannels * bytesPerSample;
     const byteRate = sampleRate * blockAlign;
     const dataSize = audioData.length * bytesPerSample;
-    const bufferSize = 44 + dataSize; // 44 bytes is WAV header size
+    const bufferSize = 44 + dataSize; // 44 bytes for WAV header
     
     // Create the buffer
     const buffer = new ArrayBuffer(bufferSize);
     const view = new DataView(buffer);
     
     // Write WAV header
-    // "RIFF" chunk
+    // "RIFF" chunk descriptor
     this.writeString(view, 0, 'RIFF');
     view.setUint32(4, 36 + dataSize, true);
     this.writeString(view, 8, 'WAVE');
     
-    // "fmt " chunk
+    // "fmt " sub-chunk
     this.writeString(view, 12, 'fmt ');
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true); // PCM format
@@ -238,7 +230,7 @@ export class SimpleAudioRecorder {
     view.setUint16(32, blockAlign, true);
     view.setUint16(34, bitsPerSample, true);
     
-    // "data" chunk
+    // "data" sub-chunk
     this.writeString(view, 36, 'data');
     view.setUint32(40, dataSize, true);
     
@@ -247,8 +239,8 @@ export class SimpleAudioRecorder {
     for (let i = 0; i < audioData.length; i++) {
       // Convert float to 16-bit PCM
       const sample = Math.max(-1, Math.min(1, audioData[i]));
-      const value = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-      view.setInt16(offset, value, true);
+      const pcmValue = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+      view.setInt16(offset, pcmValue, true);
       offset += 2;
     }
     
@@ -279,27 +271,27 @@ export class SimpleAudioRecorder {
 
       Logger.log(LOG_CONTEXT, 'Stopping recording...');
       
-      // Process any remaining audio in our buffer
+      // Generate any remaining audio in our buffer
       if (this.chunkBuffer.length > 0) {
-        this.processAudioChunk();
+        this.generateWavChunk();
       }
       
-      // Disconnect and clean up the custom audio processor
-      if (this.source && this.recorder) {
+      // Clean up audio processing components
+      if (this.source && this.scriptProcessor) {
         try {
-          this.source.disconnect(this.recorder);
-          this.recorder.disconnect();
+          this.source.disconnect(this.scriptProcessor);
+          this.scriptProcessor.disconnect();
         } catch (e) {
           // Ignore disconnect errors
         }
       }
       
-      // If we have a MediaRecorder, get its data too
+      // Get final recording from MediaRecorder if available
       if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
         this.mediaRecorder.onstop = () => {
           if (this.chunks.length > 0) {
             const finalBlob = new Blob(this.chunks, { type: this.actualMimeType || 'audio/wav' });
-            Logger.log(LOG_CONTEXT, `Recording stopped, final size: ${(finalBlob.size/1024).toFixed(1)}KB, Type: ${finalBlob.type}`);
+            Logger.log(LOG_CONTEXT, `Recording stopped, final size: ${(finalBlob.size/1024).toFixed(1)}KB`);
             this.cleanup();
             resolve(finalBlob);
           } else {
@@ -318,8 +310,7 @@ export class SimpleAudioRecorder {
           resolve(null);
         }
       } else {
-        // If we don't have a MediaRecorder or it's not recording,
-        // just clean up and resolve with null
+        // No MediaRecorder available, clean up and resolve
         this.cleanup();
         resolve(null);
       }
@@ -357,7 +348,7 @@ export class SimpleAudioRecorder {
       this.audioStream = null;
     }
 
-    // Clean up audio context resources
+    // Clean up audio processing components
     if (this.source) {
       try {
         this.source.disconnect();
@@ -367,13 +358,13 @@ export class SimpleAudioRecorder {
       this.source = null;
     }
     
-    if (this.recorder) {
+    if (this.scriptProcessor) {
       try {
-        this.recorder.disconnect();
+        this.scriptProcessor.disconnect();
       } catch (e) {
         // Ignore disconnect errors
       }
-      this.recorder = null;
+      this.scriptProcessor = null;
     }
     
     if (this.audioContext) {

@@ -1,8 +1,7 @@
 /**
- * WhisperTranscriptionService
- * Service for transcribing audio using OpenAI's Whisper API.
- * Implements best practices from the official API documentation:
- * https://platform.openai.com/docs/guides/speech-to-text
+ * VoiceRecordingTranscriptionService
+ * Service for transcribing audio using OpenAI's advanced transcription API.
+ * Handles audio chunk processing and conversion for reliable speech-to-text.
  */
 import { Logger } from '../utils/logger';
 
@@ -15,7 +14,7 @@ export interface TranscriptionResult {
   error?: string;
 }
 
-export class WhisperTranscriptionService {
+export class VoiceRecordingTranscriptionService {
   // Static cache for the first chunk that contains WebM headers
   private static firstChunkCache: Blob | null = null;
   private static chunkCount: number = 0;
