@@ -26,13 +26,8 @@ export default function ConversationModalPage() {
   }, []);
 
   const handleClose = () => {
-    // Notify parent to close modal
+    // Send close message to parent
     window.parent.postMessage({ type: 'CLOSE_MODAL' }, '*');
-  };
-
-  const handleInstruction = (instruction: string) => {
-    // Send instruction to parent
-    window.parent.postMessage({ type: 'INSTRUCTION', instruction }, '*');
   };
 
   return (

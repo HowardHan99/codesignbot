@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { DesignerModelType } from '../../../services/designerRolePlayService';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Initialize OpenAI API with environment variables
 const openai = new OpenAI({
@@ -16,8 +17,11 @@ const anthropic = new Anthropic({
   }
 });
 
+// Initialize Google Gemini API
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '');
+
 // System prompt for the designer role play
-const DESIGNER_SYSTEM_PROMPT = `You are an experienced professional designer. You approach design challenges with a structured thinking process, considering user needs, context, constraints, and opportunities. You think through problems step by step, focusing on user-centered design principles.
+const DESIGNER_SYSTEM_PROMPT = `You are a professional designer. You approach design challenges with a structured thinking process, considering user needs, context, constraints, and opportunities. You think through problems step by step, focusing on user-centered design principles.
 
 Your task is to think through the given design challenge as if you were solving it in real time, and provide:
 
@@ -36,7 +40,7 @@ The thinking process should be detailed and showcase your thought process, inclu
 The design decisions should be concrete, actionable points that represent the key components of your solution.`;
 
 // Update Claude system prompt to be more explicit about format
-const CLAUDE_SYSTEM_PROMPT = `You are an experienced professional designer. You approach design challenges with a structured thinking process, considering user needs, context, constraints, and opportunities. You think through problems step by step, focusing on user-centered design principles.
+const CLAUDE_SYSTEM_PROMPT = `You are a professional designer. You approach design challenges with a structured thinking process, considering user needs, context, constraints, and opportunities. You think through problems step by step, focusing on user-centered design principles.
 
 Your task is to think through the given design challenge as if you were solving it in real time.
 
@@ -57,6 +61,9 @@ YOUR RESPONSE should ONLY include the final design decisions, presented as clear
 ...and so on
 
 Do not number the design decisions. Each design decision should be a concise, actionable point that represents a key component of your solution.`;
+
+// System prompt for all models (GPT-O3, Gemini)
+const GENERAL_SYSTEM_PROMPT = DESIGNER_SYSTEM_PROMPT;
 
 /**
  * Designer Role Play API Route
@@ -131,10 +138,7 @@ Please show your complete thinking process as you work through this design chall
               budget_tokens: 4000 
             }
           };
-          
-          // Start timing the processing
-          const processingStartTime = Date.now();
-          
+                    
           // Make the API call with appropriate parameters
           console.log(`[DESIGNER ROLE PLAY API] Making Claude API call with params:`, {
             model: params.model,
@@ -356,26 +360,80 @@ Please show your complete thinking process as you work through this design chall
           // Do not fall back to GPT-4, just propagate the error
           throw new Error(`Claude API error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
+      } else if (modelType === DesignerModelType.GPT_O3) {
+        // Call OpenAI GPT-O3
+        console.log('[DESIGNER ROLE PLAY API] Calling OpenAI GPT-O3 API');
+        const gptO3StartTime = Date.now();
+        
+        try {
+          // Log API key presence
+          console.log('[DESIGNER ROLE PLAY API] OpenAI API Key present:', !!process.env.OPENAI_API_KEY);
+          console.log('[DESIGNER ROLE PLAY API] Using GPT-O3 model');
+          
+          const completion = await openai.chat.completions.create({
+            //Don't change this model
+            model: 'o3',
+            messages: [
+              { role: 'system', content: GENERAL_SYSTEM_PROMPT },
+              { role: 'user', content: userPrompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 2000
+          });
+          
+          responseText = completion.choices[0]?.message?.content || '';
+          
+          const gptO3Duration = Date.now() - gptO3StartTime;
+          console.log(`[DESIGNER ROLE PLAY API] GPT-O3 API call completed in ${gptO3Duration}ms`);
+        } catch (error) {
+          console.error('[DESIGNER ROLE PLAY API] Error calling GPT-O3 API:', error);
+          throw new Error('Failed to call GPT-O3 API: ' + (error as Error).message);
+        }
+      } else if (modelType === DesignerModelType.GEMINI) {
+        // Call Google Gemini 2.5 Pro
+        console.log('[DESIGNER ROLE PLAY API] Calling Google Gemini API');
+        const geminiStartTime = Date.now();
+        
+        try {
+          // Log API key presence
+          console.log('[DESIGNER ROLE PLAY API] Google Gemini API Key present:', !!process.env.GOOGLE_GEMINI_API_KEY);
+          console.log('[DESIGNER ROLE PLAY API] Using Gemini 2.5 Pro model');
+          
+          // Don't change this model
+          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro-preview-03-25' });
+          
+          // Generate content
+          const prompt = `${GENERAL_SYSTEM_PROMPT}\n\n${userPrompt}`;
+          const result = await model.generateContent(prompt);
+          const response = await result.response;
+          responseText = response.text();
+          
+          const geminiDuration = Date.now() - geminiStartTime;
+          console.log(`[DESIGNER ROLE PLAY API] Gemini API call completed in ${geminiDuration}ms`);
+        } catch (error) {
+          console.error('[DESIGNER ROLE PLAY API] Error calling Gemini API:', error);
+          throw new Error('Failed to call Gemini API: ' + (error as Error).message);
+        }
       } else {
         // Default to OpenAI GPT-4
-    console.log('[DESIGNER ROLE PLAY API] Calling OpenAI API');
-    const openaiStartTime = Date.now();
-    
+        console.log('[DESIGNER ROLE PLAY API] Calling OpenAI GPT-4 API');
+        const openaiStartTime = Date.now();
+        
         try {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [
+          const completion = await openai.chat.completions.create({
+            model: 'gpt-4',
+            messages: [
               { role: 'system', content: DESIGNER_SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: 0.7,
-      max_tokens: 2000
-    });
+              { role: 'user', content: userPrompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 2000
+          });
           
           responseText = completion.choices[0]?.message?.content || '';
     
-    const openaiDuration = Date.now() - openaiStartTime;
-    console.log(`[DESIGNER ROLE PLAY API] OpenAI API call completed in ${openaiDuration}ms`);
+          const openaiDuration = Date.now() - openaiStartTime;
+          console.log(`[DESIGNER ROLE PLAY API] OpenAI API call completed in ${openaiDuration}ms`);
         } catch (error) {
           console.error('[DESIGNER ROLE PLAY API] Error calling OpenAI API:', error);
           throw new Error('Failed to call OpenAI API: ' + (error as Error).message);
@@ -388,76 +446,76 @@ Please show your complete thinking process as you work through this design chall
 
     // Process the response into thinking process and decisions
     if (modelType !== DesignerModelType.CLAUDE) {
-    console.log('[DESIGNER ROLE PLAY API] Processing response into thinking and decisions');
+      console.log('[DESIGNER ROLE PLAY API] Processing response into thinking and decisions');
       
-      // For GPT-4, extract thinking from the response text using regex
+      // For GPT-4, GPT-O3, and Gemini - extract thinking from the response text using regex
       console.log('[DESIGNER ROLE PLAY API] Attempting regex extraction');
-    const thinkingMatch = responseText.match(/(?:Thinking Process|Thinking|Process):(.*?)(?:Design Decisions|Key Design Decisions|Main Insights|Design Decision):/s);
+      const thinkingMatch = responseText.match(/(?:Thinking Process|Thinking|Process):(.*?)(?:Design Decisions|Key Design Decisions|Main Insights|Design Decision):/s);
 
-    if (thinkingMatch && thinkingMatch[1]) {
-        console.log('[DESIGNER ROLE PLAY API] Found thinking section with regex');
+      if (thinkingMatch && thinkingMatch[1]) {
+          console.log('[DESIGNER ROLE PLAY API] Found thinking section with regex');
+          
+        thinking = thinkingMatch[1]
+          .trim()
+          .split(/\d+\.\s+|\n\s*\n+|\n-\s+/)
+          .filter((item: string) => item.trim().length > 0)
+          .map((item: string) => item.trim());
         
-      thinking = thinkingMatch[1]
-        .trim()
-        .split(/\d+\.\s+|\n\s*\n+|\n-\s+/)
-        .filter((item: string) => item.trim().length > 0)
-        .map((item: string) => item.trim());
-      
-        console.log('[DESIGNER ROLE PLAY API] Successfully extracted thinking points using regex', {
-          count: thinking.length,
-          firstPointPreview: thinking[0]?.substring(0, 100) + '...'
-      });
-    } else {
-      console.warn('[DESIGNER ROLE PLAY API] Failed to extract thinking points using regex');
-        console.log('[DESIGNER ROLE PLAY API] Response text preview:', responseText.substring(0, 300) + '...');
-    }
+          console.log('[DESIGNER ROLE PLAY API] Successfully extracted thinking points using regex', {
+            count: thinking.length,
+            firstPointPreview: thinking[0]?.substring(0, 100) + '...'
+        });
+      } else {
+        console.warn('[DESIGNER ROLE PLAY API] Failed to extract thinking points using regex');
+          console.log('[DESIGNER ROLE PLAY API] Response text preview:', responseText.substring(0, 300) + '...');
+      }
 
       // Extract design decisions using regex
       console.log('[DESIGNER ROLE PLAY API] Attempting to extract design decisions using regex');
       const decisionsMatch = responseText.match(/(?:Design Decisions|Key Design Decisions|Main Insights|Design Decision):(.*?)(?:$|Conclusion)/s);
 
-    if (decisionsMatch && decisionsMatch[1]) {
-        console.log('[DESIGNER ROLE PLAY API] Found decisions section with regex');
-        console.log('[DESIGNER ROLE PLAY API] Raw decisions section:', decisionsMatch[1].substring(0, 200) + '...');
-        
-      decisions = decisionsMatch[1]
-        .trim()
-        .split(/\d+\.\s+|\n\s*\n+|\n-\s+/)
-        .filter((item: string) => item.trim().length > 0)
-        .map((item: string) => item.trim());
-      
-      console.log('[DESIGNER ROLE PLAY API] Successfully extracted decision points', {
-          count: decisions.length,
-          decisions: decisions.map(d => d.substring(0, 50) + '...').join('\n')
-      });
-    } else {
-      console.warn('[DESIGNER ROLE PLAY API] Failed to extract decision points using regex');
-    }
-
-    // If parsing failed, fallback to manual splitting
-    if (thinking.length === 0) {
-        console.log('[DESIGNER ROLE PLAY API] Using full response as thinking (fallback)');
-      thinking = [responseText];
-    }
-
-    if (decisions.length === 0) {
-      // Extract what seems to be decisions from the text
-      console.log('[DESIGNER ROLE PLAY API] Attempting alternate decision extraction');
-      
-      const potentialDecisions = responseText.match(/(?:\d+\.\s+[A-Z].*?)(?:\.\s+|$)/g);
-      if (potentialDecisions) {
-          console.log('[DESIGNER ROLE PLAY API] Found potential decisions with alternate regex:', 
-            potentialDecisions.length);
+      if (decisionsMatch && decisionsMatch[1]) {
+          console.log('[DESIGNER ROLE PLAY API] Found decisions section with regex');
+          console.log('[DESIGNER ROLE PLAY API] Raw decisions section:', decisionsMatch[1].substring(0, 200) + '...');
           
-        decisions = potentialDecisions.map((d: string) => d.trim());
-        console.log('[DESIGNER ROLE PLAY API] Extracted decisions using alternate method', {
+        decisions = decisionsMatch[1]
+          .trim()
+          .split(/\d+\.\s+|\n\s*\n+|\n-\s+/)
+          .filter((item: string) => item.trim().length > 0)
+          .map((item: string) => item.trim());
+        
+        console.log('[DESIGNER ROLE PLAY API] Successfully extracted decision points', {
             count: decisions.length,
             decisions: decisions.map(d => d.substring(0, 50) + '...').join('\n')
         });
       } else {
-        // If no structured decisions found, provide a default
-          console.log('[DESIGNER ROLE PLAY API] No decisions found, using default decision');
-        decisions = ['Based on the designer\'s thinking process, a key design decision would be to address the core user needs.'];
+        console.warn('[DESIGNER ROLE PLAY API] Failed to extract decision points using regex');
+      }
+
+      // If parsing failed, fallback to manual splitting
+      if (thinking.length === 0) {
+          console.log('[DESIGNER ROLE PLAY API] Using full response as thinking (fallback)');
+        thinking = [responseText];
+      }
+
+      if (decisions.length === 0) {
+        // Extract what seems to be decisions from the text
+        console.log('[DESIGNER ROLE PLAY API] Attempting alternate decision extraction');
+        
+        const potentialDecisions = responseText.match(/(?:\d+\.\s+[A-Z].*?)(?:\.\s+|$)/g);
+        if (potentialDecisions) {
+            console.log('[DESIGNER ROLE PLAY API] Found potential decisions with alternate regex:', 
+              potentialDecisions.length);
+            
+          decisions = potentialDecisions.map((d: string) => d.trim());
+          console.log('[DESIGNER ROLE PLAY API] Extracted decisions using alternate method', {
+              count: decisions.length,
+              decisions: decisions.map(d => d.substring(0, 50) + '...').join('\n')
+          });
+        } else {
+          // If no structured decisions found, provide a default
+            console.log('[DESIGNER ROLE PLAY API] No decisions found, using default decision');
+          decisions = ['Based on the designer\'s thinking process, a key design decision would be to address the core user needs.'];
         }
       }
     }

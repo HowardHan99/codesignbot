@@ -1132,6 +1132,8 @@ export function MainBoard({
                     >
                       <option value={DesignerModelType.GPT4}>GPT-4 (Balanced)</option>
                       <option value={DesignerModelType.CLAUDE}>Claude (Creative)</option>
+                      <option value={DesignerModelType.GPT_O3}>GPT O3 (Fast)</option>
+                      <option value={DesignerModelType.GEMINI}>Gemini 2.5 Pro (Visual)</option>
                     </select>
                   </div>
                 </div>

@@ -17,7 +17,9 @@ interface DesignerThinkingProcess {
  */
 export enum DesignerModelType {
   GPT4 = 'gpt4',
-  CLAUDE = 'claude'
+  CLAUDE = 'claude',
+  GPT_O3 = 'gpt_o3',
+  GEMINI = 'gemini'
 }
 
 export class DesignerRolePlayService {

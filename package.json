@@ -10,6 +10,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google-cloud/firestore": "^7.11.0",
+    "@google/generative-ai": "^0.24.0",
     "@mirohq/miro-api": "^2.0.0",
     "@types/form-data": "^2.2.1",
     "@types/formidable": "^3.4.5",
