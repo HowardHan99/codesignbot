@@ -6,6 +6,8 @@
 - OAuth token for the board (if not using the default board)
 - OpenAI API key (for GPT-4 model access)
 - Anthropic API key (for Claude model access, optional)
+- Azure OpenAI API access (for GPT O3 model access, optional)
+- Google Gemini API key (for Gemini model access, optional)
 - Node.js and npm installed on your machine
 
 ## Installation and Running the Application
@@ -202,7 +204,7 @@ ANTHROPIC_API_KEY="your_anthropic_api_key" # Optional, only needed for Claude mo
 
 ## Designer Role Play Options
 
-The designer role play feature offers two AI model options with different strengths:
+The designer role play feature offers multiple AI model options with different strengths:
 
 ### GPT-4 (Balanced)
 - Provides well-structured, consistent design thinking
@@ -213,6 +215,17 @@ The designer role play feature offers two AI model options with different streng
 - Offers more explorative and creative design approaches
 - May generate more novel or unexpected insights
 - Better for open-ended or innovative design challenges
+
+### GPT O3 (Fast)
+- Quicker response times than GPT-4
+- Cost-effective for iterative design explorations
+- Good balance of speed and quality
+- Uses Azure OpenAI integration (requires Azure setup)
+
+### Gemini 2.5 Pro (Visual)
+- Strong visual understanding capabilities
+- Well-suited for design challenges with visual components
+- Good at generating creative, diverse solutions
 
 To use these options:
 1. Select your preferred model from the dropdown in the designer role play section
@@ -333,4 +346,38 @@ If you encounter issues:
 - Keep your OAuth tokens secure and never commit them directly to the repository
 - Use environment variables for sensitive information
 - Regularly rotate OAuth tokens for security
-- Consider using different tokens for development and production environments 
+- Consider using different tokens for development and production environments
+
+## Azure OpenAI Integration (For GPT O3)
+
+The GPT O3 model is accessed through Azure OpenAI Service. To set up this integration:
+
+1. Create an Azure OpenAI resource and deploy the O3 model (see detailed instructions in `docs/azure-openai-setup.md`)
+2. Add the following environment variables to your `.env` file:
+```env
+AZURE_OPENAI_API_KEY=your-azure-api-key
+AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com
+AZURE_OPENAI_API_VERSION=2023-05-15
+AZURE_OPENAI_O3_DEPLOYMENT=your-o3-deployment-name
+```
+
+For complete setup instructions, refer to the [Azure OpenAI Setup Guide](docs/azure-openai-setup.md).
+
+### Fallback Mechanism
+
+If you don't have Azure OpenAI set up, the system will automatically fall back to using the direct OpenAI API for GPT O3 requests. This requires:
+
+- Having a valid `OPENAI_API_KEY` in your environment variables
+- Having access to the O3 model through your OpenAI account
+
+This fallback ensures you can still use the GPT O3 option even without Azure setup, though using Azure is recommended for production environments due to its improved reliability and cost management features.
+
+### Troubleshooting Azure OpenAI Integration
+
+If you experience issues with the Azure OpenAI integration:
+
+1. Verify all environment variables are set correctly
+2. Ensure your Azure subscription has access to the OpenAI service
+3. Confirm that the O3 model is properly deployed in your Azure OpenAI resource
+4. Check the Azure Portal for any quota limitations or service outages
+5. Refer to the detailed troubleshooting section in the setup guide 
