@@ -5,6 +5,7 @@
 import { MiroService } from './miroService';
 import { TranscriptProcessingService } from './transcriptProcessingService';
 import { MiroFrameService } from './miro/frameService';
+import { DocumentService } from './miro/documentService';
 
 interface DesignerThinkingProcess {
   thinking: string[];         // Designer's thought process
@@ -93,19 +94,41 @@ export class DesignerRolePlayService {
   }
 
   /**
-   * Creates sticky notes in the Thinking-Dialogue frame for the designer's thinking process
+   * Creates a document-style text box in the Thinking-Dialogue frame for the designer's thinking process
    */
   private static async addThinkingToDialogueFrame(thoughts: string[]): Promise<void> {
     try {
-      await TranscriptProcessingService.createDesignProposalStickies(
-        thoughts.map(thought => ({
-          proposal: thought,
-          category: 'designer-thinking'
-        })),
-        this.THINKING_FRAME_NAME
+      console.log(`Creating designer thinking document with ${thoughts.length} thinking steps`);
+      
+      // Directly use the native document method that we know works
+      // Only specify width for fixed aspect ratio widgets (Miro API requirement)
+      await DocumentService.createMiroNativeDocument(
+        this.THINKING_FRAME_NAME,
+        '🧠 Designer Thinking Process',
+        thoughts,
+        {
+          // Only specify width, not height, for fixed aspect ratio widgets
+          width: 650
+          // Height will be determined automatically by Miro based on content
+        }
       );
+      
+      console.log('Designer thinking document created successfully!');
     } catch (error) {
-      throw error;
+      console.error('Error creating designer thinking document:', error);
+      
+      // If direct document creation fails, fall back to the thinking process document method
+      console.log('Falling back to standard thinking process document method');
+      
+      await DocumentService.createThinkingProcessDocument(
+        this.THINKING_FRAME_NAME,
+        thoughts,
+        {
+          fontSize: 16,
+          fontFamily: 'open_sans',
+          width: 600
+        }
+      );
     }
   }
 

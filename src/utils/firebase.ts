@@ -2,6 +2,7 @@
 
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getDatabase, ref, push, serverTimestamp, get, Database } from 'firebase/database';
+import { getStorage, ref as storageRef, uploadString, getDownloadURL } from 'firebase/storage';
 import { firebaseConfig } from './config';
 import { mergeSimilarPoints } from './textProcessing'
 
@@ -505,5 +506,51 @@ export async function getLatestDesignThemes(useCachedData: boolean = true): Prom
   } catch (error) {
     console.error('Error getting design themes:', error);
     return null;
+  }
+}
+
+/**
+ * Uploads HTML content to Firebase Storage and returns a public URL
+ * 
+ * @param html - The HTML content to upload
+ * @param fileName - Optional file name (defaults to a timestamped name)
+ * @returns Promise<string> - A promise that resolves to the public URL
+ */
+export async function uploadHtmlToFirebase(
+  html: string, 
+  fileName?: string
+): Promise<string> {
+  try {
+    // Ensure Firebase is initialized by calling getFirebaseDB
+    // This will initialize the app if it hasn't been already
+    getFirebaseDB();
+    
+    // Get the storage instance
+    const storage = getStorage();
+    
+    if (!storage) {
+      throw new Error('Firebase Storage not initialized properly.');
+    }
+    
+    // Create a unique filename if not provided
+    const timestamp = new Date().getTime();
+    const uniqueFileName = fileName || `document_${timestamp}.html`;
+    
+    // Create a storage reference
+    const htmlRef = storageRef(storage, `documents/${uniqueFileName}`);
+    
+    // Upload the HTML content as a string with HTML metadata
+    await uploadString(htmlRef, html, 'raw', {
+      contentType: 'text/html',
+    });
+    
+    // Get the public URL
+    const publicUrl = await getDownloadURL(htmlRef);
+    console.log('Firebase Storage upload successful. Public URL:', publicUrl);
+    
+    return publicUrl;
+  } catch (error) {
+    console.error('Error uploading HTML to Firebase:', error);
+    throw error;
   }
 } 
