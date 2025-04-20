@@ -20,61 +20,85 @@ const anthropic = new Anthropic({
 // Initialize Google Gemini API
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '');
 
-// System prompt for the designer role play
-const DESIGNER_SYSTEM_PROMPT = `You are a professional designer. You approach design challenges with a structured thinking process, considering user needs, context, constraints, and opportunities. You think through problems step by step, focusing on user-centered design principles.
+// System prompt for the first step (Thinking + Brainstorming)
+const STEP_1_SYSTEM_PROMPT = `You are a professional designer. You approach design challenges with a structured thinking process and creative brainstorming.
 
-Your task is to think through the given design challenge as if you were solving it in real time, and provide:
+Your task is to first think through the given design challenge step-by-step, and then generate multiple distinct design concept proposals based on your thinking.
 
-1. A detailed thinking process that shows your approach to understanding and solving the design challenge
-2. A set of main insights or design decisions that would form the core of your solution
+1.  **Thinking Process:** Showcase your detailed thought process:
+    *   How you understand and frame the problem.
+    *   Key questions you ask yourself.
+    *   How you might research the problem.
+    *   How you identify user needs and pain points.
+    *   Your initial ideation.
 
-The thinking process should be detailed and showcase your thought process, including:
+2.  **Brainstorming Proposals:** Based on your thinking, generate at least 3 distinct design proposals. For each proposal, provide:
+    *   A clear concept name or theme.
+    *   The primary design goal or objective.
+    *   3-5 key characteristics or features that define this approach.
+
+Format your response clearly, separating the Thinking Process and Brainstorming Proposals sections. Use headings like '## Thinking Process' and '## Brainstorming Proposals'.`;
+
+// Claude-specific prompt for Step 1 (Thinking + Brainstorming)
+// Claude needs explicit instructions for the 'thinking' block and the final output format.
+const CLAUDE_STEP_1_SYSTEM_PROMPT = `You are a professional designer. Your task is to think through the given design challenge and then brainstorm multiple design proposals.
+
+YOUR THINKING PROCESS will be captured in the "thinking" section of your response. Explore:
 - How you understand and frame the problem
 - Key questions you ask yourself
-- How you might research the problem
-- How you identify user needs and pain points
-- Your ideation and brainstorming process
-- How you evaluate and refine potential solutions
-- Any challenges you identify and how you might address them
+- Research approaches
+- User needs and pain points
+- Initial ideation
 
-The design decisions should be concrete, actionable points that represent the key components of your solution.`;
+YOUR RESPONSE should ONLY include the Brainstorming Proposals, presented under the heading "## Brainstorming Proposals". Generate at least 3 distinct proposals. For each proposal:
+- **Concept Name/Theme:** [Name]
+- **Goal:** [Objective]
+- **Characteristics:**
+    - [Characteristic 1]
+    - [Characteristic 2]
+    - [Characteristic 3]
+    - [...]
 
-// Update Claude system prompt to be more explicit about format
-const CLAUDE_SYSTEM_PROMPT = `You are a professional designer. You approach design challenges with a structured thinking process, considering user needs, context, constraints, and opportunities. You think through problems step by step, focusing on user-centered design principles.
+## Brainstorming Proposals
 
-Your task is to think through the given design challenge as if you were solving it in real time.
+**Concept Name/Theme:** ...
+**Goal:** ...
+**Characteristics:**
+- ...
 
-YOUR THINKING PROCESS will be captured in the "thinking" section of your response, where you should explore:
-- How you understand and frame the problem
-- Key questions you ask yourself
-- How you might research the problem
-- How you identify user needs and pain points
-- Your ideation and brainstorming process
-- How you evaluate and refine potential solutions
-- Any challenges you identify and how you might address them
+**Concept Name/Theme:** ...
+... and so on.`;
 
-YOUR RESPONSE should ONLY include the final design decisions, presented as clear bullet points under the heading "## Design Decisions":
+// System prompt for the second step (Final Decisions from Proposals)
+const STEP_2_FINAL_DECISION_SYSTEM_PROMPT = `You are a professional designer tasked with synthesizing multiple design proposals into a single, concrete design solution.
 
-## Design Decisions
-- [First key design decision]
-- [Second key design decision]
-...and so on
+Based on the provided design proposals, which represent different approaches to a design challenge, your task is to:
 
-Do not number the design decisions. Each design decision should be a concise, actionable point that represents a key component of your solution.`;
+1.  **Evaluate:** Briefly evaluate the strengths and weaknesses of the different proposals.
+2.  **Synthesize:** Combine the best elements or choose the most promising direction.
+3.  **Define Solution:** Formulate a final, concrete design solution.
 
-// System prompt for all models (GPT-O3, Gemini)
-const GENERAL_SYSTEM_PROMPT = DESIGNER_SYSTEM_PROMPT;
+Your output should ONLY be the final design decisions, presented as clear, actionable bullet points under the heading '## Final Design Decisions'. These decisions should describe specific features, user flows, or design choices for the final solution.
+
+## Final Design Decisions
+- [First concrete feature or decision]
+- [Second concrete feature or decision]
+- [Third concrete feature or decision]
+... and so on.`;
+
+// System prompt for all models (GPT-O3, Gemini) - Use STEP_1 prompt
+const GENERAL_SYSTEM_PROMPT = STEP_1_SYSTEM_PROMPT;
 
 /**
  * Designer Role Play API Route
- * Generates designer thinking process and design decisions based on a design challenge
+ * Step 1: Generates thinking process and brainstorming proposals.
+ * Step 2: Generates final design decisions from proposals.
  */
 export async function POST(request: NextRequest) {
   console.log('[DESIGNER ROLE PLAY API] Received request');
   const startTime = Date.now();
   
   try {
-    // Get request data
     const requestData = await request.json();
     const { designChallenge, type, modelType = DesignerModelType.GPT4 } = requestData;
     
@@ -85,460 +109,198 @@ export async function POST(request: NextRequest) {
       modelType
     });
 
-    // Validate request
     if (!designChallenge) {
       console.error('[DESIGNER ROLE PLAY API] Missing design challenge');
-      return NextResponse.json(
-        { error: 'Design challenge is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Design challenge is required' }, { status: 400 });
     }
 
-    // User prompt with the design challenge
-    const userPrompt = `Design Challenge: ${designChallenge}
-
-Please show your complete thinking process as you work through this design challenge, and then provide the key design decisions you would make to solve it.`;
-
-    let responseText = '';
     let thinking: string[] = [];
+    let brainstormingProposals: string[] = [];
     let decisions: string[] = [];
-    
-    // Call appropriate AI model based on modelType
+
+    // --- STEP 1: Generate Thinking Process and Brainstorming Proposals --- 
+    console.log('[DESIGNER ROLE PLAY API] Starting Step 1: Thinking & Proposals');
+    const step1StartTime = Date.now();
     try {
+      const step1UserPrompt = `Design Challenge: ${designChallenge}
+
+Please first show your thinking process, then generate brainstorming proposals based on that process.`;
+      let step1ResponseText = '';
+      let step1ThinkingContent = ''; // For Claude
+
       if (modelType === DesignerModelType.CLAUDE) {
-        console.log('[DESIGNER ROLE PLAY API] Calling Claude API');
-        const claudeStartTime = Date.now();
-        
-        try {
-          // Log the API key presence (not the actual key)
-          console.log('[DESIGNER ROLE PLAY API] Anthropic API Key present:', !!process.env.ANTHROPIC_API_KEY);
-          
-          // Use the Claude-specific system prompt
-          const model = 'claude-3-7-sonnet-20250219';  
-          console.log(`[DESIGNER ROLE PLAY API] Using Claude model: ${model}`);
-          
-          // Configure the API call
-          let params: any = {
-            model: model,
-            max_tokens: 8000,
-            system: CLAUDE_SYSTEM_PROMPT, // Use Claude-specific prompt
-            messages: [
-              { 
-                role: 'user', 
-                content: [
-                  {
-                    type: 'text',
-                    text: userPrompt
-                  }
-                ]
-              }
-            ],
-            thinking: { 
-              type: 'enabled', 
-              budget_tokens: 4000 
-            }
-          };
-                    
-          // Make the API call with appropriate parameters
-          console.log(`[DESIGNER ROLE PLAY API] Making Claude API call with params:`, {
-            model: params.model,
-            max_tokens: params.max_tokens,
-            thinkingEnabled: !!params.thinking,
-            messageLengthChars: userPrompt.length
-          });
+        console.log('[DESIGNER ROLE PLAY API] Calling Claude API for Step 1');
+        const completion = await anthropic.messages.create({
+          model: 'claude-3-7-sonnet-20250219', // Use a suitable model
+          max_tokens: 8000,
+          system: CLAUDE_STEP_1_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: step1UserPrompt }],
+          thinking: { type: 'enabled', budget_tokens: 4000 }
+        });
 
-          const completion = await anthropic.messages.create(params);
+        // Extract thinking from thinking blocks
+        const thinkingBlocks = completion.content?.filter(block => block.type === 'thinking') || [];
+        step1ThinkingContent = thinkingBlocks.map(block => (block as any).thinking || '').join('\n');
+        thinking = parseThinkingContent(step1ThinkingContent, 'Claude thinking block');
 
-          // Log the full API response (with sensitive info redacted)
-          console.log('[DESIGNER ROLE PLAY API] Raw Claude API response received:', {
-            id: completion.id,
-            model: completion.model,
-            type: completion.type,
-            role: completion.role,
-            content_blocks: completion.content?.map(block => ({
-              type: block.type,
-              text_length: block.type === 'text' ? (block as any).text?.length || 0 : 0,
-              thinking_length: block.type === 'thinking' ? (block as any).thinking?.length || 0 : 0,
-              has_signature: block.type === 'thinking' && 'signature' in block
-            }))
-          });
-          
-          // Log content blocks information
-          if (completion.content) {
-            console.log(`[DESIGNER ROLE PLAY API] Received ${completion.content.length} content blocks`);
-            
-            // Log types of all blocks
-            const blockTypes = completion.content.map(block => block.type);
-            console.log('[DESIGNER ROLE PLAY API] Content block types:', blockTypes);
-            
-            // Log thinking blocks specifically
-            const thinkingBlocks = completion.content.filter(block => block.type === 'thinking');
-            console.log(`[DESIGNER ROLE PLAY API] Found ${thinkingBlocks.length} thinking blocks`);
-            
-            if (thinkingBlocks.length > 0) {
-              // Log a preview of the first thinking block
-              const firstThinking = thinkingBlocks[0];
-              console.log('[DESIGNER ROLE PLAY API] First thinking block preview:', {
-                type: firstThinking.type,
-                raw_preview: JSON.stringify(firstThinking).substring(0, 200) + '...'
-              });
-            }
-          }
-          
-          // Simplified extraction process for Claude
-          // 1. Extract thinking content directly from thinking blocks
-          const thinkingPoints: string[] = [];
-          try {
-            if (completion.content) {
-              // Get thinking blocks
-              const thinkingBlocks = completion.content.filter(block => block.type === 'thinking');
-              console.log(`[DESIGNER ROLE PLAY API] Processing ${thinkingBlocks.length} thinking blocks`);
-              
-              if (thinkingBlocks.length > 0) {
-                // Extract and process each thinking block into separate points
-                thinkingBlocks.forEach(block => {
-                  const thinkingContent = (block as any).thinking || '';
-                  if (thinkingContent && thinkingContent.trim().length > 0) {
-                    // Split thinking content into separate points
-                    const points = thinkingContent
-                      .split(/\n(?=-|\d+\.)/)
-                      .map((point: string) => point.trim())
-                      .filter((point: string) => point.length > 0);
-                    
-                    // If we found clear points, add them
-                    if (points.length > 0) {
-                      thinkingPoints.push(...points);
-                    } else {
-                      // Otherwise add the whole content as one point
-                      thinkingPoints.push(thinkingContent.trim());
-                    }
-                  }
-                });
-                
-                console.log(`[DESIGNER ROLE PLAY API] Extracted ${thinkingPoints.length} thinking points`);
-                if (thinkingPoints.length > 0) {
-                  console.log('[DESIGNER ROLE PLAY API] First thinking point:', thinkingPoints[0].substring(0, 100) + '...');
-                }
-              } else {
-                console.log('[DESIGNER ROLE PLAY API] No thinking blocks found in response');
-              }
-            }
-          } catch (error) {
-            console.error('[DESIGNER ROLE PLAY API] Error extracting thinking content:', error);
-          }
-          
-          // 2. Extract design decisions from text blocks
-          let designDecisions: string[] = [];
-          try {
-            // Extract text content from text blocks
-            const text = completion.content
-              ?.filter(block => block.type === 'text')
-              ?.map(block => (block as any).text)
-              ?.join('\n') || '';
-            
-            console.log(`[DESIGNER ROLE PLAY API] Text content length: ${text.length} characters`);
-            
-            // Extract design decisions section using regex
-            const designDecisionsMatch = text.match(/## Design Decisions[\s\S]*?$/i);
-            if (designDecisionsMatch) {
-              console.log('[DESIGNER ROLE PLAY API] Found design decisions section');
-              
-              // Clean the heading and split into points
-              const decisionsText = designDecisionsMatch[0].replace(/^## Design Decisions\s*/i, '').trim();
-              const decisions = decisionsText
-                .split(/\n(?=-|\d+\.)/)
-                .map(d => d.trim())
-                .filter(d => d.length > 0);
-              
-              console.log(`[DESIGNER ROLE PLAY API] Extracted ${decisions.length} design decisions`);
-              designDecisions = decisions;
-            } else {
-              // Alternative: if no heading, look for numbered or bullet lists
-              console.log('[DESIGNER ROLE PLAY API] No design decisions heading found, looking for lists');
-              
-              // Look for numbered lists (1. 2. 3.) or dashed lists (- item)
-              const listPattern = /(?:(?:\d+\.\s+[A-Z][^.\n]+[.\n])|(?:-\s+[A-Z][^.\n]+[.\n]))+/g;
-              const lists = text.match(listPattern);
-              
-              if (lists && lists.length > 0) {
-                // Use the last list which is likely decisions
-                const lastList = lists[lists.length - 1];
-                const listItems = lastList
-                  .split(/\n(?=\d+\.|-\s)/)
-                  .map(item => item.trim())
-                  .filter(item => item.length > 0);
-                
-                console.log(`[DESIGNER ROLE PLAY API] Extracted ${listItems.length} list items as decisions`);
-                designDecisions = listItems;
-              } else {
-                // If no structured decisions found, use paragraphs
-                const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-                if (paragraphs.length > 0) {
-                  // Use the paragraphs as decisions
-                  designDecisions = paragraphs;
-                  console.log(`[DESIGNER ROLE PLAY API] Using ${paragraphs.length} paragraphs as decisions`);
-                } else {
-                  // Last resort: generic message
-                  designDecisions = ["Based on the analysis, a comprehensive design approach is recommended."];
-                }
-              }
-            }
-          } catch (error) {
-            console.error('[DESIGNER ROLE PLAY API] Error extracting design decisions:', error);
-            designDecisions = ["A structured design approach is recommended based on the analysis."];
-          }
-          
-          // No filtering needed - thinking and decisions come from separate sources
-          
-          // Set the thinking and decisions arrays
-          thinking = thinkingPoints;
-          decisions = designDecisions;
-          
-          const claudeDuration = Date.now() - claudeStartTime;
-          console.log(`[DESIGNER ROLE PLAY API] Claude API call completed in ${claudeDuration}ms`);
-        } catch (error) {
-          // Enhanced error logging
-          console.error('[DESIGNER ROLE PLAY API] Detailed Claude API error:', error);
-          if (error instanceof Error) {
-            console.error('Error message:', error.message);
-            console.error('Error stack:', error.stack);
-            
-            // Parse error message for specific Claude API issues
-            if (error.message.includes('thinking')) {
-              console.error('[DESIGNER ROLE PLAY API] Claude API error related to thinking parameter');
-              
-              // If the error message contains JSON, try to extract and log it
-              const jsonMatch = error.message.match(/\{.*\}/s);
-              if (jsonMatch) {
-                try {
-                  const errorJson = JSON.parse(jsonMatch[0]);
-                  console.error('[DESIGNER ROLE PLAY API] Extracted error JSON:', errorJson);
-                } catch (e) {
-                  console.error('[DESIGNER ROLE PLAY API] Failed to parse error JSON');
-                }
-              }
-            }
-            
-            if (error.message.includes('max_tokens')) {
-              console.error('[DESIGNER ROLE PLAY API] Claude API error related to token limits');
-            }
-            
-            if (error.message.includes('budget_tokens')) {
-              console.error('[DESIGNER ROLE PLAY API] Claude API error related to thinking budget');
-            }
-            
-            if (error.message.includes('type:')) {
-              console.error('[DESIGNER ROLE PLAY API] Claude API error related to object type');
-            }
-            
-            if ('status' in error) {
-              console.error('Error status:', (error as any).status);
-              
-              // Log specific HTTP error codes
-              const status = (error as any).status;
-              if (status === 400) {
-                console.error('[DESIGNER ROLE PLAY API] Bad request error - check API parameters');
-              } else if (status === 401) {
-                console.error('[DESIGNER ROLE PLAY API] Authentication error - check API key');
-              } else if (status === 403) {
-                console.error('[DESIGNER ROLE PLAY API] Permission error - account may not have access');
-              } else if (status === 404) {
-                console.error('[DESIGNER ROLE PLAY API] Resource not found - check model name');
-              } else if (status === 429) {
-                console.error('[DESIGNER ROLE PLAY API] Rate limit error - too many requests');
-              } else if (status >= 500) {
-                console.error('[DESIGNER ROLE PLAY API] Claude service error - API issues');
-              }
-            }
-            
-            if ('error' in error) {
-              const errorDetails = (error as any).error;
-              console.error('[DESIGNER ROLE PLAY API] API Error Details:', JSON.stringify(errorDetails, null, 2));
-            }
-          }
-          
-          // Do not fall back to GPT-4, just propagate the error
-          throw new Error(`Claude API error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      } else if (modelType === DesignerModelType.GPT_O3) {
-        // Call OpenAI GPT-O3
-        console.log('[DESIGNER ROLE PLAY API] Calling OpenAI GPT-O3 API');
-        const gptO3StartTime = Date.now();
-        
-        try {
-          // Log API key presence
-          console.log('[DESIGNER ROLE PLAY API] OpenAI API Key present:', !!process.env.OPENAI_API_KEY);
-          console.log('[DESIGNER ROLE PLAY API] Using GPT-O3 model');
-          
+        // Extract proposals from text blocks (which should ONLY contain proposals based on prompt)
+        step1ResponseText = completion.content
+          ?.filter(block => block.type === 'text')
+          ?.map(block => (block as any).text)
+          ?.join('\n') || '';
+        brainstormingProposals = parseBrainstormingProposals(step1ResponseText, 'Claude text block');
+
+      } else {
+        // For OpenAI and Gemini
+        console.log(`[DESIGNER ROLE PLAY API] Calling ${modelType} API for Step 1`);
+        if (modelType === DesignerModelType.GPT_O3) {
           const completion = await openai.chat.completions.create({
-            //Don't change this model
             model: 'o3',
             messages: [
               { role: 'system', content: GENERAL_SYSTEM_PROMPT },
-              { role: 'user', content: userPrompt }
+              { role: 'user', content: step1UserPrompt }
             ],
             temperature: 0.7,
-            max_tokens: 2000
+            max_tokens: 4000 // Increased max tokens
           });
-          
-          responseText = completion.choices[0]?.message?.content || '';
-          
-          const gptO3Duration = Date.now() - gptO3StartTime;
-          console.log(`[DESIGNER ROLE PLAY API] GPT-O3 API call completed in ${gptO3Duration}ms`);
-        } catch (error) {
-          console.error('[DESIGNER ROLE PLAY API] Error calling GPT-O3 API:', error);
-          throw new Error('Failed to call GPT-O3 API: ' + (error as Error).message);
-        }
-      } else if (modelType === DesignerModelType.GEMINI) {
-        // Call Google Gemini 2.5 Pro
-        console.log('[DESIGNER ROLE PLAY API] Calling Google Gemini API');
-        const geminiStartTime = Date.now();
-        
-        try {
-          // Log API key presence
-          console.log('[DESIGNER ROLE PLAY API] Google Gemini API Key present:', !!process.env.GOOGLE_GEMINI_API_KEY);
-          console.log('[DESIGNER ROLE PLAY API] Using Gemini 2.5 Pro model');
-          
-          // Don't change this model
+          step1ResponseText = completion.choices[0]?.message?.content || '';
+        } else if (modelType === DesignerModelType.GEMINI) {
           const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro-preview-03-25' });
-          
-          // Generate content
-          const prompt = `${GENERAL_SYSTEM_PROMPT}\n\n${userPrompt}`;
+          const prompt = `${GENERAL_SYSTEM_PROMPT}\n\n${step1UserPrompt}`;
           const result = await model.generateContent(prompt);
-          const response = await result.response;
-          responseText = response.text();
-          
-          const geminiDuration = Date.now() - geminiStartTime;
-          console.log(`[DESIGNER ROLE PLAY API] Gemini API call completed in ${geminiDuration}ms`);
-        } catch (error) {
-          console.error('[DESIGNER ROLE PLAY API] Error calling Gemini API:', error);
-          throw new Error('Failed to call Gemini API: ' + (error as Error).message);
-        }
-      } else {
-        // Default to OpenAI GPT-4
-        console.log('[DESIGNER ROLE PLAY API] Calling OpenAI GPT-4 API');
-        const openaiStartTime = Date.now();
-        
-        try {
+          step1ResponseText = (await result.response).text();
+        } else { // Default to GPT-4
           const completion = await openai.chat.completions.create({
             model: 'gpt-4',
             messages: [
-              { role: 'system', content: DESIGNER_SYSTEM_PROMPT },
-              { role: 'user', content: userPrompt }
+              { role: 'system', content: GENERAL_SYSTEM_PROMPT },
+              { role: 'user', content: step1UserPrompt }
             ],
             temperature: 0.7,
-            max_tokens: 2000
+            max_tokens: 4000 // Increased max tokens
           });
-          
-          responseText = completion.choices[0]?.message?.content || '';
-    
-          const openaiDuration = Date.now() - openaiStartTime;
-          console.log(`[DESIGNER ROLE PLAY API] OpenAI API call completed in ${openaiDuration}ms`);
-        } catch (error) {
-          console.error('[DESIGNER ROLE PLAY API] Error calling OpenAI API:', error);
-          throw new Error('Failed to call OpenAI API: ' + (error as Error).message);
+          step1ResponseText = completion.choices[0]?.message?.content || '';
         }
+        
+        // Parse thinking and proposals from the single response
+        thinking = parseThinkingContent(step1ResponseText, modelType);
+        brainstormingProposals = parseBrainstormingProposals(step1ResponseText, modelType);
       }
-    } catch (error) {
-      console.error('[DESIGNER ROLE PLAY API] Error with all model APIs:', error);
-      throw error;
-    }
-
-    // Process the response into thinking process and decisions
-    if (modelType !== DesignerModelType.CLAUDE) {
-      console.log('[DESIGNER ROLE PLAY API] Processing response into thinking and decisions');
       
-      // For GPT-4, GPT-O3, and Gemini - extract thinking from the response text using regex
-      console.log('[DESIGNER ROLE PLAY API] Attempting regex extraction');
-      const thinkingMatch = responseText.match(/(?:Thinking Process|Thinking|Process):(.*?)(?:Design Decisions|Key Design Decisions|Main Insights|Design Decision):/s);
+      console.log(`[DESIGNER ROLE PLAY API] Step 1 completed in ${Date.now() - step1StartTime}ms`, {
+        thinkingCount: thinking.length,
+        proposalCount: brainstormingProposals.length,
+        thinkingSample: thinking[0]?.substring(0, 100) + '...',
+        proposalSample: brainstormingProposals[0]?.substring(0, 100) + '...'
+      });
 
-      if (thinkingMatch && thinkingMatch[1]) {
-          console.log('[DESIGNER ROLE PLAY API] Found thinking section with regex');
-          
-        thinking = thinkingMatch[1]
-          .trim()
-          .split(/\d+\.\s+|\n\s*\n+|\n-\s+/)
-          .filter((item: string) => item.trim().length > 0)
-          .map((item: string) => item.trim());
-        
-          console.log('[DESIGNER ROLE PLAY API] Successfully extracted thinking points using regex', {
-            count: thinking.length,
-            firstPointPreview: thinking[0]?.substring(0, 100) + '...'
-        });
-      } else {
-        console.warn('[DESIGNER ROLE PLAY API] Failed to extract thinking points using regex');
-          console.log('[DESIGNER ROLE PLAY API] Response text preview:', responseText.substring(0, 300) + '...');
-      }
-
-      // Extract design decisions using regex
-      console.log('[DESIGNER ROLE PLAY API] Attempting to extract design decisions using regex');
-      const decisionsMatch = responseText.match(/(?:Design Decisions|Key Design Decisions|Main Insights|Design Decision):(.*?)(?:$|Conclusion)/s);
-
-      if (decisionsMatch && decisionsMatch[1]) {
-          console.log('[DESIGNER ROLE PLAY API] Found decisions section with regex');
-          console.log('[DESIGNER ROLE PLAY API] Raw decisions section:', decisionsMatch[1].substring(0, 200) + '...');
-          
-        decisions = decisionsMatch[1]
-          .trim()
-          .split(/\d+\.\s+|\n\s*\n+|\n-\s+/)
-          .filter((item: string) => item.trim().length > 0)
-          .map((item: string) => item.trim());
-        
-        console.log('[DESIGNER ROLE PLAY API] Successfully extracted decision points', {
-            count: decisions.length,
-            decisions: decisions.map(d => d.substring(0, 50) + '...').join('\n')
-        });
-      } else {
-        console.warn('[DESIGNER ROLE PLAY API] Failed to extract decision points using regex');
-      }
-
-      // If parsing failed, fallback to manual splitting
-      if (thinking.length === 0) {
-          console.log('[DESIGNER ROLE PLAY API] Using full response as thinking (fallback)');
-        thinking = [responseText];
-      }
-
-      if (decisions.length === 0) {
-        // Extract what seems to be decisions from the text
-        console.log('[DESIGNER ROLE PLAY API] Attempting alternate decision extraction');
-        
-        const potentialDecisions = responseText.match(/(?:\d+\.\s+[A-Z].*?)(?:\.\s+|$)/g);
-        if (potentialDecisions) {
-            console.log('[DESIGNER ROLE PLAY API] Found potential decisions with alternate regex:', 
-              potentialDecisions.length);
-            
-          decisions = potentialDecisions.map((d: string) => d.trim());
-          console.log('[DESIGNER ROLE PLAY API] Extracted decisions using alternate method', {
-              count: decisions.length,
-              decisions: decisions.map(d => d.substring(0, 50) + '...').join('\n')
-          });
-        } else {
-          // If no structured decisions found, provide a default
-            console.log('[DESIGNER ROLE PLAY API] No decisions found, using default decision');
-          decisions = ['Based on the designer\'s thinking process, a key design decision would be to address the core user needs.'];
-        }
-      }
+    } catch (error) {
+      console.error(`[DESIGNER ROLE PLAY API] Error in Step 1 after ${Date.now() - step1StartTime}ms:`, error);
+      // Decide if we should stop or try to proceed with defaults
+      // For now, let's throw to indicate failure
+      throw new Error(`Step 1 failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-    
-    // Final response preparation
+
+    // --- STEP 2: Generate Final Design Decisions from Proposals --- 
+    console.log('[DESIGNER ROLE PLAY API] Starting Step 2: Final Decisions');
+    const step2StartTime = Date.now();
+    if (brainstormingProposals.length > 0) {
+      try {
+        const step2UserPrompt = `Here are the design proposals generated earlier:
+
+${brainstormingProposals.map((p, i) => `Proposal ${i + 1}:\n${p}`).join('\n\n')}
+
+Please evaluate these proposals and synthesize them into a single, concrete design solution, providing only the final design decisions.`;
+        
+        let step2ResponseText = '';
+
+        // Use the same model type as Step 1 for consistency
+        if (modelType === DesignerModelType.CLAUDE) {
+          console.log('[DESIGNER ROLE PLAY API] Calling Claude API for Step 2');
+          const completion = await anthropic.messages.create({
+            model: 'claude-3-7-sonnet-20250219', 
+            max_tokens: 2000, 
+            system: STEP_2_FINAL_DECISION_SYSTEM_PROMPT,
+            messages: [{ role: 'user', content: step2UserPrompt }]
+            // No 'thinking' needed for step 2
+          });
+          step2ResponseText = completion.content
+            ?.filter(block => block.type === 'text')
+            ?.map(block => (block as any).text)
+            ?.join('\n') || '';
+        } else {
+          console.log(`[DESIGNER ROLE PLAY API] Calling ${modelType} API for Step 2`);
+          if (modelType === DesignerModelType.GPT_O3) {
+            const completion = await openai.chat.completions.create({
+              model: 'o3',
+              messages: [
+                { role: 'system', content: STEP_2_FINAL_DECISION_SYSTEM_PROMPT },
+                { role: 'user', content: step2UserPrompt }
+              ],
+              temperature: 0.6, // Slightly lower temp for focused decision making
+              max_tokens: 2000
+            });
+            step2ResponseText = completion.choices[0]?.message?.content || '';
+          } else if (modelType === DesignerModelType.GEMINI) {
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro-preview-03-25' });
+            const prompt = `${STEP_2_FINAL_DECISION_SYSTEM_PROMPT}\n\n${step2UserPrompt}`;
+            const result = await model.generateContent(prompt);
+            step2ResponseText = (await result.response).text();
+          } else { // Default to GPT-4
+            const completion = await openai.chat.completions.create({
+              model: 'gpt-4',
+              messages: [
+                { role: 'system', content: STEP_2_FINAL_DECISION_SYSTEM_PROMPT },
+                { role: 'user', content: step2UserPrompt }
+              ],
+              temperature: 0.6,
+              max_tokens: 2000
+            });
+            step2ResponseText = completion.choices[0]?.message?.content || '';
+          }
+        }
+        
+        // Parse final decisions from the response
+        decisions = parseFinalDecisions(step2ResponseText, modelType);
+
+        console.log(`[DESIGNER ROLE PLAY API] Step 2 completed in ${Date.now() - step2StartTime}ms`, {
+          decisionCount: decisions.length,
+          decisionSample: decisions[0]?.substring(0, 100) + '...'
+        });
+
+      } catch (error) {
+        console.error(`[DESIGNER ROLE PLAY API] Error in Step 2 after ${Date.now() - step2StartTime}ms:`, error);
+        // Provide default decisions if step 2 fails but step 1 succeeded
+        decisions = ["Based on the generated proposals, a synthesized design approach is recommended, focusing on core user needs identified in the thinking process."];
+      }
+    } else {
+      console.warn('[DESIGNER ROLE PLAY API] Skipping Step 2 as no brainstorming proposals were generated in Step 1.');
+      decisions = ["No brainstorming proposals were generated. Default decision: Focus on addressing the core user needs from the initial thinking process."];
+    }
+
+    // --- Final Response Preparation --- 
     console.log('[DESIGNER ROLE PLAY API] Preparing final response', {
       thinkingCount: thinking.length,
+      brainstormingCount: brainstormingProposals.length,
       decisionsCount: decisions.length
     });
 
-    // Return the processed response
     const totalDuration = Date.now() - startTime;
     console.log(`[DESIGNER ROLE PLAY API] Request completed in ${totalDuration}ms`, {
       thinkingCount: thinking.length,
+      brainstormingCount: brainstormingProposals.length,
       decisionsCount: decisions.length,
       thinkingSample: thinking.length > 0 ? thinking[0].substring(0, 100) + '...' : 'none',
+      brainstormingSample: brainstormingProposals.length > 0 ? brainstormingProposals[0].substring(0, 100) + '...' : 'none',
       decisionsSample: decisions.length > 0 ? decisions[0].substring(0, 100) + '...' : 'none'
     });
     
     return NextResponse.json({
       thinking,
+      brainstormingProposals,
       decisions
     });
+
   } catch (error: any) {
     const duration = Date.now() - startTime;
     console.error(`[DESIGNER ROLE PLAY API] Error in designer role play API after ${duration}ms:`, error);
@@ -546,5 +308,134 @@ Please show your complete thinking process as you work through this design chall
       { error: error.message || 'An error occurred during designer role play' },
       { status: 500 }
     );
+  }
+}
+
+// --- Helper Parsing Functions ---
+
+function parseThinkingContent(responseText: string, source: string): string[] {
+  console.log(`[Parsing Helper] Attempting to parse thinking content from ${source}`);
+  if (!responseText || responseText.trim().length === 0) return [];
+  
+  // Try extracting section based on heading for non-Claude sources
+  let thinkingText = responseText;
+  if (!source.includes('Claude')) {
+    const thinkingMatch = responseText.match(/(?:## Thinking Process|Thinking Process:|Thinking:)(.*?)(?:## Brainstorming Proposals|Brainstorming Proposals:|## Design Decisions|Design Decisions:)/si);
+    if (thinkingMatch && thinkingMatch[1]) {
+        console.log(`[Parsing Helper] Found thinking section via regex for ${source}`);
+        thinkingText = thinkingMatch[1].trim();
+    } else {
+        console.warn(`[Parsing Helper] Could not find dedicated thinking section via regex for ${source}. Using full text.`);
+        // Fallback: If no clear section, assume the first part might be thinking, before proposals/decisions
+        const firstProposalMatch = responseText.search(/(?:## Brainstorming Proposals|Brainstorming Proposals:|## Design Decisions|Design Decisions:)/si);
+        if (firstProposalMatch > 0) {
+          thinkingText = responseText.substring(0, firstProposalMatch).trim();
+        }
+        // If still nothing, use the whole text (might get mixed results)
+    }
+  }
+
+  // Split the extracted/full text into points
+  const points = thinkingText
+    .split(/\n(?:\d+\. |\* |- |\u2022 )/g) // Split by numbered/bullet points on new lines
+    .map(p => p.trim().replace(/^(## Thinking Process|Thinking Process:|Thinking:)/i, '').trim()) // Clean up point text
+    .filter(p => p.length > 5); // Filter out very short/empty lines
+
+  if (points.length > 0) {
+    console.log(`[Parsing Helper] Extracted ${points.length} thinking points from ${source}`);
+    return points;
+  } else {
+     // Fallback: Split by double newline if list parsing fails
+     const paragraphs = thinkingText.split(/\n\s*\n+/).filter(p => p.trim().length > 5);
+     if (paragraphs.length > 0) {
+       console.log(`[Parsing Helper] Extracted ${paragraphs.length} thinking paragraphs as fallback from ${source}`);
+       return paragraphs;
+     } else {
+       console.warn(`[Parsing Helper] No structured thinking points found for ${source}. Returning single block.`);
+       return [thinkingText]; // Return the whole block if no structure found
+     }
+  }
+}
+
+function parseBrainstormingProposals(responseText: string, source: string): string[] {
+  console.log(`[Parsing Helper] Attempting to parse brainstorming proposals from ${source}`);
+  if (!responseText || responseText.trim().length === 0) return [];
+
+  // Extract the section explicitly titled "Brainstorming Proposals"
+  const proposalsMatch = responseText.match(/(?:## Brainstorming Proposals|Brainstorming Proposals:)(.*?)(?:$|## Final Design Decisions|Final Design Decisions:)/si);
+  let proposalsText = '';
+
+  if (proposalsMatch && proposalsMatch[1]) {
+    console.log(`[Parsing Helper] Found brainstorming section via regex for ${source}`);
+    proposalsText = proposalsMatch[1].trim();
+  } else {
+    console.warn(`[Parsing Helper] Could not find dedicated brainstorming section via regex for ${source}. Using full text (might include thinking/decisions).`);
+    proposalsText = responseText.trim(); // Use the whole text as fallback
+  }
+
+  if (proposalsText.length === 0) {
+    console.warn(`[Parsing Helper] No text found for brainstorming proposals from ${source}.`);
+    return [];
+  }
+  
+  // Split proposals based on common patterns like "Concept Name/Theme:", "Proposal X:", or double newlines if structure is simple
+  const proposalSeparators = /\n(?:\*\*Concept Name\/Theme:|\*\*Proposal \d+:|Concept \d+:|Approach \d+:|---)\s*\n|\n\s*\n+/g;
+  
+  let proposals = proposalsText
+    .split(proposalSeparators)
+    .map(p => p.trim())
+    .filter(p => p.length > 10 && (p.includes('Goal:') || p.includes('Characteristics:') || p.includes('Key Features:'))); // Filter for likely proposals
+
+  // If splitting by detailed separators fails, try splitting just by major headings
+  if (proposals.length < 2) {
+    const conceptHeaderPattern = /(?:\*\*Concept Name\/Theme:|\*\*Proposal \d+:|Concept \d+:|Approach \d+:)/gi;
+    proposals = proposalsText
+      .split(conceptHeaderPattern)
+      .map(p => p.trim())
+      .filter(p => p.length > 10);
+  }
+
+  // If still few proposals, maybe the structure is just paragraphs? Try splitting by double newline again on the extracted text.
+  if (proposals.length < 2) {
+    proposals = proposalsText.split(/\n\s*\n+/).filter(p => p.trim().length > 10);
+  }
+
+  console.log(`[Parsing Helper] Extracted ${proposals.length} brainstorming proposals from ${source}`);
+  return proposals;
+}
+
+function parseFinalDecisions(responseText: string, source: string): string[] {
+  console.log(`[Parsing Helper] Attempting to parse final decisions from ${source}`);
+  if (!responseText || responseText.trim().length === 0) return [];
+
+  // Extract the section explicitly titled "Final Design Decisions"
+  let decisionsText = responseText;
+  const decisionsMatch = responseText.match(/(?:## Final Design Decisions|Final Design Decisions:)(.*)/si);
+  if (decisionsMatch && decisionsMatch[1]) {
+    console.log(`[Parsing Helper] Found final decisions section via regex for ${source}`);
+    decisionsText = decisionsMatch[1].trim();
+  } else {
+    console.warn(`[Parsing Helper] Could not find dedicated final decisions section via regex for ${source}. Using full text.`);
+  }
+
+  // Split into points (usually bulleted or numbered)
+  const points = decisionsText
+    .split(/\n(?:\d+\. |\* |- |\u2022 )/g) // Split by numbered/bullet points on new lines
+    .map(p => p.trim().replace(/^(## Final Design Decisions|Final Design Decisions:)/i, '').trim()) // Clean up point text
+    .filter(p => p.length > 5); // Filter out very short/empty lines
+
+  if (points.length > 0) {
+    console.log(`[Parsing Helper] Extracted ${points.length} final decision points from ${source}`);
+    return points;
+  } else {
+     // Fallback: Split by double newline if list parsing fails
+     const paragraphs = decisionsText.split(/\n\s*\n+/).filter(p => p.trim().length > 5);
+     if (paragraphs.length > 0) {
+       console.log(`[Parsing Helper] Extracted ${paragraphs.length} final decision paragraphs as fallback from ${source}`);
+       return paragraphs;
+     } else {
+       console.warn(`[Parsing Helper] No structured final decisions found for ${source}. Returning single block.`);
+       return [decisionsText]; // Return the whole block if no structure found
+     }
   }
 } 

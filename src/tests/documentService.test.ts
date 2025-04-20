@@ -169,7 +169,7 @@ export async function testCustomHtmlDocument(): Promise<void> {
     const result = await DocumentService.createMiroNativeDocument(
       'Test-Custom-HTML',
       'Custom HTML Document',
-      customHtml,
+      [customHtml],
       { width: 650 }
     );
     

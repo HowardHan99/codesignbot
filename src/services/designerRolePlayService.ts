@@ -8,8 +8,9 @@ import { MiroFrameService } from './miro/frameService';
 import { DocumentService } from './miro/documentService';
 
 interface DesignerThinkingProcess {
-  thinking: string[];         // Designer's thought process
-  decisions: string[];        // Final design decisions/highlights
+  thinking: string[];                   // Designer's thought process
+  brainstormingProposals: string[];     // Brainstorming design proposals
+  decisions: string[];                  // Final design decisions/highlights
 }
 
 /**
@@ -83,11 +84,15 @@ export class DesignerRolePlayService {
         ? response.thinking 
         : [response.thinking];
       
+      const brainstormingProposals = Array.isArray(response.brainstormingProposals)
+        ? response.brainstormingProposals
+        : response.brainstormingProposals ? [response.brainstormingProposals] : [];
+      
       const decisions = Array.isArray(response.decisions) 
         ? response.decisions 
         : [response.decisions];
 
-      return { thinking, decisions };
+      return { thinking, brainstormingProposals, decisions };
     } catch (error) {
       throw error;
     } finally {
@@ -96,41 +101,51 @@ export class DesignerRolePlayService {
   }
 
   /**
-   * Creates a document-style text box in the Thinking-Dialogue frame for the designer's thinking process
+   * Creates a document-style text box in the Thinking-Dialogue frame for the 
+   * designer's thinking process AND brainstorming proposals.
    */
-  private static async addThinkingToDialogueFrame(thoughts: string[]): Promise<void> {
+  private static async addThinkingAndProposalsToDialogueFrame(thoughts: string[], proposals: string[]): Promise<void> {
     try {
-      console.log(`Creating designer thinking document with ${thoughts.length} thinking steps`);
+      console.log(`Creating designer thinking/proposals document with ${thoughts.length} steps and ${proposals.length} proposals`);
       
-      // Directly use the native document method that we know works
-      // Only specify width for fixed aspect ratio widgets (Miro API requirement)
+      // Combine thoughts and proposals into a single structure for the document service
+      const combinedContent = [
+        // Add a clear separator or header for thoughts
+        '## 🧠 Designer Thinking Process',
+        ...thoughts,
+        '\n---\n', // Separator
+        // Add a clear separator or header for proposals
+        '## 💡 Brainstorming Proposals',
+        ...proposals
+      ];
+      
+      // Use the native document method
       await DocumentService.createMiroNativeDocument(
         this.THINKING_FRAME_NAME,
-        '🧠 Designer Thinking Process',
-        thoughts,
+        'Designer Process & Concepts', // Updated title
+        combinedContent,
         {
-          // Only specify width, not height, for fixed aspect ratio widgets
           width: 650
-          // Height will be determined automatically by Miro based on content
         }
       );
       
-      console.log('Designer thinking document created successfully!');
+      console.log('Designer thinking & proposals document created successfully!');
     } catch (error) {
-      console.error('Error creating designer thinking document:', error);
+      console.error('Error creating designer thinking & proposals document:', error);
       
-      // If direct document creation fails, fall back to the thinking process document method
-      console.log('Falling back to standard thinking process document method');
-      
-      await DocumentService.createThinkingProcessDocument(
-        this.THINKING_FRAME_NAME,
-        thoughts,
-        {
-          fontSize: 16,
-          fontFamily: 'open_sans',
-          width: 600
+      // Fallback: Try creating separate documents if combined fails (less ideal)
+      console.log('Falling back to separate document creation attempts');
+      try {
+        await DocumentService.createThinkingProcessDocument(this.THINKING_FRAME_NAME, thoughts, { width: 600 });
+        if (proposals.length > 0) {
+          // Attempt to use the brainstorming doc function, targeting the same frame
+          await DocumentService.createBrainstormingProposalsDocument(this.THINKING_FRAME_NAME, proposals, { width: 600 });
         }
-      );
+      } catch (fallbackError) {
+         console.error('Fallback document creation also failed:', fallbackError);
+         // Optional: Notify user or re-throw original error
+         throw error;
+      }
     }
   }
 
@@ -157,12 +172,15 @@ export class DesignerRolePlayService {
   }
 
   /**
-   * Creates sticky notes in the appropriate frames for the designer's thinking process
-   * and final decisions
+   * Creates documents and sticky notes in the appropriate frames for the designer's thinking process,
+   * brainstorming proposals (in thinking frame), and final decisions.
    */
   public static async addThinkingToBoard(designerThinking: DesignerThinkingProcess): Promise<void> {
     try {
-      await this.addThinkingToDialogueFrame(designerThinking.thinking);
+      // Add thinking process AND brainstorming proposals to the dialogue frame
+      await this.addThinkingAndProposalsToDialogueFrame(designerThinking.thinking, designerThinking.brainstormingProposals);
+      
+      // Add design decisions to the proposal frame
       await this.addDecisionsToDesignFrame(designerThinking.decisions);
     } catch (error) {
       throw error;
@@ -172,7 +190,7 @@ export class DesignerRolePlayService {
   /**
    * Simulates a designer solving a design challenge
    * @param modelType The AI model to use for reasoning (GPT4 or Claude)
-   * @returns The designer's thinking process and decisions
+   * @returns The designer's thinking process, brainstorming proposals, and decisions
    */
   public static async simulateDesigner(modelType: DesignerModelType = DesignerModelType.GPT4): Promise<DesignerThinkingProcess> {
     try {

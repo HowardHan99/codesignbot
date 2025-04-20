@@ -263,6 +263,7 @@ export class DocumentService {
   
   /**
    * Creates a thinking process document specifically for designer thinking
+   * Note: This might be used as a fallback if createMiroNativeDocument fails.
    */
   public static async createThinkingProcessDocument(
     frameTitle: string,
@@ -270,14 +271,9 @@ export class DocumentService {
     customStyling: Partial<DocumentStyling> = {}
   ): Promise<any> {
     try {
-      // First, try to create a native Miro document
-      try {
-        return await this.createMiroNativeDocument(frameTitle, 'Designer Thinking Process', thoughts);
-      } catch (docError) {
-        console.warn('Failed to create native Miro document, falling back to text box:', docError);
-      }
+      // No direct call to createMiroNativeDocument here to avoid loops
+      console.warn('Using fallback createThinkingProcessDocument (TextBox method)');
       
-      // Fall back to text box if native document API fails
       // Find or create the frame
       let frame = await MiroFrameService.findFrameByTitle(frameTitle);
       
@@ -292,14 +288,15 @@ export class DocumentService {
       }
       
       // Process the thinking steps to improve readability
-      const formattedThoughts = this.formatThinkingSteps(thoughts);
+      // Use a generic title as proposals might be mixed in during fallback
+      const formattedContent = this.formatCombinedContent(thoughts, 'Designer Output');
       
       // Merge default styling with custom styling
       const styling = { ...this.DEFAULT_STYLING, ...customStyling };
       
       // Create the text box
       const textBox = await miro.board.createText({
-        content: formattedThoughts,
+        content: formattedContent,
         x: frame.x,
         y: frame.y,
         width: styling.width || 600,
@@ -316,95 +313,158 @@ export class DocumentService {
       
       return textBox;
     } catch (error) {
-      console.error('Error creating thinking process document:', error);
+      console.error('Error creating thinking process document (fallback TextBox method):', error);
       throw error;
     }
   }
   
   /**
-   * Format thinking steps into well-structured content
+   * Format combined thinking/proposal steps into well-structured content for TextBox fallback
    */
-  private static formatThinkingSteps(thoughts: string[]): string {
+  private static formatCombinedContent(content: string[], title: string): string {
     const lines: string[] = [];
     
-    // Add title with brain emoji
-    lines.push('🧠 Designer Thinking Process');
-    lines.push('');
-    lines.push('This document captures the designer\'s internal thought process:');
+    lines.push(title); // Use generic title
     lines.push('');
     
-    // Process each thinking step
-    thoughts.forEach((thought, index) => {
-      // Extract sections and structure them
-      const sections = this.extractSections(thought);
-      
-      // Add the main step number
-      lines.push(`${index + 1}. ${sections.mainHeading}`);
-      
-      // Add formatted subsections with proper indentation
-      sections.subsections.forEach((subsection, subIndex) => {
-        lines.push(`   ${String.fromCharCode(97 + subIndex)}. ${subsection}`);
-      });
-      
-      // Add a spacer between major steps
-      lines.push('');
+    let currentSection = '';
+    content.forEach((item) => {
+      const trimmedItem = item.trim();
+      // Check for section headers we added in the service
+      if (trimmedItem.startsWith('## 🧠')) {
+        currentSection = 'thinking';
+        lines.push('## Thinking Process'); // Clean header
+        lines.push('');
+      } else if (trimmedItem.startsWith('## 💡')) {
+        currentSection = 'proposals';
+        lines.push('## Brainstorming Proposals'); // Clean header
+        lines.push('');
+      } else if (trimmedItem === '---') {
+        lines.push(''); // Add spacing for separator
+      } else if (trimmedItem.length > 0) {
+        // Add item with basic formatting (e.g., bullet point)
+        lines.push(`• ${trimmedItem}`); 
+      }
     });
     
     return lines.join('\n');
   }
   
   /**
-   * Extracts sections from a thinking step
+   * Creates a brainstorming proposals document with multiple design concepts
    */
-  private static extractSections(text: string | any): { mainHeading: string, subsections: string[] } {
-    // Default result structure
-    const result = {
-      mainHeading: 'Thinking Step',
-      subsections: [] as string[]
-    };
-    
-    if (!text || typeof text !== 'string') return result;
-    
-    // Split by lines
-    const lines = text.split('\n');
-    
-    // If there's at least one line, use it as the main heading
-    if (lines.length > 0) {
-      // Remove any numbering or special characters from the first line
-      result.mainHeading = lines[0].replace(/^\d+[\.\)]\s*/, '').trim();
-      
-      // Process remaining lines as subsections
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line) {
-          // Remove any lettering or special characters
-          const cleanedLine = line.replace(/^[a-z][\.\)]\s*/i, '').trim();
-          result.subsections.push(cleanedLine);
-        }
+  public static async createBrainstormingProposalsDocument(
+    frameTitle: string,
+    proposals: string[],
+    customStyling: Partial<DocumentStyling> = {}
+  ): Promise<any> {
+    try {
+      // First, try to create a native Miro document
+      try {
+        return await this.createMiroNativeDocument(frameTitle, 'Design Concept Proposals', proposals);
+      } catch (docError) {
+        console.warn('Failed to create native Miro document for brainstorming, falling back to text box:', docError);
       }
+      
+      // Fall back to text box if native document API fails
+      // Find or create the frame
+      let frame = await MiroFrameService.findFrameByTitle(frameTitle);
+      
+      if (!frame) {
+        frame = await MiroFrameService.createFrame(
+          frameTitle,
+          -1000,
+          0,
+          650,
+          Math.max(800, proposals.length * 150) // More space for each proposal
+        );
+      }
+      
+      // Process the proposals to improve readability
+      const formattedProposals = this.formatBrainstormingProposals(proposals);
+      
+      // Merge default styling with custom styling
+      const styling = { ...this.DEFAULT_STYLING, ...customStyling };
+      
+      // Create the text box
+      const textBox = await miro.board.createText({
+        content: formattedProposals,
+        x: frame.x,
+        y: frame.y,
+        width: styling.width || 600,
+        style: {
+          textAlign: styling.textAlign || 'left',
+          fontSize: styling.fontSize || 16,
+          color: styling.textColor || '#1a1a1a',
+          fontFamily: this.mapFontFamily(styling.fontFamily)
+        }
+      });
+      
+      // Focus on the created document
+      await miro.board.viewport.zoomTo(textBox);
+      
+      return textBox;
+    } catch (error) {
+      console.error('Error creating brainstorming proposals document:', error);
+      throw error;
     }
-    
-    return result;
   }
   
   /**
-   * Creates a Miro native document using the Document API via direct REST call
-   * This implements the createDocumentItemUsingUrl functionality without requiring the @api/miro-ea package
+   * Format brainstorming proposals into well-structured content
+   */
+  private static formatBrainstormingProposals(proposals: string[]): string {
+    const lines: string[] = [];
+    
+    // Add title with lightbulb emoji
+    lines.push('💡 Design Concept Proposals');
+    lines.push('');
+    lines.push('Multiple design approaches to address the challenge:');
+    lines.push('');
+    
+    // Process each proposal
+    proposals.forEach((proposal, index) => {
+      // Format the concept as a section with proper styling
+      
+      // Check if the proposal already has a heading (##, Concept:, etc.)
+      const hasHeading = /^(##|\s*Concept|\s*Design Concept|\s*Approach)\s*/i.test(proposal);
+      
+      if (hasHeading) {
+        // If it already has a heading, just number it
+        lines.push(`Concept ${index + 1}: ${proposal.replace(/^(##|\s*Concept|\s*Design Concept|\s*Approach)\s*/i, '')}`);
+      } else {
+        // Otherwise add a heading
+        lines.push(`Concept ${index + 1}:`);
+        lines.push(proposal);
+      }
+      
+      // Add a spacer between concepts
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+    });
+    
+    return lines.join('\n');
+  }
+
+  /**
+   * Creates a Miro native document using the Document API via direct REST call (if available)
+   * or falls back to other methods.
    */
   public static async createMiroNativeDocument(
     frameTitle: string,
     title: string,
-    content: string[] | string,
+    content: string[], // Expects combined content with headers
     options: {
       position?: { x: number, y: number },
       width?: number,
       height?: number 
     } = {}
   ): Promise<any> {
-    console.log('Starting alternative document creation process...', { frameTitle, title });
+    console.log('Starting native document creation process...', { frameTitle, title });
     
     try {
-      // Find or create the frame
+      // Find or create frame (logic remains the same)
       let frame = await MiroFrameService.findFrameByTitle(frameTitle);
       console.log('Frame found/created:', frame ? { id: frame.id, title: frame.title } : 'Frame not found');
       
@@ -420,26 +480,21 @@ export class DocumentService {
         console.log('New frame created:', { id: frame.id, title: frame.title });
       }
       
-      // Generate HTML content
-      const htmlContent = this.generateHtmlDocument(title, content);
+      // Generate HTML content using the updated helper
+      const htmlContent = this.generateHtmlDocument(title, content); // Pass combined content
       console.log('HTML content generated, length:', htmlContent.length);
       
       // Set default position if not provided
       const position = options.position || { x: frame.x, y: frame.y };
       console.log('Using position:', position);
       
-      // Try to upload to Firebase first
       let documentUrl;
-      
       try {
-        // Import and use the Firebase storage utility
         const { uploadHtmlToFirebase } = await import('../../utils/firebase');
-        
         documentUrl = await uploadHtmlToFirebase(
           htmlContent, 
-          `miro_doc_${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${Date.now()}.html`
+          `miro_doc_${title.replace(/[^a-z0-9]/gi, '').toLowerCase()}_${Date.now()}.html`
         );
-        
         console.log('Successfully created Firebase URL for HTML content:', documentUrl);
         
         // Create a sticky note with the URL
@@ -460,21 +515,8 @@ export class DocumentService {
         documentUrl = null;
       }
       
-      // Format the content as plain text for a Miro text element
-      let plainTextContent: string;
-      
-      if (Array.isArray(content)) {
-        // If it's an array, format it as a list
-        plainTextContent = `# ${title}\n\n`;
-        plainTextContent += content.map((item, index) => `${index + 1}. ${item}`).join('\n\n');
-      } else {
-        // For regular text, just apply basic formatting
-        plainTextContent = `# ${title}\n\n${content}`;
-      }
-      
-      if (documentUrl) {
-        plainTextContent += `\n\n**Full formatted document:**\n${documentUrl}`;
-      }
+      // Format content as plain text for Miro text element (fallback display)
+      const plainTextContent = this.formatCombinedContent(content, title); // Use helper
       
       // Create a text element with the content
       const textElement = await miro.board.createText({
@@ -507,158 +549,69 @@ export class DocumentService {
   }
   
   /**
-   * Generate an HTML document from the thinking process
+   * Generate an HTML document from combined thinking/proposal content
    */
-  public static generateHtmlDocument(title: string, content: string[] | string): string {
-    // For backwards compatibility, if content is an array, treat the first item as subtitle and rest as thinkingSteps
-    let subtitle = '';
-    let thinkingSteps: string[] = [];
+  public static generateHtmlDocument(title: string, content: string[]): string {
+    let htmlBody = '';
+    let currentSection = '';
+
+    content.forEach((item) => {
+      const trimmedItem = item.trim();
+      if (trimmedItem.startsWith('## 🧠')) {
+        currentSection = 'thinking';
+        htmlBody += `<h2>${trimmedItem.replace('## ', '')}</h2>\n<div class="section-content thinking-step">`; // Start thinking section div
+      } else if (trimmedItem.startsWith('## 💡')) {
+        if (currentSection === 'thinking') htmlBody += `</div>`; // Close previous section div
+        currentSection = 'proposals';
+        htmlBody += `<h2>${trimmedItem.replace('## ', '')}</h2>\n<div class="section-content proposal-item">`; // Start proposal section div
+      } else if (trimmedItem === '---') {
+        htmlBody += `<hr>`;
+      } else if (trimmedItem.length > 0) {
+        if (currentSection === 'thinking') {
+          // Format thinking steps (e.g., as list items or paragraphs)
+          const { mainHeading, subsections } = this.extractSections(trimmedItem);
+          htmlBody += `<div class="step">
+                          <h3><span class="step-number"></span>${mainHeading}</h3>
+                          ${subsections.map((sub: string) => `<div class="subsection">${sub}</div>`).join('')}
+                      </div>`;
+        } else if (currentSection === 'proposals') {
+          // Format proposals (e.g., as distinct blocks)
+          htmlBody += `<div class="proposal">${trimmedItem.replace(/\n/g, '<br>')}</div>`;
+        } else {
+          // Content before the first section header (should ideally not happen with new structure)
+          htmlBody += `<p>${trimmedItem.replace(/\n/g, '<br>')}</p>`;
+        }
+      }
+    });
     
-    if (Array.isArray(content)) {
-      thinkingSteps = content;
-    } else {
-      // If it's a string, just use it directly
-      return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          body {
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            line-height: 1.6;
-            color: #333333;
-            padding: 20px;
-            background-color: #f9f9f9;
-            max-width: 800px;
-            margin: 0 auto;
-          }
-          h1 {
-            color: #2264d1;
-            font-size: 28px;
-            font-weight: 600;
-            text-align: center;
-            margin-bottom: 10px;
-          }
-          h2 {
-            color: #4d4d4d;
-            font-size: 22px;
-            margin-top: 30px;
-            border-bottom: 1px solid #eaeaea;
-            padding-bottom: 8px;
-          }
-          .content {
-            background-color: #ffffff;
-            padding: 15px 20px;
-            margin: 20px 0;
-            border-radius: 8px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-          }
-        </style>
-      </head>
-      <body>
-        <h1>${title}</h1>
-        <div class="content">
-          ${content}
-        </div>
-      </body>
-      </html>
-      `;
-    }
-    
+    if (currentSection) htmlBody += `</div>`; // Close the last section div
+
+    // Add step numbering via CSS/JS if needed later, simple structure for now.
+
     const html = `
     <!DOCTYPE html>
     <html>
     <head>
       <style>
-        body {
-          font-family: 'Helvetica Neue', Arial, sans-serif;
-          line-height: 1.6;
-          color: #333333;
-          padding: 20px;
-          background-color: #f9f9f9;
-          max-width: 800px;
-          margin: 0 auto;
-        }
-        h1 {
-          color: #2264d1;
-          font-size: 28px;
-          font-weight: 600;
-          text-align: center;
-          margin-bottom: 10px;
-        }
-        h2 {
-          color: #4d4d4d;
-          font-size: 22px;
-          margin-top: 30px;
-          border-bottom: 1px solid #eaeaea;
-          padding-bottom: 8px;
-        }
-        h3 {
-          color: #2264d1;
-          font-size: 18px;
-          margin-top: 20px;
-          margin-bottom: 10px;
-        }
-        .subtitle {
-          color: #666666;
-          font-size: 18px;
-          text-align: center;
-          margin-bottom: 30px;
-          font-style: italic;
-        }
-        .thinking-step {
-          background-color: #ffffff;
-          padding: 15px 20px;
-          margin: 20px 0;
-          border-radius: 8px;
-          box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-        }
-        .step-number {
-          display: inline-block;
-          width: 28px;
-          height: 28px;
-          background-color: #2264d1;
-          color: white;
-          border-radius: 50%;
-          text-align: center;
-          line-height: 28px;
-          margin-right: 10px;
-          font-weight: bold;
-        }
-        .subsection {
-          margin-left: 15px;
-          margin-top: 8px;
-          position: relative;
-          padding-left: 20px;
-        }
-        .subsection:before {
-          content: "•";
-          color: #2264d1;
-          position: absolute;
-          left: 0;
-          font-weight: bold;
-        }
+        body { /* ... styles ... */ }
+        h1 { /* ... styles ... */ }
+        h2 { /* ... styles ... */ font-size: 24px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        h3 { /* ... styles ... */ color: #444; font-size: 18px; }
+        .section-content { background-color: #ffffff; padding: 15px 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+        .thinking-step .step { margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed #eee; }
+        .thinking-step .step:last-child { border-bottom: none; }
+        .subsection { margin-left: 20px; margin-top: 5px; position: relative; padding-left: 15px; font-size: 0.95em; color: #555; }
+        .subsection:before { content: "•"; color: #3498db; position: absolute; left: 0; font-weight: bold; }
+        .proposal-item .proposal { margin-bottom: 15px; padding: 10px; background-color: #fdf9e8; border-left: 3px solid #f1c40f; border-radius: 4px; }
+        hr { border: none; border-top: 1px solid #eee; margin: 25px 0; }
       </style>
     </head>
     <body>
       <h1>${title}</h1>
-      <div class="subtitle">Designer Thinking Process</div>
-      
-      ${thinkingSteps.map((step: string, index: number) => {
-        const { mainHeading, subsections } = this.extractSections(step);
-        
-        return `
-        <div class="thinking-step">
-          <h3><span class="step-number">${index + 1}</span>${mainHeading}</h3>
-          ${subsections.map((subsection: string) => `
-            <div class="subsection">${subsection}</div>
-          `).join('')}
-        </div>
-      `}).join('')}
+      ${htmlBody}
     </body>
     </html>
     `;
-
     return html;
   }
 
@@ -741,5 +694,39 @@ export class DocumentService {
       console.error('Error generating screenshot:', error);
       // Don't throw - this is a non-critical feature
     }
+  }
+
+  /**
+   * Extracts sections from a thinking step
+   */
+  private static extractSections(text: string | any): { mainHeading: string, subsections: string[] } {
+    // Default result structure
+    const result = {
+      mainHeading: 'Thinking Step',
+      subsections: [] as string[]
+    };
+    
+    if (!text || typeof text !== 'string') return result;
+    
+    // Split by lines
+    const lines = text.split('\n');
+    
+    // If there's at least one line, use it as the main heading
+    if (lines.length > 0) {
+      // Remove any numbering or special characters from the first line
+      result.mainHeading = lines[0].replace(/^\d+[\.\)]\s*/, '').trim();
+      
+      // Process remaining lines as subsections
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line) {
+          // Remove any lettering or special characters
+          const cleanedLine = line.replace(/^[a-z][\.\)]\s*/i, '').trim();
+          result.subsections.push(cleanedLine);
+        }
+      }
+    }
+    
+    return result;
   }
 } 
