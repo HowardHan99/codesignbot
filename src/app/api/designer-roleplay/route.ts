@@ -335,25 +335,41 @@ function parseThinkingContent(responseText: string, source: string): string[] {
     }
   }
 
-  // Split the extracted/full text into points
-  const points = thinkingText
-    .split(/\n(?:\d+\. |\* |- |\u2022 )/g) // Split by numbered/bullet points on new lines
-    .map(p => p.trim().replace(/^(## Thinking Process|Thinking Process:|Thinking:)/i, '').trim()) // Clean up point text
-    .filter(p => p.length > 5); // Filter out very short/empty lines
+  // Preserve section headers and structure by properly processing the text
+  const processedThinking: string[] = [];
+  
+  // Split the text into lines first to properly identify section headers and content
+  const lines = thinkingText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+  
+  // Process line by line to identify headers and content
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Check if the line is a section header
+    if (line.match(/^(#{1,3}|[A-Z][A-Za-z\s]+:|\*\*[^*]+\*\*)/)) {
+      // This is a section header - add as is
+      processedThinking.push(line);
+    } 
+    // Check if it's a bullet point list item
+    else if (line.match(/^(\d+\.|[-•*]|\u2022)\s/)) {
+      // This is a list item - preserve the bullet format
+      processedThinking.push(line);
+    } 
+    // Otherwise, it's regular content
+    else if (line.length > 5) {
+      // If it's not attached to a previous line, add as a new entry
+      processedThinking.push(line);
+    }
+  }
 
-  if (points.length > 0) {
-    console.log(`[Parsing Helper] Extracted ${points.length} thinking points from ${source}`);
-    return points;
+  if (processedThinking.length > 0) {
+    console.log(`[Parsing Helper] Extracted ${processedThinking.length} thinking elements from ${source}`);
+    return processedThinking;
   } else {
-     // Fallback: Split by double newline if list parsing fails
-     const paragraphs = thinkingText.split(/\n\s*\n+/).filter(p => p.trim().length > 5);
-     if (paragraphs.length > 0) {
-       console.log(`[Parsing Helper] Extracted ${paragraphs.length} thinking paragraphs as fallback from ${source}`);
-       return paragraphs;
-     } else {
-       console.warn(`[Parsing Helper] No structured thinking points found for ${source}. Returning single block.`);
-       return [thinkingText]; // Return the whole block if no structure found
-     }
+    // Fallback if the processing failed
+    console.warn(`[Parsing Helper] Structured processing failed for ${source}. Falling back to paragraph splitting.`);
+    const paragraphs = thinkingText.split(/\n\s*\n+/).filter(p => p.trim().length > 5);
+    return paragraphs.length > 0 ? paragraphs : [thinkingText];
   }
 }
 

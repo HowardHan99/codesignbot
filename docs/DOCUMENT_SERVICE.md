@@ -169,6 +169,72 @@ interface DocumentStyling {
 }
 ```
 
+## Document Formatting
+
+The document service uses a sophisticated HTML/CSS formatting system optimized for clear information hierarchy and space efficiency.
+
+### Document Width and Layout
+
+- Documents use a maximum width of 1400px for optimal readability on large screens
+- Content containers have a minimum width of 800px with responsive behavior
+- Screenshots are generated at 1400px width and scaled appropriately for display in Miro
+
+### Content Structure and Hierarchy
+
+The formatting system automatically detects and applies styling to different content elements:
+
+1. **Section Headers** - Identified by:
+   - Text with capitalized first words followed by colons
+   - Text in **bold** format or wrapped in markdown headers (#)
+   - Lines matching common section names (e.g., "User Needs:", "Technical Innovation:")
+
+2. **Content Items** - Any text not identified as a header:
+   - Plain text with consistent sizing (0.96em)
+   - Properly indented (15px) under their parent section
+   - Bullet/number markers automatically removed for clean presentation
+
+### HTML Structure
+
+The generated HTML uses a semantic structure that maintains clarity:
+
+```html
+<div class="section-content thinking-step">
+  <!-- Section Header -->
+  <div class="theme-section">
+    <div class="theme-header">User Needs:</div>
+  </div>
+  
+  <!-- Content Items -->
+  <div class="content-item">Need spaces for both social gathering and quiet study</div>
+  <div class="content-item">Desire areas for relaxation between classes</div>
+</div>
+```
+
+### CSS Styling
+
+The system applies the following key styles:
+
+```css
+body { font-family: Arial, sans-serif; line-height: 1.4; max-width: 1400px; }
+.theme-header { font-weight: bold; color: #2980b9; font-size: 1.05em; border-left: 3px solid #3498db; padding-left: 8px; }
+.content-item { margin: 3px 0 3px 15px; font-size: 0.96em; color: #333; }
+```
+
+This styling ensures:
+- Section headers clearly stand out with color and left border accent
+- Content items take minimal vertical space while remaining readable
+- Proper visual hierarchy is maintained throughout the document
+
+### Best Practices for Content Formatting
+
+When preparing content for the Document Service:
+
+1. Use clear section headers with colons (e.g., "Research Findings:", "User Personas:")
+2. Keep content items concise and focused
+3. Use lists where appropriate but don't nest them too deeply
+4. For thinking process documents, make the first line of each step a clear headline
+5. Avoid repeating section headers or creating redundant hierarchy
+
 ## Testing
 
 Test functionality is available in the `documentService.test.ts` file, providing:

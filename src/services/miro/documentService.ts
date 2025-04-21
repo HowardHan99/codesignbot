@@ -15,12 +15,6 @@ interface DocumentStyling {
   width?: number;
 }
 
-interface SectionFormatting {
-  useNumbering?: boolean;
-  useHeading?: boolean;
-  indentLevel?: number;
-  bulletStyle?: 'number' | 'bullet' | 'dash' | 'none';
-}
 
 export class DocumentService {
   /**
@@ -32,7 +26,7 @@ export class DocumentService {
     textColor: '#1a1a1a',
     backgroundColor: '#ffffff',
     textAlign: 'left',
-    width: 550
+    width: 1300
   };
 
   /**
@@ -474,7 +468,7 @@ export class DocumentService {
           frameTitle,
           -1000,
           0,
-          700,
+          1500,
           900
         );
         console.log('New frame created:', { id: frame.id, title: frame.title });
@@ -523,7 +517,7 @@ export class DocumentService {
         content: plainTextContent,
         x: position.x,
         y: position.y,
-        width: options.width || 600,
+        width: options.width || 1400,
         style: {
           textAlign: 'left',
           fontSize: 16,
@@ -554,9 +548,12 @@ export class DocumentService {
   public static generateHtmlDocument(title: string, content: string[]): string {
     let htmlBody = '';
     let currentSection = '';
+    let currentTheme = '';
 
-    content.forEach((item) => {
+    content.forEach((item, index) => {
       const trimmedItem = item.trim();
+      
+      // Check for main section headers first
       if (trimmedItem.startsWith('## 🧠')) {
         currentSection = 'thinking';
         htmlBody += `<h2>${trimmedItem.replace('## ', '')}</h2>\n<div class="section-content thinking-step">`; // Start thinking section div
@@ -568,12 +565,38 @@ export class DocumentService {
         htmlBody += `<hr>`;
       } else if (trimmedItem.length > 0) {
         if (currentSection === 'thinking') {
-          // Format thinking steps (e.g., as list items or paragraphs)
-          const { mainHeading, subsections } = this.extractSections(trimmedItem);
-          htmlBody += `<div class="step">
-                          <h3><span class="step-number"></span>${mainHeading}</h3>
-                          ${subsections.map((sub: string) => `<div class="subsection">${sub}</div>`).join('')}
-                      </div>`;
+          // Check if this is a section theme (headers for grouping content)
+          const isSectionTheme = 
+              trimmedItem.startsWith('#') || 
+              trimmedItem.includes('**') || 
+              trimmedItem.match(/^\|.*\|$/) ||
+              trimmedItem.match(/^[A-Z][A-Za-z\s]+:/) ||
+              trimmedItem.match(/^([A-Z][A-Z\s]{2,}|User Needs|Location and Context|Technical|Wellness|Interdisciplinary|CMU|Study|Analyze|Benchmark|Consult)/i) ||
+              (trimmedItem.includes(':') && !trimmedItem.match(/^[-•*]\s/)); // Has colon but isn't a bullet point
+          
+          if (isSectionTheme) {
+            // This is a section theme/header - format it as a theme header
+            currentTheme = trimmedItem
+              .replace(/^\||\|$/g, '') // Remove vertical bars
+              .replace(/\*\*/g, '')    // Remove bold markers
+              .replace(/^#+\s*/, '')   // Remove markdown heading markers
+              .trim();
+              
+            htmlBody += `<div class="theme-section">
+                          <div class="theme-header">${currentTheme}</div>
+                        </div>`;
+          } else {
+            // For regular content items
+            const plainText = trimmedItem
+              .replace(/^[-•*]\s*/, '')  // Remove bullet markers
+              .replace(/^(\d+)\.\s*/, '') // Remove numbered list markers
+              .trim();
+            
+            // Skip if the plainText is empty or too short after cleanup
+            if (plainText.length > 1) {
+              htmlBody += `<div class="content-item">${plainText}</div>`;
+            }
+          }
         } else if (currentSection === 'proposals') {
           // Format proposals (e.g., as distinct blocks)
           htmlBody += `<div class="proposal">${trimmedItem.replace(/\n/g, '<br>')}</div>`;
@@ -586,24 +609,20 @@ export class DocumentService {
     
     if (currentSection) htmlBody += `</div>`; // Close the last section div
 
-    // Add step numbering via CSS/JS if needed later, simple structure for now.
-
     const html = `
     <!DOCTYPE html>
     <html>
     <head>
       <style>
-        body { /* ... styles ... */ }
-        h1 { /* ... styles ... */ }
-        h2 { /* ... styles ... */ font-size: 24px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
-        h3 { /* ... styles ... */ color: #444; font-size: 18px; }
-        .section-content { background-color: #ffffff; padding: 15px 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
-        .thinking-step .step { margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed #eee; }
-        .thinking-step .step:last-child { border-bottom: none; }
-        .subsection { margin-left: 20px; margin-top: 5px; position: relative; padding-left: 15px; font-size: 0.95em; color: #555; }
-        .subsection:before { content: "•"; color: #3498db; position: absolute; left: 0; font-weight: bold; }
+        body { font-family: Arial, sans-serif; line-height: 1.4; margin: 20px; max-width: 1400px; }
+        h1 { color: #2c3e50; font-size: 28px; margin-bottom: 15px; }
+        h2 { color: #3498db; font-size: 22px; margin-top: 25px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        .section-content { background-color: #ffffff; padding: 12px 15px; margin: 12px 0; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+        .theme-section { margin: 20px 0 5px 0; }
+        .theme-header { font-weight: bold; color: #2980b9; font-size: 1.05em; border-left: 3px solid #3498db; padding-left: 8px; margin-bottom: 6px; }
+        .content-item { margin: 3px 0 3px 15px; padding: 0; font-size: 0.96em; color: #333; line-height: 1.4; }
         .proposal-item .proposal { margin-bottom: 15px; padding: 10px; background-color: #fdf9e8; border-left: 3px solid #f1c40f; border-radius: 4px; }
-        hr { border: none; border-top: 1px solid #eee; margin: 25px 0; }
+        hr { border: none; border-top: 1px solid #eee; margin: 15px 0; }
       </style>
     </head>
     <body>
@@ -633,7 +652,7 @@ export class DocumentService {
       const tempDiv = document.createElement('div');
       tempDiv.style.position = 'absolute';
       tempDiv.style.left = '-9999px';
-      tempDiv.style.width = '800px';
+      tempDiv.style.width = '1400px';
       tempDiv.style.height = 'auto';
       tempDiv.style.backgroundColor = 'white';
       tempDiv.innerHTML = htmlContent;
@@ -654,7 +673,7 @@ export class DocumentService {
           backgroundColor: 'white',
           scale: 2, // Higher quality
           logging: false,
-          width: 800,
+          width: 1400,
           height: tempDiv.offsetHeight
         });
         
@@ -666,7 +685,7 @@ export class DocumentService {
           url: dataUrl,
           x: position.x,
           y: position.y,
-          width: 600
+          width: 1200
         });
         
         console.log('Screenshot added to Miro board');
@@ -716,14 +735,22 @@ export class DocumentService {
       // Remove any numbering or special characters from the first line
       result.mainHeading = lines[0].replace(/^\d+[\.\)]\s*/, '').trim();
       
+      // Collect all subsections into a single array
+      const subsectionText: string[] = [];
+      
       // Process remaining lines as subsections
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (line) {
           // Remove any lettering or special characters
           const cleanedLine = line.replace(/^[a-z][\.\)]\s*/i, '').trim();
-          result.subsections.push(cleanedLine);
+          subsectionText.push(cleanedLine);
         }
+      }
+      
+      // Group related subsections together
+      if (subsectionText.length > 0) {
+        result.subsections = subsectionText;
       }
     }
     
