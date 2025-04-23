@@ -20,6 +20,8 @@ const anthropic = new Anthropic({
 // Initialize Google Gemini API
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '');
 
+const gptmodel = 'o4-mini'
+
 // System prompt for the first step (Thinking + Brainstorming)
 const STEP_1_SYSTEM_PROMPT = `You are a professional designer. You approach design challenges with a structured thinking process and creative brainstorming.
 
@@ -152,16 +154,14 @@ Please first show your thinking process, then generate brainstorming proposals b
 
       } else {
         // For OpenAI and Gemini
-        console.log(`[DESIGNER ROLE PLAY API] Calling ${modelType} API for Step 1`);
+        console.log(`[DESIGNER ROLE PLAY API] Calling ${gptmodel} API for Step 1`);
         if (modelType === DesignerModelType.GPT_O3) {
           const completion = await openai.chat.completions.create({
-            model: 'o3',
+            model: gptmodel,
             messages: [
               { role: 'system', content: GENERAL_SYSTEM_PROMPT },
               { role: 'user', content: step1UserPrompt }
             ],
-            temperature: 0.7,
-            max_tokens: 4000 // Increased max tokens
           });
           step1ResponseText = completion.choices[0]?.message?.content || '';
         } else if (modelType === DesignerModelType.GEMINI) {
@@ -229,16 +229,14 @@ Please evaluate these proposals and synthesize them into a single, concrete desi
             ?.map(block => (block as any).text)
             ?.join('\n') || '';
         } else {
-          console.log(`[DESIGNER ROLE PLAY API] Calling ${modelType} API for Step 2`);
+          console.log(`[DESIGNER ROLE PLAY API] Calling ${gptmodel} API for Step 2`);
           if (modelType === DesignerModelType.GPT_O3) {
             const completion = await openai.chat.completions.create({
-              model: 'o3',
+              model: gptmodel,
               messages: [
                 { role: 'system', content: STEP_2_FINAL_DECISION_SYSTEM_PROMPT },
                 { role: 'user', content: step2UserPrompt }
               ],
-              temperature: 0.6, // Slightly lower temp for focused decision making
-              max_tokens: 2000
             });
             step2ResponseText = completion.choices[0]?.message?.content || '';
           } else if (modelType === DesignerModelType.GEMINI) {

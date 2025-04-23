@@ -6,10 +6,13 @@ interface AnalysisControlsProps {
   isSimplifiedMode: boolean;         // Whether simplified mode is active
   synthesizedPointsCount: number;    // Number of synthesized points available
   useThemedDisplay?: boolean;        // Whether to use themed display (optional for backward compatibility)
+  useThinkingDialogue?: boolean;     // Whether to include thinking dialogue context
+  hasThinkingResults?: boolean;      // Whether thinking dialogue results are available
   onToneChange: (tone: string) => void;          // Handler for tone changes
   onModeToggle: () => void;                      // Handler for mode toggle
   onShowSynthesizedPoints: () => void;           // Handler for showing synthesized points
   onDisplayToggle?: () => void;                  // Handler for display mode toggle (optional for backward compatibility)
+  onThinkingDialogueToggle?: () => void;         // Handler for thinking dialogue toggle
 }
 
 /**
@@ -21,10 +24,13 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
   isSimplifiedMode,
   synthesizedPointsCount,
   useThemedDisplay = true,
+  useThinkingDialogue = false,
+  hasThinkingResults = false,
   onToneChange,
   onModeToggle,
   onShowSynthesizedPoints,
   onDisplayToggle = () => {},
+  onThinkingDialogueToggle = () => {},
 }) => {
   return (
     <div style={{ 
@@ -53,6 +59,53 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
         Show All Suggested Points ({synthesizedPointsCount})
       </button>
 
+      {/* Thinking Dialogue Toggle */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '8px 12px',
+        backgroundColor: useThinkingDialogue ? '#e6fff0' : '#f9f9f9',
+        borderRadius: '4px',
+        border: '1px solid #e0e0e0'
+      }}>
+        <div style={{ fontSize: '14px', fontWeight: '500' }}>
+          Thinking Dialogue
+        </div>
+        <div style={{ 
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <label className="toggle" style={{ display: 'flex', alignItems: 'center', cursor: hasThinkingResults ? 'pointer' : 'not-allowed', margin: 0 }}>
+            <span style={{ 
+              marginRight: '6px', 
+              fontSize: '14px', 
+              color: useThinkingDialogue ? '#999' : '#333',
+              transition: 'color 0.2s'
+            }}>
+              Off
+            </span>
+            <input 
+              type="checkbox" 
+              tabIndex={0}
+              checked={useThinkingDialogue}
+              onChange={onThinkingDialogueToggle}
+              disabled={!hasThinkingResults}
+              style={{ position: 'relative', margin: '0 8px' }}
+            />
+            <span style={{ 
+              marginLeft: '0px', 
+              fontSize: '14px', 
+              color: useThinkingDialogue ? '#333' : '#999',
+              transition: 'color 0.2s'
+            }}>
+              On
+            </span>
+          </label>
+        </div>
+      </div>
+
       {/* Display Mode Toggle */}
       <div style={{
         display: 'flex',
@@ -69,7 +122,7 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
         <div style={{ 
           display: 'flex',
           alignItems: 'center',
-          gap: '8px'
+          gap: '2px'
         }}>
           <label className="toggle" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
             <span style={{ 

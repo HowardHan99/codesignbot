@@ -193,7 +193,7 @@ export class MiroDesignService {
         const connector = event.connector;
         
         // Make sure the connector has the expected structure
-        // This matches the SDK structure, not our MiroConnector interface
+        // This matches gpt-4othe SDK structure, not our MiroConnector interface
         if (!connector.start?.item || !connector.end?.item) return;
         
         // Get the connected items

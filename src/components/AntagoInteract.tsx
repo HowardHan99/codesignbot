@@ -11,11 +11,12 @@ import { AnalysisResults } from './AnalysisResults';
 import ResponseStore from '../utils/responseStore';
 import { saveAnalysis, getSynthesizedPoints, logUserActivity, saveDesignThemes } from '../utils/firebase';
 import { splitResponse } from '../utils/textProcessing';
-import { EmbeddingService } from '../services/embeddingService';
 import { VoiceRecorder } from './VoiceRecorder';
 import { FileUploadTest } from './FileUploadTest';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 import { DesignThemeService } from '../services/designThemeService';
+import { EmbeddingService } from '../services/embeddingService';
+import { Logger } from '../utils/logger';
 
 /**
  * Interface for themed response
@@ -70,6 +71,24 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
     return false;
   });
+  
+  // New state for thinking dialogue toggle
+  const [useThinkingDialogue, setUseThinkingDialogue] = useState(() => {
+    // Initialize from localStorage if available, otherwise default to false
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('useThinkingDialogue');
+      return saved ? JSON.parse(saved) : false;
+    }
+    return false;
+  });
+  
+  // State for storing results with thinking dialogue
+  const [thinkingResponses, setThinkingResponses] = useState<string[]>([]);
+  const [thinkingThemedResponses, setThinkingThemedResponses] = useState<ThemedResponse[]>([]);
+  const [thinkingSimplifiedResponses, setThinkingSimplifiedResponses] = useState<string[]>([]);
+  const [storedThinkingFullResponses, setStoredThinkingFullResponses] = useState<StoredResponses>({ normal: '' });
+  const [storedThinkingSimplifiedResponses, setStoredThinkingSimplifiedResponses] = useState<StoredResponses>({ normal: '' });
+  
   const [simplifiedResponses, setSimplifiedResponses] = useState<string[]>([]);
   const [selectedTone, setSelectedTone] = useState<string>('');
   const [synthesizedPoints, setSynthesizedPoints] = useState<string[]>([]);
@@ -87,6 +106,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const processedRef = useRef(false);
   const processingRef = useRef(false);  // New ref to prevent concurrent processing
 
+  // Save to localStorage whenever useThinkingDialogue changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('useThinkingDialogue', JSON.stringify(useThinkingDialogue));
+    }
+  }, [useThinkingDialogue]);
+  
   // Save to localStorage whenever isSimplifiedMode changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -125,31 +151,24 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const processNotes = useCallback(async (notes: string[], forceProcess: boolean = false) => {
     // If forcing process, reset state flags first
     if (forceProcess) {
-      console.log('Force processing requested, resetting processing state');
+      Logger.log('AntagoInteract', 'Force processing requested, resetting state');
       processedRef.current = false;
       processingRef.current = false;
     }
     
     // Don't process if already processed and not forcing
     if (processedRef.current && !forceProcess) {
-      console.log('Notes already processed and not forcing, skipping processing');
+      Logger.log('AntagoInteract', 'Notes already processed, skipping processing');
       return;
     }
     
     // Prevent concurrent processing
     if (processingRef.current) {
-      console.log('Already processing notes, skipping duplicate processing');
+      Logger.log('AntagoInteract', 'Already processing notes, skipping duplicate processing');
       return;
     }
     
-    console.log(`Starting to process ${notes.length} notes, forceProcess=${forceProcess}`);
-    console.log('Current state:', {
-      processedRef: processedRef.current,
-      processingRef: processingRef.current,
-      designChallenge: designChallenge?.length > 0 ? 'set' : 'not set',
-      consensusPoints: consensusPoints?.length || 0,
-      synthesizedPoints: synthesizedPoints?.length || 0
-    });
+    Logger.log('AntagoInteract', `Processing ${notes.length} notes`, { forceProcess });
     
     try {
       // Mark as processing
@@ -172,16 +191,89 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       const designStickyNotes = stickyNotes.filter(
         note => note.parentId === designFrame.id
       );
-
+      
+      // Get thinking dialogue context if the toggle is enabled
+      let dialogueContext = '';
+      console.log('Checking for thinking dialogue. useThinkingDialogue =', useThinkingDialogue);
+      
+      // Always check for the frame, even if toggle is off (for debugging)
+      try {
+        console.log('DEBUG: Searching for Thinking-Dialogue frame...');
+        const allFrames = await miro.board.get({ type: 'frame' });
+        console.log('DEBUG: All frames on board:', allFrames.map(f => f.title));
+        
+        const thinkingFrame = allFrames.find(f => f.title === 'Thinking-Dialogue');
+        console.log('DEBUG: Thinking frame found?', thinkingFrame ? 'YES' : 'NO');
+        
+        if (thinkingFrame) {
+          // Get both sticky notes and text elements from the frame
+          const dialogueStickyNotes = stickyNotes.filter(
+            note => note.parentId === thinkingFrame.id
+          );
+          
+          // Also get text elements (need to fetch them first)
+          console.log('DEBUG: Fetching text elements...');
+          const textElements = await miro.board.get({ type: 'text' });
+          console.log('DEBUG: Total text elements found:', textElements.length);
+          
+          const dialogueTextElements = textElements.filter(
+            text => text.parentId === thinkingFrame.id
+          );
+          
+          console.log(`Found ${dialogueStickyNotes.length} thinking dialogue sticky notes`);
+          console.log(`Found ${dialogueTextElements.length} thinking dialogue text elements`);
+          
+          // Process content from both sources
+          const stickyNotesContent = dialogueStickyNotes.length > 0 
+            ? dialogueStickyNotes.map((note, index) => 
+                `Dialogue Point ${index + 1}: ${note.content || ''}`
+              ).join('\n')
+            : '';
+          
+          const textElementsContent = dialogueTextElements.length > 0
+            ? dialogueTextElements.map((text, index) => 
+                `Dialogue Point ${dialogueStickyNotes.length + index + 1}: ${text.content || ''}`
+              ).join('\n')
+            : '';
+          
+          // Combine content from both sources
+          if (stickyNotesContent || textElementsContent) {
+            dialogueContext = [stickyNotesContent, textElementsContent]
+              .filter(Boolean)
+              .join('\n');
+              
+            console.log(`Created dialogue context with ${dialogueContext.length} characters`);
+            console.log('First 100 chars of dialogue context:', dialogueContext.substring(0, 100));
+          } else {
+            console.log('No thinking dialogue content found in frame');
+          }
+        } else {
+          console.log('IMPORTANT: Thinking-Dialogue frame not found. Please create a frame with this exact name.');
+        }
+      } catch (dialogueError) {
+        console.error('Error fetching thinking dialogue:', dialogueError);
+        // Continue without dialogue context if there's an error
+      }
+      
+      // Set useThinkingDialogue to false if no dialogue context was found
+      if (!dialogueContext && useThinkingDialogue) {
+        console.log('Setting useThinkingDialogue to false because no dialogue context was found');
+        setUseThinkingDialogue(false);
+      }
       
       const combinedMessage = designStickyNotes.map((note, index) => 
         `Design Decision ${index + 1}: ${note.content || ''}`
       ).join('\n');
 
-      // Add image context if available
-      const messageWithContext = imageContext 
+      // Base message with just design decisions
+      const baseMessageWithContext = imageContext 
         ? `${combinedMessage}\n\nRelevant visual context from design sketches:\n${imageContext}`
         : combinedMessage;
+        
+      // Create a thinking dialogue-enhanced message if we have dialogue context
+      const thinkingMessageWithContext = dialogueContext 
+        ? `${baseMessageWithContext}\n\nThinking Dialogue Context:\n${dialogueContext}`
+        : baseMessageWithContext;
       
       // Simply read existing themes from the board and their selection state
       console.log('Reading themes from the board...');
@@ -193,19 +285,56 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         console.log('No themes found on board. Using standard analysis without themes.');
         // Generate standard analysis
         try {
-          const response = await OpenAIService.generateAnalysis(
-            messageWithContext, 
-            designChallenge,
-            synthesizedPoints,
-            consensusPoints
-          );
+          const generateAnalysis = async (
+            messageContext: string,
+            setResultsFunc: React.Dispatch<React.SetStateAction<string[]>>,
+            setStoredResponsesFunc: React.Dispatch<React.SetStateAction<StoredResponses>>
+          ) => {
+            const response = await OpenAIService.generateAnalysis(
+              messageContext, 
+              designChallenge,
+              synthesizedPoints,
+              consensusPoints
+            );
+            
+            setResultsFunc([response]);
+            setStoredResponsesFunc({ normal: response });
+            return response;
+          };
           
-          setResponses([response]);
-          setStoredFullResponses({ normal: response });
+          // Generate both standard and thinking dialogue enhanced analyses in parallel
+          Logger.log('AntagoInteract', 'Generating analyses');
+          const [standardResponse, thinkingResponse] = await Promise.all([
+            // Standard analysis without thinking dialogue
+            generateAnalysis(baseMessageWithContext, setResponses, setStoredFullResponses),
+            
+            // Analysis with thinking dialogue (if dialogue context exists)
+            dialogueContext 
+              ? generateAnalysis(thinkingMessageWithContext, setThinkingResponses, setStoredThinkingFullResponses)
+              : Promise.resolve('')
+          ]);
           
-          // Update UI with response
-          const splitResponses = splitResponse(response);
+          Logger.log('AntagoInteract', 'Analysis generation complete', {
+            standardLength: standardResponse?.length || 0,
+            thinkingLength: thinkingResponse?.length || 0,
+            hasThinkingResults: !!thinkingResponse
+          });
+          
+          // Update UI with appropriate response based on current toggle state
+          const currentResponse = useThinkingDialogue && thinkingResponse 
+            ? thinkingResponse 
+            : standardResponse;
+            
+          const splitResponses = splitResponse(currentResponse);
           onResponsesUpdate?.(splitResponses);
+          
+          // Update the hasThinkingResults state indirectly by populating the thinkingResponses array
+          if (dialogueContext && thinkingResponse) {
+            console.log('Setting thinking responses to enable toggle');
+            setThinkingResponses([thinkingResponse]);
+          } else {
+            console.log('No thinking dialogue content was found or processed');
+          }
           
           // Save to Firebase in the background
           try {
@@ -215,11 +344,18 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               designChallenge: designChallenge,
               decisions: designStickyNotes.map(note => note.content || ''),
               analysis: {
-                full: splitResponse(response),
+                full: splitResponse(standardResponse),
                 simplified: []
               },
               tone: selectedTone || 'normal',
-              consensusPoints: consensusPoints
+              consensusPoints: consensusPoints,
+              hasThinkingDialogue: useThinkingDialogue,
+              ...(useThinkingDialogue && thinkingResponse ? {
+                thinkingAnalysis: {
+                  full: splitResponse(thinkingResponse),
+                  simplified: []
+                }
+              } : {})
             };
             await saveAnalysis(analysisData);
             
@@ -230,7 +366,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
                 hasThemes: false,
                 themedDisplay: false,
                 challengeLength: designChallenge?.length || 0,
-                consensusCount: consensusPoints?.length || 0
+                consensusCount: consensusPoints?.length || 0,
+                useThinkingDialogue: useThinkingDialogue,
+                thinkingDialogueLength: dialogueContext?.length || 0
               }
             });
           } catch (saveError) {
@@ -298,33 +436,83 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       // No need to regenerate themes or recalculate positions - the existing themes already have positions
  
+      // Function to generate themed analysis
+      const generateThemedAnalysis = async (
+        messageContext: string,
+        setResponseFunc: React.Dispatch<React.SetStateAction<string[]>>,
+        setThemedResponsesFunc: React.Dispatch<React.SetStateAction<ThemedResponse[]>>,
+        setStoredResponsesFunc: React.Dispatch<React.SetStateAction<StoredResponses>>
+      ) => {
+        // Generate all theme analyses in parallel with standard response
+        const [themedResponsesData, response] = await Promise.all([
+          // Generate all theme analyses in parallel
+          OpenAIService.generateAllThemeAnalyses(
+            messageContext,
+            selectedThemes,
+            designChallenge,
+            consensusPoints
+          ),
+          
+          // Also generate original response for compatibility and fallback
+          OpenAIService.generateAnalysis(
+            messageContext, 
+            designChallenge,
+            synthesizedPoints,
+            consensusPoints
+          )
+        ]);
+        
+        // Store results
+        setResponseFunc([response]);
+        setThemedResponsesFunc(themedResponsesData);
+        setStoredResponsesFunc({ normal: response });
+        
+        return { themedResponsesData, response };
+      };
 
-      // Run both the theme-specific analyses and the original response generation in parallel
-      const [themedResponsesData, response] = await Promise.all([
-        // Generate all theme analyses in parallel
-        OpenAIService.generateAllThemeAnalyses(
-          messageWithContext,
-          selectedThemes,
-          designChallenge,
-          consensusPoints
+      // Run both standard and thinking dialogue enhanced analyses in parallel
+      Logger.log('AntagoInteract', 'Generating analyses');
+      const [standardResults, thinkingResults] = await Promise.all([
+        // Standard themed analysis without thinking dialogue
+        generateThemedAnalysis(
+          baseMessageWithContext, 
+          setResponses, 
+          setThemedResponses, 
+          setStoredFullResponses
         ),
         
-        // Also generate original response for compatibility and fallback
-        OpenAIService.generateAnalysis(
-          messageWithContext, 
-          designChallenge,
-          synthesizedPoints,
-          consensusPoints
-        )
+        // Themed analysis with thinking dialogue (if dialogue context exists)
+        dialogueContext 
+          ? generateThemedAnalysis(
+              thinkingMessageWithContext,
+              setThinkingResponses,
+              setThinkingThemedResponses,
+              setStoredThinkingFullResponses
+            )
+          : Promise.resolve({ themedResponsesData: [], response: '' })
       ]);
-
       
-      setResponses([response]);
-      setThemedResponses(themedResponsesData);
-      setStoredFullResponses({ normal: response }); // Store normal tone
+      Logger.log('AntagoInteract', 'Themed analysis generation complete', {
+        standardLength: standardResults.response?.length || 0,
+        thinkingLength: thinkingResults.response?.length || 0,
+        hasThinkingResults: !!thinkingResults.response
+      });
+      
+      // Update the hasThinkingResults state indirectly by populating the thinkingResponses array
+      if (dialogueContext && thinkingResults && thinkingResults.response) {
+        console.log('Setting thinking responses to enable toggle');
+        setThinkingResponses([thinkingResults.response]);
+      } else {
+        console.log('No thinking dialogue content was found or processed for themed generation');
+      }
+      
+      // Use the appropriate results based on current toggle state
+      const currentResults = useThinkingDialogue && thinkingResults.response 
+        ? thinkingResults 
+        : standardResults;
       
       // Create a combined list of all points for backward compatibility
-      const allPoints = themedResponsesData.flatMap(theme => theme.points);
+      const allPoints = currentResults.themedResponsesData.flatMap(theme => theme.points);
       
       // Update parent with appropriate responses
       if (useThemedDisplay) {
@@ -332,7 +520,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         onResponsesUpdate?.(allPoints);
       } else {
         // Otherwise, use the standard response format
-        const splitResponses = splitResponse(response);
+        const splitResponses = splitResponse(currentResults.response);
         onResponsesUpdate?.(splitResponses);
       }
       
@@ -349,23 +537,40 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             designChallenge: designChallenge,
             decisions: designStickyNotes.map(note => note.content || ''),
             analysis: {
-              full: useThemedDisplay ? allPoints : splitResponse(response),
+              full: useThemedDisplay ? currentResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(currentResults.response),
               simplified: []
             },
             tone: selectedTone || 'normal',
-            consensusPoints: consensusPoints
+            consensusPoints: consensusPoints,
+            hasThinkingDialogue: useThinkingDialogue && dialogueContext && thinkingResults.response ? true : false,
+            ...(dialogueContext && thinkingResults && thinkingResults.response ? {
+              thinkingAnalysis: {
+                full: useThemedDisplay ? thinkingResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(thinkingResults.response),
+                simplified: []
+              }
+            } : {})
           };
           await saveAnalysis(analysisData);
           
           // If we have themed responses, also save them as design themes
-          if (themedResponsesData.length > 0) {
+          if (currentResults.themedResponsesData.length > 0) {
             await saveDesignThemes({
-              themes: themedResponsesData.map(theme => ({
+              themes: currentResults.themedResponsesData.map(theme => ({
                 name: theme.name,
                 color: theme.color,
                 description: theme.points.join(' | ')
               }))
             });
+            
+            if (useThinkingDialogue && currentResults.themedResponsesData.length > 0) {
+              await saveDesignThemes({
+                themes: currentResults.themedResponsesData.map(theme => ({
+                  name: `${theme.name} (with thinking dialogue)`,
+                  color: theme.color,
+                  description: theme.points.join(' | ')
+                }))
+              });
+            }
           }
         } catch (error) {
           console.error('Error saving analysis data to Firebase:', error);
@@ -380,14 +585,30 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         const simplifyPromise = (async () => {
           try {
             setIsChangingTone(true);
-            const simplified = await OpenAIService.simplifyAnalysis(response);
             
+            // Simplify both standard and thinking analyses if needed
+            const [simplified, thinkingSimplified] = await Promise.all([
+              OpenAIService.simplifyAnalysis(standardResults.response),
+              dialogueContext && thinkingResults && thinkingResults.response 
+                ? OpenAIService.simplifyAnalysis(thinkingResults.response) 
+                : Promise.resolve('')
+            ]);
+            
+            // Store simplifications
             setSimplifiedResponses([simplified]);
             setStoredSimplifiedResponses({ normal: simplified });
             
-            if (isSimplifiedMode && !useThemedDisplay) {
-              onResponsesUpdate?.(splitResponse(simplified));
+            if (useThinkingDialogue && thinkingSimplified) {
+              setThinkingSimplifiedResponses([thinkingSimplified]);
+              setStoredThinkingSimplifiedResponses({ normal: thinkingSimplified });
             }
+            
+            // Update UI with the appropriate simplified response
+            const currentSimplified = useThinkingDialogue && thinkingSimplified ? thinkingSimplified : simplified;
+            if (isSimplifiedMode && !useThemedDisplay) {
+              onResponsesUpdate?.(splitResponse(currentSimplified));
+            }
+            
             setIsChangingTone(false);
           } catch (error) {
             setIsChangingTone(false);
@@ -411,7 +632,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           hasThemes: existingThemes.length > 0, 
           themedDisplay: useThemedDisplay,
           challengeLength: designChallenge?.length || 0,
-          consensusCount: consensusPoints?.length || 0
+          consensusCount: consensusPoints?.length || 0,
+          useThinkingDialogue: useThinkingDialogue,
+          thinkingDialogueLength: dialogueContext?.length || 0
         }
       });
       
@@ -420,7 +643,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setLoading(false);
       processingRef.current = false;
     }
-  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints, useThemedDisplay, themedResponses]);
+  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints, useThemedDisplay, useThinkingDialogue]);
 
   // Process notes when they change or when shouldRefresh is true
   useEffect(() => {
@@ -430,6 +653,62 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   }, [stickyNotes, shouldRefresh, processNotes]);
 
+  /**
+   * Toggle between standard and thinking dialogue enhanced analysis
+   */
+  const handleThinkingDialogueToggle = useCallback(() => {
+    setUseThinkingDialogue((prev: boolean) => {
+      const newMode = !prev;
+      
+      // Ensure we have the thinking dialogue results before enabling
+      if (newMode && thinkingResponses.length === 0) {
+        // If we don't have thinking dialogue results, we can't toggle
+        console.warn('Thinking dialogue results not available');
+        return prev;
+      }
+      
+      // Update UI with appropriate responses based on new mode
+      if (useThemedDisplay) {
+        // If themed display is active, update with appropriate themed responses
+        const themedResponsesToUse = newMode ? thinkingThemedResponses : themedResponses;
+        if (themedResponsesToUse.length > 0) {
+          const allPoints = themedResponsesToUse.flatMap(theme => theme.points);
+          onResponsesUpdate?.(allPoints);
+        }
+      } else {
+        // Otherwise update with standard or simplified responses
+        const responsesToUse = isSimplifiedMode 
+          ? (newMode ? thinkingSimplifiedResponses : simplifiedResponses)
+          : (newMode ? thinkingResponses : responses);
+          
+        if (responsesToUse.length > 0) {
+          onResponsesUpdate?.(splitResponse(responsesToUse[0]));
+        }
+      }
+      
+      // Log the toggle action
+      logUserActivity({
+        action: 'toggle_thinking_dialogue',
+        additionalData: {
+          newMode,
+          hasThinkingResults: thinkingResponses.length > 0
+        }
+      });
+      
+      return newMode;
+    });
+  }, [
+    thinkingResponses, 
+    thinkingThemedResponses, 
+    thinkingSimplifiedResponses, 
+    themedResponses, 
+    responses, 
+    simplifiedResponses, 
+    useThemedDisplay, 
+    isSimplifiedMode, 
+    onResponsesUpdate
+  ]);
+
   // Handle mode toggle
   const handleModeToggle = useCallback(() => {
     // Don't process mode toggle if themed display is active
@@ -438,15 +717,29 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     setIsSimplifiedMode((prev: boolean) => {
       const newMode = !prev;
       
+      // Get the correct response data based on thinking dialogue toggle
+      const currentResponses = useThinkingDialogue ? thinkingResponses : responses;
+      const currentSimplifiedResponses = useThinkingDialogue ? thinkingSimplifiedResponses : simplifiedResponses;
+      
       // If switching to simplified mode but we don't have simplified responses yet
-      if (newMode && responses.length > 0 && !simplifiedResponses.length) {
+      if (newMode && currentResponses.length > 0 && !currentSimplifiedResponses.length) {
         // Generate simplified version on demand
         (async () => {
           try {
             setIsChangingTone(true);
-            const simplified = await OpenAIService.simplifyAnalysis(responses[0]);
-            setSimplifiedResponses([simplified]);
-            setStoredSimplifiedResponses({ normal: simplified });
+            
+            // Choose the correct response to simplify based on current toggle state
+            const responseToSimplify = useThinkingDialogue ? thinkingResponses[0] : responses[0];
+            const simplified = await OpenAIService.simplifyAnalysis(responseToSimplify);
+            
+            // Store in the correct state variable based on current toggle
+            if (useThinkingDialogue) {
+              setThinkingSimplifiedResponses([simplified]);
+              setStoredThinkingSimplifiedResponses({ normal: simplified });
+            } else {
+              setSimplifiedResponses([simplified]);
+              setStoredSimplifiedResponses({ normal: simplified });
+            }
             
             if (!useThemedDisplay) {
               onResponsesUpdate?.(splitResponse(simplified));
@@ -459,10 +752,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             setIsChangingTone(false);
           }
         })();
-      } else if (responses.length > 0 && !useThemedDisplay) {
+      } else if (currentResponses.length > 0 && !useThemedDisplay) {
         // If we already have the right responses, just update
-        const currentResponses = newMode ? simplifiedResponses : responses;
-        onResponsesUpdate?.(splitResponse(currentResponses[0]));
+        const responsesToShow = newMode ? currentSimplifiedResponses : currentResponses;
+        onResponsesUpdate?.(splitResponse(responsesToShow[0]));
       }
       
       // Log user activity
@@ -471,8 +764,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           action: 'toggle_simplified_mode',
           additionalData: {
             newMode: !prev,
-            responseLength: responses[0]?.length || 0,
-            simplifiedLength: simplifiedResponses[0]?.length || 0
+            responseLength: currentResponses[0]?.length || 0,
+            simplifiedLength: currentSimplifiedResponses[0]?.length || 0,
+            withThinkingDialogue: useThinkingDialogue
           }
         });
       } catch (error) {
@@ -481,7 +775,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       return newMode;
     });
-  }, [responses, simplifiedResponses, onResponsesUpdate, useThemedDisplay]);
+  }, [
+    responses, 
+    simplifiedResponses, 
+    thinkingResponses, 
+    thinkingSimplifiedResponses, 
+    onResponsesUpdate, 
+    useThemedDisplay, 
+    useThinkingDialogue
+  ]);
 
   /**
    * Toggle between themed and standard display
@@ -492,21 +794,37 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     setUseThemedDisplay(prev => {
       const newDisplayMode = !prev;
       
+      // Choose the correct data source based on thinking dialogue toggle
+      const currentResponses = useThinkingDialogue ? thinkingResponses : responses;
+      const currentSimplifiedResponses = useThinkingDialogue ? thinkingSimplifiedResponses : simplifiedResponses;
+      const currentThemedResponses = useThinkingDialogue ? thinkingThemedResponses : themedResponses;
+      
       // When switching to themed display, update UI state
       if (newDisplayMode) {
         // No need to change tone selection as it's visually disabled
         // No need to change simplified mode as it's visually disabled
       } else {
         // When switching back to standard display, restore previous settings
-        if (isSimplifiedMode && !simplifiedResponses.length && responses.length > 0) {
+        if (isSimplifiedMode && !currentSimplifiedResponses.length && currentResponses.length > 0) {
           // If we need to generate simplified responses
           (async () => {
             try {
               setIsChangingTone(true);
-              const simplified = await OpenAIService.simplifyAnalysis(responses[0]);
-              setSimplifiedResponses([simplified]);
-              setStoredSimplifiedResponses({ normal: simplified });
-              onResponsesUpdate?.(splitResponse(simplified));
+              const responseToSimplify = currentResponses[0];
+              const simplified = await OpenAIService.simplifyAnalysis(responseToSimplify);
+              
+              // Store in the correct state variable
+              if (useThinkingDialogue) {
+                setThinkingSimplifiedResponses([simplified]);
+                setStoredThinkingSimplifiedResponses({ normal: simplified });
+              } else {
+                setSimplifiedResponses([simplified]);
+                setStoredSimplifiedResponses({ normal: simplified });
+              }
+              
+              if (!useThemedDisplay) {
+                onResponsesUpdate?.(splitResponse(simplified));
+              }
               setIsChangingTone(false);
             } catch (error) {
               console.error('Error generating simplified response:', error);
@@ -518,15 +836,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       }
       
       // Update parent with appropriate responses based on new display mode
-      if (newDisplayMode && themedResponses.length > 0) {
+      if (newDisplayMode && currentThemedResponses.length > 0) {
         // If switching to themed display, pass all themed points
-        const allPoints = themedResponses.flatMap(theme => theme.points);
+        const allPoints = currentThemedResponses.flatMap(theme => theme.points);
         onResponsesUpdate?.(allPoints);
-      } else if (!newDisplayMode && responses.length > 0) {
+      } else if (!newDisplayMode && currentResponses.length > 0) {
         // If switching to standard display, use the normal or simplified responses
-        const currentResponses = isSimplifiedMode ? simplifiedResponses : responses;
-        if (currentResponses.length > 0) {
-          onResponsesUpdate?.(splitResponse(currentResponses[0]));
+        const responsesToShow = isSimplifiedMode ? currentSimplifiedResponses : currentResponses;
+        if (responsesToShow.length > 0) {
+          onResponsesUpdate?.(splitResponse(responsesToShow[0]));
         }
       }
       
@@ -534,13 +852,25 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       logUserActivity({
         action: 'toggle_themed_display',
         additionalData: {
-          newMode: !useThemedDisplay
+          newMode: !useThemedDisplay,
+          withThinkingDialogue: useThinkingDialogue
         }
       });
       
       return newDisplayMode;
     });
-  }, [themedResponses, responses, simplifiedResponses, isSimplifiedMode, selectedTone, onResponsesUpdate]);
+  }, [
+    themedResponses, 
+    responses, 
+    simplifiedResponses, 
+    thinkingThemedResponses,
+    thinkingResponses,
+    thinkingSimplifiedResponses,
+    isSimplifiedMode, 
+    selectedTone, 
+    onResponsesUpdate, 
+    useThinkingDialogue
+  ]);
 
   /**
    * Handle tone changes and update responses accordingly
@@ -550,17 +880,30 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     if (useThemedDisplay) return;
     
     setSelectedTone(newTone);
-    if (!responses.length) return;
+    
+    // Choose the correct data source based on thinking dialogue toggle
+    const currentResponses = useThinkingDialogue ? thinkingResponses : responses;
+    const currentSimplifiedResponses = useThinkingDialogue ? thinkingSimplifiedResponses : simplifiedResponses;
+    const currentStoredFullResponses = useThinkingDialogue ? storedThinkingFullResponses : storedFullResponses;
+    const currentStoredSimplifiedResponses = useThinkingDialogue ? storedThinkingSimplifiedResponses : storedSimplifiedResponses;
+    
+    // References to the correct setter functions
+    const setCurrentResponses = useThinkingDialogue ? setThinkingResponses : setResponses;
+    const setCurrentSimplifiedResponses = useThinkingDialogue ? setThinkingSimplifiedResponses : setSimplifiedResponses;
+    const setCurrentStoredFullResponses = useThinkingDialogue ? setStoredThinkingFullResponses : setStoredFullResponses;
+    const setCurrentStoredSimplifiedResponses = useThinkingDialogue ? setStoredThinkingSimplifiedResponses : setStoredSimplifiedResponses;
+    
+    if (!currentResponses.length) return;
 
     try {
       setIsChangingTone(true);
       
       // If no tone selected, use normal version
       if (!newTone) {
-        const normalFull = storedFullResponses.normal;
-        const normalSimplified = storedSimplifiedResponses.normal;
-        setResponses([normalFull]);
-        setSimplifiedResponses([normalSimplified]);
+        const normalFull = currentStoredFullResponses.normal;
+        const normalSimplified = currentStoredSimplifiedResponses.normal;
+        setCurrentResponses([normalFull]);
+        setCurrentSimplifiedResponses([normalSimplified]);
         
         if (!useThemedDisplay) {
           onResponsesUpdate?.(splitResponse(isSimplifiedMode ? normalSimplified : normalFull));
@@ -569,13 +912,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       }
 
       // Check if we already have this tone version stored
-      const storedResponses = isSimplifiedMode ? storedSimplifiedResponses : storedFullResponses;
+      const storedResponses = isSimplifiedMode ? currentStoredSimplifiedResponses : currentStoredFullResponses;
       if (storedResponses[newTone as keyof StoredResponses]) {
         const storedResponse = storedResponses[newTone as keyof StoredResponses]!;
         if (isSimplifiedMode) {
-          setSimplifiedResponses([storedResponse]);
+          setCurrentSimplifiedResponses([storedResponse]);
         } else {
-          setResponses([storedResponse]);
+          setCurrentResponses([storedResponse]);
         }
         
         if (!useThemedDisplay) {
@@ -585,16 +928,16 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       }
 
       // If we don't have this tone stored, generate it
-      const currentResponse = isSimplifiedMode ? simplifiedResponses[0] : responses[0];
+      const currentResponse = isSimplifiedMode ? currentSimplifiedResponses[0] : currentResponses[0];
       const adjustedResponse = await OpenAIService.adjustTone(currentResponse, newTone);
       
       // Store the new tone version
       if (isSimplifiedMode) {
-        setStoredSimplifiedResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
-        setSimplifiedResponses([adjustedResponse]);
+        setCurrentStoredSimplifiedResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
+        setCurrentSimplifiedResponses([adjustedResponse]);
       } else {
-        setStoredFullResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
-        setResponses([adjustedResponse]);
+        setCurrentStoredFullResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
+        setCurrentResponses([adjustedResponse]);
       }
 
       if (!useThemedDisplay) {
@@ -608,11 +951,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           designChallenge: designChallenge,
           decisions: stickyNotes,
           analysis: {
-            full: splitResponse(isSimplifiedMode ? simplifiedResponses[0] : responses[0]),
-            simplified: splitResponse(isSimplifiedMode ? simplifiedResponses[0] : responses[0])
+            full: splitResponse(isSimplifiedMode ? currentSimplifiedResponses[0] : currentResponses[0]),
+            simplified: splitResponse(isSimplifiedMode ? currentSimplifiedResponses[0] : currentResponses[0])
           },
           tone: newTone,
-          consensusPoints: consensusPoints
+          consensusPoints: consensusPoints,
+          hasThinkingDialogue: useThinkingDialogue
         });
         
         // Log the tone change
@@ -621,7 +965,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           additionalData: {
             newTone: newTone,
             isSimplifiedMode,
-            analysisLength: (isSimplifiedMode ? simplifiedResponses[0] : responses[0])?.length || 0
+            analysisLength: (isSimplifiedMode ? currentSimplifiedResponses[0] : currentResponses[0])?.length || 0,
+            withThinkingDialogue: useThinkingDialogue
           }
         });
       } catch (error) {
@@ -632,7 +977,23 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     } finally {
       setIsChangingTone(false);
     }
-  }, [responses, simplifiedResponses, isSimplifiedMode, onResponsesUpdate, storedFullResponses, storedSimplifiedResponses, useThemedDisplay, designChallenge, stickyNotes, consensusPoints]);
+  }, [
+    responses, 
+    simplifiedResponses, 
+    thinkingResponses,
+    thinkingSimplifiedResponses,
+    storedFullResponses,
+    storedSimplifiedResponses,
+    storedThinkingFullResponses,
+    storedThinkingSimplifiedResponses,
+    isSimplifiedMode, 
+    onResponsesUpdate, 
+    useThemedDisplay, 
+    designChallenge, 
+    stickyNotes, 
+    consensusPoints,
+    useThinkingDialogue
+  ]);
 
   // Store responses in local storage
   useEffect(() => {
@@ -761,7 +1122,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               onNewPoints={handleNewResponsePoints}
               skipParentCallback={true}
             />
-            
+            {/* Analysis Controls */}
             <AnalysisControls
               selectedTone={selectedTone}
               isSimplifiedMode={isSimplifiedMode}
@@ -771,17 +1132,26 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               onShowSynthesizedPoints={() => MiroService.sendSynthesizedPointsToBoard(synthesizedPoints)}
               useThemedDisplay={useThemedDisplay}
               onDisplayToggle={handleDisplayToggle}
+              useThinkingDialogue={useThinkingDialogue}
+              onThinkingDialogueToggle={handleThinkingDialogueToggle}
+              hasThinkingResults={thinkingResponses.length > 0}
             />
-
+            {/* Analysis Results - Moved above controls */}
             <AnalysisResults
-              responses={splitResponse((isSimplifiedMode ? simplifiedResponses : responses)[0] || '')}
+              responses={
+                useThinkingDialogue
+                  ? splitResponse((isSimplifiedMode ? thinkingSimplifiedResponses : thinkingResponses)[0] || '')
+                  : splitResponse((isSimplifiedMode ? simplifiedResponses : responses)[0] || '')
+              }
               isSimplifiedMode={isSimplifiedMode}
               selectedTone={selectedTone}
               onCleanAnalysis={() => MiroService.cleanAnalysisBoard()}
               isChangingTone={isChangingTone}
-              themedResponses={themedResponses}
+              themedResponses={useThinkingDialogue ? thinkingThemedResponses : themedResponses}
               useThemedDisplay={useThemedDisplay}
             />
+            
+            
           </div>
         </>
       )}

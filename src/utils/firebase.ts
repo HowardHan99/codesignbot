@@ -36,6 +36,11 @@ export interface AnalysisData {
   };
   tone?: string;
   consensusPoints?: string[];
+  hasThinkingDialogue?: boolean;
+  thinkingAnalysis?: {
+    full: string[];
+    simplified: string[];
+  };
 }
 
 export interface UserActivityData {

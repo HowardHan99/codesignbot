@@ -11,6 +11,7 @@ interface DesignerThinkingProcess {
   thinking: string[];                   // Designer's thought process
   brainstormingProposals: string[];     // Brainstorming design proposals
   decisions: string[];                  // Final design decisions/highlights
+  sketch?: string;                      // URL of the generated sketch
 }
 
 /**
@@ -27,6 +28,12 @@ export class DesignerRolePlayService {
   private static isProcessing: boolean = false;
   private static readonly THINKING_FRAME_NAME = 'Thinking-Dialogue';
   private static readonly DECISION_FRAME_NAME = 'Design-Proposal';
+  
+  /**
+   * Toggle to enable or disable sketch generation using DALL-E 3
+   * Set to false to turn off automatic sketch generation with designer role play
+   */
+  public static enableSketchGeneration: boolean = false;
   
   /**
    * Makes a request to the OpenAI API endpoint for designer role play
@@ -172,6 +179,85 @@ export class DesignerRolePlayService {
   }
 
   /**
+   * Generates a sketch based on design proposals and decisions using DALL-E 3
+   * @param designerThinking The designer's thinking process including proposals and decisions
+   * @returns URL of the generated image
+   */
+  private static async generateSketch(designerThinking: DesignerThinkingProcess): Promise<string> {
+    try {
+      // Combine decisions and proposals for a comprehensive prompt
+      const designContent = [
+        ...designerThinking.decisions,
+        ...designerThinking.brainstormingProposals.slice(0, 2) // Include top proposals if needed
+      ].join('\n\n');
+      
+      const prompt = `Create a detailed design sketch based on the following design proposal and solution:\n${designContent}`;
+      
+      const response = await this.makeRequest('/api/generate-sketch', {
+        prompt,
+        model: 'dall-e-3'
+      });
+      
+      if (!response || !response.imageUrl) {
+        throw new Error('Failed to generate sketch');
+      }
+      
+      return response.imageUrl;
+    } catch (error) {
+      console.error('Error generating sketch:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Adds the generated sketch to the Design-Proposal frame
+   * @param imageUrl URL of the generated sketch
+   */
+  private static async addSketchToBoard(imageUrl: string): Promise<void> {
+    try {
+      const designFrame = await MiroFrameService.findFrameByTitle(this.DECISION_FRAME_NAME);
+      
+      if (!designFrame) {
+        throw new Error(`Design frame '${this.DECISION_FRAME_NAME}' not found`);
+      }
+      
+      // Get frame dimensions to position the image appropriately
+      const frameWidth = designFrame.width;
+      const frameHeight = designFrame.height;
+      
+      // Calculate position (bottom of the frame)
+      const positionX = designFrame.x;
+      const positionY = designFrame.y + (frameHeight / 2) - 100; // Place below existing content
+      
+      // Create an image on the board
+      const image = await miro.board.createImage({
+        url: imageUrl,
+        title: 'Generated Design Sketch',
+        x: positionX,
+        y: positionY,
+        width: Math.min(600, frameWidth * 0.8) // Limit width to 80% of frame or 600px
+      });
+      
+      // Optionally add a caption
+      await miro.board.createStickyNote({
+        content: 'AI-Generated Design Sketch',
+        x: positionX,
+        y: positionY + 300, // Position below the image
+        width: 200,
+        style: {
+          fillColor: 'yellow'
+        }
+      });
+      
+      console.log('Added sketch to board successfully');
+      return;
+    } catch (error) {
+      console.error('Error adding sketch to board:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Creates documents and sticky notes in the appropriate frames for the designer's thinking process,
    * brainstorming proposals (in thinking frame), and final decisions.
    */
@@ -182,6 +268,17 @@ export class DesignerRolePlayService {
       
       // Add design decisions to the proposal frame
       await this.addDecisionsToDesignFrame(designerThinking.decisions);
+      
+      // Generate and add sketch if enabled and it doesn't exist
+      if (this.enableSketchGeneration && !designerThinking.sketch) {
+        const sketchUrl = await this.generateSketch(designerThinking);
+        designerThinking.sketch = sketchUrl;
+      }
+      
+      // Add the sketch to the board if it exists
+      if (this.enableSketchGeneration && designerThinking.sketch) {
+        await this.addSketchToBoard(designerThinking.sketch);
+      }
     } catch (error) {
       throw error;
     }
@@ -201,6 +298,13 @@ export class DesignerRolePlayService {
       }
       
       const designerThinking = await this.generateDesignerThinking(designChallenge, modelType);
+      
+      // Generate sketch based on design proposals and decisions if enabled
+      if (this.enableSketchGeneration) {
+        const sketchUrl = await this.generateSketch(designerThinking);
+        designerThinking.sketch = sketchUrl;
+      }
+      
       await this.addThinkingToBoard(designerThinking);
       
       // Return the designer thinking process for use in the UI
