@@ -193,87 +193,108 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       );
       
       // Get thinking dialogue context if the toggle is enabled
-      let dialogueContext = '';
-      console.log('Checking for thinking dialogue. useThinkingDialogue =', useThinkingDialogue);
+      let dialogueContext = ''; // Combined raw content
+      let thinkingContextString = ''; // Parsed thinking process
+      let ragContextString = ''; // Parsed external knowledge/RAG
+      const THINKING_MARKER = "Designer Process & Concepts";
+      
+      Logger.log('AntagoInteract', 'Checking for thinking dialogue/RAG content', { useThinkingDialogue });
       
       // Always check for the frame, even if toggle is off (for debugging)
       try {
-        console.log('DEBUG: Searching for Thinking-Dialogue frame...');
         const allFrames = await miro.board.get({ type: 'frame' });
-        console.log('DEBUG: All frames on board:', allFrames.map(f => f.title));
-        
         const thinkingFrame = allFrames.find(f => f.title === 'Thinking-Dialogue');
-        console.log('DEBUG: Thinking frame found?', thinkingFrame ? 'YES' : 'NO');
+        Logger.log('AntagoInteract', 'Searching for Thinking-Dialogue frame', { found: !!thinkingFrame });
         
         if (thinkingFrame) {
           // Get both sticky notes and text elements from the frame
           const dialogueStickyNotes = stickyNotes.filter(
             note => note.parentId === thinkingFrame.id
           );
-          
-          // Also get text elements (need to fetch them first)
-          console.log('DEBUG: Fetching text elements...');
           const textElements = await miro.board.get({ type: 'text' });
-          console.log('DEBUG: Total text elements found:', textElements.length);
-          
           const dialogueTextElements = textElements.filter(
             text => text.parentId === thinkingFrame.id
           );
           
-          console.log(`Found ${dialogueStickyNotes.length} thinking dialogue sticky notes`);
-          console.log(`Found ${dialogueTextElements.length} thinking dialogue text elements`);
-          
-          // Process content from both sources
-          const stickyNotesContent = dialogueStickyNotes.length > 0 
-            ? dialogueStickyNotes.map((note, index) => 
-                `Dialogue Point ${index + 1}: ${note.content || ''}`
-              ).join('\n')
-            : '';
-          
-          const textElementsContent = dialogueTextElements.length > 0
-            ? dialogueTextElements.map((text, index) => 
-                `Dialogue Point ${dialogueStickyNotes.length + index + 1}: ${text.content || ''}`
-              ).join('\n')
-            : '';
+          Logger.log('AntagoInteract', 'Found content elements in Thinking-Dialogue frame', { 
+            stickyNotes: dialogueStickyNotes.length,
+            textElements: dialogueTextElements.length 
+          });
           
           // Combine content from both sources
-          if (stickyNotesContent || textElementsContent) {
-            dialogueContext = [stickyNotesContent, textElementsContent]
-              .filter(Boolean)
-              .join('\n');
-              
-            console.log(`Created dialogue context with ${dialogueContext.length} characters`);
-            console.log('First 100 chars of dialogue context:', dialogueContext.substring(0, 100));
+          const stickyNotesContent = dialogueStickyNotes.map(note => note.content || '').join('\n');
+          const textElementsContent = dialogueTextElements.map(text => text.content || '').join('\n');
+          const combinedDialogueContent = [stickyNotesContent, textElementsContent].filter(Boolean).join('\n\n').trim();
+
+          if (combinedDialogueContent) {
+            // Parse combined content into Thinking and RAG sections
+            const markerIndex = combinedDialogueContent.indexOf(THINKING_MARKER);
+            
+            if (markerIndex !== -1) {
+              ragContextString = combinedDialogueContent.substring(0, markerIndex).trim();
+              thinkingContextString = combinedDialogueContent.substring(markerIndex).trim();
+              Logger.log('AntagoInteract', 'Parsed frame content into Thinking & RAG', { 
+                ragLength: ragContextString.length,
+                thinkingLength: thinkingContextString.length 
+              });
+            } else {
+              // If marker not found, treat all content as RAG
+              ragContextString = combinedDialogueContent;
+              thinkingContextString = ''; // Explicitly empty
+              Logger.log('AntagoInteract', 'No thinking marker found, treating all frame content as RAG', { 
+                ragLength: ragContextString.length 
+              });
+            }
+            // Keep original combined content for potential backward compatibility or simpler logging if needed
+            dialogueContext = combinedDialogueContent; 
           } else {
-            console.log('No thinking dialogue content found in frame');
+            Logger.log('AntagoInteract', 'No thinking dialogue/RAG content found in frame');
           }
         } else {
-          console.log('IMPORTANT: Thinking-Dialogue frame not found. Please create a frame with this exact name.');
+          Logger.warn('AntagoInteract', 'Thinking-Dialogue frame not found');
         }
       } catch (dialogueError) {
-        console.error('Error fetching thinking dialogue:', dialogueError);
-        // Continue without dialogue context if there's an error
+        Logger.error('AntagoInteract', 'Error fetching/parsing thinking dialogue/RAG content', dialogueError);
       }
       
-      // Set useThinkingDialogue to false if no dialogue context was found
-      if (!dialogueContext && useThinkingDialogue) {
-        console.log('Setting useThinkingDialogue to false because no dialogue context was found');
-        setUseThinkingDialogue(false);
+      // Set useThinkingDialogue toggle state to false if no enhanced context was actually found/parsed
+      if (!thinkingContextString && !ragContextString && useThinkingDialogue) {
+        Logger.log('AntagoInteract', 'Setting useThinkingDialogue to false (no enhanced context found)');
+        setUseThinkingDialogue(false); // Turn off toggle if no context to enhance with
       }
-      
-      const combinedMessage = designStickyNotes.map((note, index) => 
-        `Design Decision ${index + 1}: ${note.content || ''}`
-      ).join('\n');
 
-      // Base message with just design decisions
-      const baseMessageWithContext = imageContext 
-        ? `${combinedMessage}\n\nRelevant visual context from design sketches:\n${imageContext}`
-        : combinedMessage;
+      // --- Message Construction --- 
+      const baseMessage = imageContext 
+        ? `${designStickyNotes.map((note, index) => 
+            `Design Decision ${index + 1}: ${note.content || ''}`
+          ).join('\n')}\n\nRelevant visual context from design sketches:\n${imageContext}`
+        : designStickyNotes.map((note, index) => 
+            `Design Decision ${index + 1}: ${note.content || ''}`
+          ).join('\n');
         
-      // Create a thinking dialogue-enhanced message if we have dialogue context
-      const thinkingMessageWithContext = dialogueContext 
-        ? `${baseMessageWithContext}\n\nThinking Dialogue Context:\n${dialogueContext}`
-        : baseMessageWithContext;
+      // Construct the enhanced message with clear labels for the LLM
+      let enhancedContextParts: string[] = [];
+      if (ragContextString) {
+        enhancedContextParts.push(`Relevant Knowledge Context:\n${ragContextString}`);
+      }
+      if (thinkingContextString) {
+        enhancedContextParts.push(`Thinking Process Context:\n${thinkingContextString}`);
+      }
+      
+      const enhancedMessageWithContext = enhancedContextParts.length > 0
+        ? `${baseMessage}\n\n${enhancedContextParts.join('\n\n')}`
+        : baseMessage;
+
+      // Log final message lengths for debugging
+      Logger.log('AntagoInteract', 'Generated message contexts', {
+        baseLength: baseMessage.length,
+        enhancedLength: enhancedMessageWithContext.length,
+        hasDialogue: !!dialogueContext, // Use original combined content flag for simplicity here
+        hasThinkingParsed: !!thinkingContextString,
+        hasRAGParsed: !!ragContextString
+      });
+      
+      // --- End Message Construction ---
       
       // Simply read existing themes from the board and their selection state
       console.log('Reading themes from the board...');
@@ -302,38 +323,30 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             return response;
           };
           
-          // Generate both standard and thinking dialogue enhanced analyses in parallel
+          // Run both standard and thinking dialogue enhanced analyses in parallel
           Logger.log('AntagoInteract', 'Generating analyses');
-          const [standardResponse, thinkingResponse] = await Promise.all([
-            // Standard analysis without thinking dialogue
-            generateAnalysis(baseMessageWithContext, setResponses, setStoredFullResponses),
+          const [standardResponse, enhancedResponse] = await Promise.all([
+            // Standard analysis without thinking dialogue/RAG
+            generateAnalysis(baseMessage, setResponses, setStoredFullResponses),
             
-            // Analysis with thinking dialogue (if dialogue context exists)
-            dialogueContext 
-              ? generateAnalysis(thinkingMessageWithContext, setThinkingResponses, setStoredThinkingFullResponses)
-              : Promise.resolve('')
+            // Analysis enhanced with thinking dialogue/RAG (if context exists)
+            (thinkingContextString || ragContextString) 
+              ? generateAnalysis(enhancedMessageWithContext, setThinkingResponses, setStoredThinkingFullResponses)
+              : Promise.resolve('') // Resolve with empty if no enhanced context
           ]);
           
           Logger.log('AntagoInteract', 'Analysis generation complete', {
             standardLength: standardResponse?.length || 0,
-            thinkingLength: thinkingResponse?.length || 0,
-            hasThinkingResults: !!thinkingResponse
+            enhancedLength: enhancedResponse?.length || 0,
+            hasEnhancedResults: !!enhancedResponse
           });
-          
-          // Update UI with appropriate response based on current toggle state
-          const currentResponse = useThinkingDialogue && thinkingResponse 
-            ? thinkingResponse 
-            : standardResponse;
-            
-          const splitResponses = splitResponse(currentResponse);
-          onResponsesUpdate?.(splitResponses);
-          
+
           // Update the hasThinkingResults state indirectly by populating the thinkingResponses array
-          if (dialogueContext && thinkingResponse) {
-            console.log('Setting thinking responses to enable toggle');
-            setThinkingResponses([thinkingResponse]);
+          if (enhancedResponse) {
+            Logger.log('AntagoInteract', 'Setting thinking/enhanced responses to enable toggle');
+            setThinkingResponses([enhancedResponse]); // Store enhanced results here
           } else {
-            console.log('No thinking dialogue content was found or processed');
+            Logger.log('AntagoInteract', 'No enhanced context was found or processed');
           }
           
           // Save to Firebase in the background
@@ -350,9 +363,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               tone: selectedTone || 'normal',
               consensusPoints: consensusPoints,
               hasThinkingDialogue: useThinkingDialogue,
-              ...(useThinkingDialogue && thinkingResponse ? {
+              ...(useThinkingDialogue && enhancedResponse ? {
                 thinkingAnalysis: {
-                  full: splitResponse(thinkingResponse),
+                  full: splitResponse(enhancedResponse),
                   simplified: []
                 }
               } : {})
@@ -471,44 +484,45 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       };
 
       // Run both standard and thinking dialogue enhanced analyses in parallel
-      Logger.log('AntagoInteract', 'Generating analyses');
-      const [standardResults, thinkingResults] = await Promise.all([
-        // Standard themed analysis without thinking dialogue
+      Logger.log('AntagoInteract', 'Generating themed analyses');
+      const [standardResults, enhancedResults] = await Promise.all([
+        // Standard themed analysis without thinking dialogue/RAG
         generateThemedAnalysis(
-          baseMessageWithContext, 
+          baseMessage, 
           setResponses, 
           setThemedResponses, 
           setStoredFullResponses
         ),
         
-        // Themed analysis with thinking dialogue (if dialogue context exists)
-        dialogueContext 
+        // Themed analysis enhanced with thinking dialogue/RAG (if context exists)
+        (thinkingContextString || ragContextString) 
           ? generateThemedAnalysis(
-              thinkingMessageWithContext,
-              setThinkingResponses,
+              enhancedMessageWithContext,
+              setThinkingResponses, // Still use thinking state vars for enhanced results
               setThinkingThemedResponses,
               setStoredThinkingFullResponses
             )
-          : Promise.resolve({ themedResponsesData: [], response: '' })
+          : Promise.resolve({ themedResponsesData: [], response: '' }) // Resolve with empty if no enhanced context
       ]);
       
       Logger.log('AntagoInteract', 'Themed analysis generation complete', {
         standardLength: standardResults.response?.length || 0,
-        thinkingLength: thinkingResults.response?.length || 0,
-        hasThinkingResults: !!thinkingResults.response
+        enhancedLength: enhancedResults.response?.length || 0,
+        hasEnhancedResults: !!enhancedResults.response
       });
       
       // Update the hasThinkingResults state indirectly by populating the thinkingResponses array
-      if (dialogueContext && thinkingResults && thinkingResults.response) {
-        console.log('Setting thinking responses to enable toggle');
-        setThinkingResponses([thinkingResults.response]);
+      if (enhancedResults && enhancedResults.response) {
+        Logger.log('AntagoInteract', 'Setting thinking/enhanced responses to enable toggle (themed)');
+        setThinkingResponses([enhancedResults.response]); // Store enhanced standard response
+        setThinkingThemedResponses(enhancedResults.themedResponsesData); // Store enhanced themed responses
       } else {
-        console.log('No thinking dialogue content was found or processed for themed generation');
+        Logger.log('AntagoInteract', 'No enhanced context was found or processed for themed generation');
       }
       
       // Use the appropriate results based on current toggle state
-      const currentResults = useThinkingDialogue && thinkingResults.response 
-        ? thinkingResults 
+      const currentResults = useThinkingDialogue && enhancedResults.response 
+        ? enhancedResults 
         : standardResults;
       
       // Create a combined list of all points for backward compatibility
@@ -542,10 +556,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             },
             tone: selectedTone || 'normal',
             consensusPoints: consensusPoints,
-            hasThinkingDialogue: useThinkingDialogue && dialogueContext && thinkingResults.response ? true : false,
-            ...(dialogueContext && thinkingResults && thinkingResults.response ? {
+            hasThinkingDialogue: useThinkingDialogue && dialogueContext && enhancedResults.response ? true : false,
+            ...(dialogueContext && enhancedResults && enhancedResults.response ? {
               thinkingAnalysis: {
-                full: useThemedDisplay ? thinkingResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(thinkingResults.response),
+                full: useThemedDisplay ? enhancedResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(enhancedResults.response),
                 simplified: []
               }
             } : {})
@@ -589,8 +603,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             // Simplify both standard and thinking analyses if needed
             const [simplified, thinkingSimplified] = await Promise.all([
               OpenAIService.simplifyAnalysis(standardResults.response),
-              dialogueContext && thinkingResults && thinkingResults.response 
-                ? OpenAIService.simplifyAnalysis(thinkingResults.response) 
+              dialogueContext && enhancedResults && enhancedResults.response 
+                ? OpenAIService.simplifyAnalysis(enhancedResults.response) 
                 : Promise.resolve('')
             ]);
             

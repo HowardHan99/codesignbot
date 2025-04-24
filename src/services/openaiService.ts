@@ -174,19 +174,19 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
       ? `\n\nConsensus points that you should defintely follow:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
       : '';
 
-    const systemPrompt = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 10 provacative questions that identify potential problems or conflicts in these decisions. The provacative questions should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design decisions.
+    const systemPrompt = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative questions that identify potential problems or conflicts in these decisions. The provacative questions should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design decisions.
 
 Rules:
 1. NEVER question or criticize the consensus points ${consensusPointsText} - these are established agreements that must be respected
 2. Focus on potential problems, conflicts, or negative consequences
-3. Always provide EXACTLY 10 points, no more, no less
+3. Always provide EXACTLY 5 points, no more, no less
 4. Each point should be a complete, self-contained criticism
 5. Keep each point focused on a single issue
-6. CRITICALLY IMPORTANT: Format your response as 10 distinct points separated by double asterisks " ** "
+6. CRITICALLY IMPORTANT: Format your response as 5 distinct points separated by double asterisks " ** "
 7. Each point should be shorter than 300 characters
 
-Format example (10 points exactly):
-1. First problem: The design lacks consideration for accessibility, potentially excluding users with disabilities. ** 2. Second problem: The color scheme might cause readability issues in different lighting conditions. ** 3. Third problem: The login flow requires too many steps, increasing user frustration. ** 4. Fourth problem: [etc...] ** 5. Fifth problem: [etc...] ** 6. Sixth problem: [etc...] ** 7. Seventh problem: [etc...] ** 8. Eighth problem: [etc...] ** 9. Ninth problem: [etc...] ** 10. Tenth problem: [etc...]
+Format example (5 points exactly):
+1. First problem: The design lacks consideration for accessibility, potentially excluding users with disabilities. ** 2. Second problem: The color scheme might cause readability issues in different lighting conditions. ** 3. Third problem: The login flow requires too many steps, increasing user frustration. ** 4. Fourth problem: [etc...] ** 5. Fifth problem: [etc...] 
 
 The numbers are optional but the " ** " separators are REQUIRED. Do not include any other text before or after the 10 points. Each point must be a complete, standalone criticism.`;
 
@@ -241,7 +241,7 @@ Review these criticism points and:
    - Are unique from other selected points
 4. If any points are longer than 300 characters, simplify them to be 300 characters or less.
 
-Return exactly 10 final points separated by ** **.`;
+Return exactly 5 final points separated by ** **.`;
 
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt: points.join('\n'),

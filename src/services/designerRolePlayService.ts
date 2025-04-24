@@ -33,7 +33,7 @@ export class DesignerRolePlayService {
    * Toggle to enable or disable sketch generation using DALL-E 3
    * Set to false to turn off automatic sketch generation with designer role play
    */
-  public static enableSketchGeneration: boolean = false;
+  public static enableSketchGeneration: boolean = true;
   
   /**
    * Makes a request to the OpenAI API endpoint for designer role play
