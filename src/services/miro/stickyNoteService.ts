@@ -17,7 +17,7 @@ type ColorCategory = 'highRelevance' | 'mediumRelevance' | 'lowRelevance';
  */
 export class StickyNoteService {
   // Configurable character limit for sticky notes
-  private static STICKY_CHAR_LIMIT = 250; // Increased from 80 to 250
+  private static STICKY_CHAR_LIMIT = 300; // Increased from 80 to 250
 
   /**
    * Set the sticky note character limit
@@ -85,13 +85,14 @@ export class StickyNoteService {
   }
 
   /**
-   * Create sticky notes for long content that exceeds Miro's character limit
-   * @param frame The frame to place the sticky notes in
-   * @param content The full content to split into multiple sticky notes
-   * @param baseX Base X coordinate for the first sticky
-   * @param baseY Base Y coordinate for the first sticky
+   * Create multiple sticky notes for content that exceeds character limit
+   * @param frame The frame to add sticky notes to
+   * @param content The content to split
+   * @param baseX Base X position
+   * @param baseY Base Y position
    * @param color The color to use for all sticky notes
    * @param width Width for the sticky notes
+   * @param shape The shape to use for the sticky notes
    * @private
    * @returns Object containing created stickies array and the number of row spaces consumed
    */
@@ -101,115 +102,71 @@ export class StickyNoteService {
     baseX: number,
     baseY: number,
     color: string,
-    width: number
+    width: number,
+    shape: 'square' | 'rectangle' = 'square'
   ): Promise<{stickies: any[], rowSpacesUsed: number}> {
     // CONFIGURABLE: Adjust this value to control spacing between connected sticky notes
-    const VERTICAL_GAP = 200; // Increased from 40 to 200 pixels for much better vertical separation
-    // Add horizontal offset for connected stickies to improve readability
-    const HORIZONTAL_OFFSET = 40; // Slight right shift for each connected note
+    const CONNECTED_STICKY_SPACING = 50;  // Space between connected stickies
     
     // Split the content into chunks that fit within the character limit
     const chunks = this.splitContentIntoChunks(content, this.STICKY_CHAR_LIMIT);
     
-    const createdStickies: any[] = [];
-    let previousSticky = null;
+    // Create an array to hold the created sticky notes
+    const stickies: any[] = [];
     
-    // Create sticky notes for each chunk
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      // No longer adding numbering for multiple chunks
-      const displayContent = chunk;
-      
-      // Calculate position - stack vertically with increasing Y offset
-      // Add horizontal offset to improve visual separation
-      const yOffset = i * (VERTICAL_GAP + 60); // Increased vertical space
-      const xOffset = i * HORIZONTAL_OFFSET; // New: Add slight horizontal offset for each connected note
-      
-      try {
-        // For linked stickies, use slightly different shade to visually distinguish parts
-        // Darken the color slightly for each subsequent sticky note
-        let adjustedColor = color;
-        if (i > 0 && color.startsWith('#')) {
-          // Simple color adjustment - make subsequent stickies slightly darker
-          try {
-            const colorValue = parseInt(color.slice(1), 16);
-            const darkenAmount = Math.min(i * 5, 20); // Limit darkening
-            const adjustedValue = Math.max(0, colorValue - darkenAmount * 65536 - darkenAmount * 256 - darkenAmount);
-            adjustedColor = '#' + adjustedValue.toString(16).padStart(6, '0');
-          } catch (e) {
-            // If color manipulation fails, use original color
-            adjustedColor = color;
-          }
+    // Adjust the first sticky color to show it's the primary content
+    // Others will have a slightly lighter color to show connection
+    const adjustedColor = color; // Keep the original color for the first sticky
+    
+    try {
+      // Create sticky notes for each chunk
+      for (let i = 0; i < chunks.length; i++) {
+        // Calculate offset from the base position for each sticky
+        // This will create a vertical arrangement with equal spacing
+        const yOffset = i * CONNECTED_STICKY_SPACING;
+        
+        // Append continuation marker if this is not the first chunk
+        let chunkContent = chunks[i];
+        if (i > 0) {
+          chunkContent = `(continued) ${chunkContent}`;
         }
         
+        // Create the sticky note
         const sticky = await MiroApiClient.createStickyNote({
-          content: displayContent,
-          x: baseX + xOffset, // Add horizontal offset for connected notes
+          content: chunkContent,
+          x: baseX,
           y: baseY + yOffset,
           width: width,
+          shape: shape,
           style: {
             fillColor: adjustedColor
           }
         });
         
+        // Add to our array
         if (sticky) {
-          createdStickies.push(sticky);
-          
-          // Connect with previous sticky if this isn't the first one
-          if (previousSticky && i > 0) {
-            try {
-              // CONFIGURABLE: You can customize the connector style here
-              await miro.board.createConnector({
-                start: {
-                  item: previousSticky.id,
-                  position: { x: 0.5, y: 1 } // Bottom of previous sticky
-                },
-                end: {
-                  item: sticky.id,
-                  position: { x: 0.5, y: 0 } // Top of current sticky
-                },
-                style: {
-                  strokeColor: '#4262ff', // CONFIGURABLE: Connector color
-                  strokeWidth: 1,         // CONFIGURABLE: Connector width
-                  strokeStyle: 'dashed'   // CONFIGURABLE: Connector style ('straight', 'dashed', etc)
-                }
-              });
-            } catch (connError) {
-              console.error('Error creating connector between sticky notes:', connError);
-            }
-          }
-          
-          previousSticky = sticky;
-          
-          // Add a small delay between sticky note creations
-          await new Promise(resolve => setTimeout(resolve, 100));
+          stickies.push(sticky);
         }
-      } catch (error) {
-        console.error(`Error creating sticky note for chunk ${i+1}:`, error);
+        
+        // Short delay between sticky creation to avoid rate limiting
+        await delay(50);
       }
+      
+      // Create connecting lines between the sticky notes
+      // Skip this step for now as it requires more specific consideration...
+      
+      // Return the array of created stickies and the number of row spaces used
+      return {
+        stickies: stickies,
+        rowSpacesUsed: chunks.length  // Each chunk takes up one row space
+      };
+    } catch (error) {
+      console.error('Error creating multiple sticky notes:', error);
+      return {
+        stickies: stickies,
+        rowSpacesUsed: stickies.length || 1  // Use the actual count or minimum 1
+      };
     }
-    
-    // Calculate how many row spaces this series of connected notes consumes
-    // This is based on the total vertical height used divided by standard row height
-    const stickyConfig = ConfigurationService.getStickyConfig();
-    const standardRowHeight = stickyConfig.dimensions.height + stickyConfig.dimensions.spacing;
-    
-    // For empty chunks (shouldn't happen), return 1 to avoid division by zero
-    if (chunks.length === 0) {
-      return { stickies: createdStickies, rowSpacesUsed: 1 };
-    }
-    
-    // Calculate total vertical space used by the connected notes
-    const totalVerticalSpace = (chunks.length - 1) * (VERTICAL_GAP + 60) + 60;
-    
-    // Calculate how many standard rows this would occupy (round up)
-    const rowSpacesUsed = Math.ceil(totalVerticalSpace / standardRowHeight);
-    
-    // Return at least 1 row space, or more if needed
-    return { 
-      stickies: createdStickies, 
-      rowSpacesUsed: Math.max(1, rowSpacesUsed)
-    };
   }
 
   /**
@@ -263,8 +220,27 @@ export class StickyNoteService {
       
       Logger.log('STICKY-POS', `Calculated position: X=${position.x.toFixed(0)}, Y=${position.y.toFixed(0)}`);
       
-      // Get sticky dimensions from config
-      const { width, height } = ConfigurationService.getStickyConfig().dimensions;
+      // Get sticky dimensions and shape from config
+      const stickyConfig = ConfigurationService.getStickyConfig();
+      let width = stickyConfig.dimensions.width;
+      let height = stickyConfig.dimensions.height;
+      let shape: 'square' | 'rectangle' = 'square'; // Default shape
+      
+      // Check if there are frame-specific overrides for sticky shape and dimensions
+      if (stickyConfig.shapes && stickyConfig.shapes.frameOverrides) {
+        // Type guard to check if frameName exists in frameOverrides
+        const frameOverrides = stickyConfig.shapes.frameOverrides as Record<string, any>;
+        if (frameOverrides[frameName]) {
+          const override = frameOverrides[frameName];
+          if (override.shape) shape = override.shape as 'square' | 'rectangle';
+          if (override.width) width = override.width;
+          if (override.height) height = override.height;
+          
+          Logger.log('STICKY-POS', `Using frame-specific sticky configuration: shape=${shape}, width=${width}, height=${height}`);
+        }
+      } else if (stickyConfig.shapes && stickyConfig.shapes.default) {
+        shape = stickyConfig.shapes.default as 'square' | 'rectangle';
+      }
       
       // =========================================================================
       // IMPORTANT: Sticky Note Positioning for Frame Assignment
@@ -321,7 +297,8 @@ export class StickyNoteService {
           adjustedX,
           adjustedY,
           color,
-          width
+          width,
+          shape
         );
         
         // Return the first sticky from the set
@@ -336,6 +313,7 @@ export class StickyNoteService {
           x: adjustedX,
           y: adjustedY,
           width: width,
+          shape: shape,
           style: {
             fillColor: color
           }
@@ -742,7 +720,22 @@ export class StickyNoteService {
     totalSoFar: number
   ): { x: number, y: number } {
     const stickyConfig = ConfigurationService.getStickyConfig();
-    const { width: STICKY_WIDTH, height: STICKY_HEIGHT, spacing: SPACING } = stickyConfig.dimensions;
+    
+    // Check for frame-specific sticky dimensions
+    let width = stickyConfig.dimensions.width;
+    let height = stickyConfig.dimensions.height;
+    
+    // Check if there are frame-specific overrides for sticky dimensions
+    if (stickyConfig.shapes && stickyConfig.shapes.frameOverrides) {
+      const frameOverrides = stickyConfig.shapes.frameOverrides as Record<string, any>;
+      if (frameOverrides[frame.title]) {
+        const override = frameOverrides[frame.title];
+        if (override.width) width = override.width;
+        if (override.height) height = override.height;
+      }
+    }
+    
+    const SPACING = stickyConfig.dimensions.spacing;
     
     // Frame dimensions
     const frameLeft = frame.x - frame.width/2;
@@ -756,10 +749,10 @@ export class StickyNoteService {
     const effectiveHeight = frameHeight - (margin * 2);
     
     // Always ensure at least 2 columns for better space usage
-    const maxColumns = Math.max(2, Math.floor(effectiveWidth / (STICKY_WIDTH + SPACING)));
+    const maxColumns = Math.max(2, Math.floor(effectiveWidth / (width + SPACING)));
     
     // Use consistent row height with adequate spacing
-    const rowSpacing = STICKY_HEIGHT + SPACING;
+    const rowSpacing = height + SPACING;
     const itemsPerColumn = Math.max(6, Math.floor(effectiveHeight / rowSpacing));
     
     // Calculate column and row based on total stickies so far
@@ -768,10 +761,10 @@ export class StickyNoteService {
     
     // Calculate position with evenly distributed columns
     const columnWidth = effectiveWidth / maxColumns;
-    const columnCenter = frameLeft + margin + (STICKY_WIDTH / 2) + (column * columnWidth);
+    const columnCenter = frameLeft + margin + (width / 2) + (column * columnWidth);
     
     // Calculate Y position with consistent spacing
-    const y = frameTop + margin + (STICKY_HEIGHT / 2) + (row * rowSpacing);
+    const y = frameTop + margin + (height / 2) + (row * rowSpacing);
     
     // Handle overflow case when we exceed the maxColumns
     if (Math.floor(totalSoFar / itemsPerColumn) >= maxColumns) {

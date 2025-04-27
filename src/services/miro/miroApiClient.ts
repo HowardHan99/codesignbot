@@ -134,12 +134,14 @@ export class MiroApiClient {
     x: number;
     y: number;
     width?: number;
+    shape?: 'square' | 'rectangle';
     style?: any;
   }): Promise<any | null> {
     console.log(`[DEBUG] MiroApiClient.createStickyNote called with:
     content: ${stickyConfig.content.substring(0, 50)}...
     position: x=${stickyConfig.x}, y=${stickyConfig.y}
     width: ${stickyConfig.width}
+    shape: ${stickyConfig.shape || 'square'}
     style: ${JSON.stringify(stickyConfig.style)}`);
     
     return await this.call<any>(

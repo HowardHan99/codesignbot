@@ -38,6 +38,17 @@ export const stickyConfig = {
     topMargin: 100,
     leftMargin: 100
   },
+  shapes: {
+    // Default shape for sticky notes
+    default: 'square',
+    // Override for specific frames
+    frameOverrides: {
+      'Design-Proposal': {
+        shape: 'rectangle',
+        width: 800,
+      }
+    }
+  },
   colors: {
     decision: {
       highRelevance: 'light_yellow',

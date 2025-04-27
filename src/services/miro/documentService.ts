@@ -327,7 +327,7 @@ export class DocumentService {
       // Check for section headers we added in the service
       if (trimmedItem.startsWith('## 🧠')) {
         currentSection = 'thinking';
-        lines.push('## Thinking Process'); // Clean header
+        lines.push('## Thinking Process (High-Level Themes)'); // Updated header to indicate themes
         lines.push('');
       } else if (trimmedItem.startsWith('## 💡')) {
         currentSection = 'proposals';
@@ -336,8 +336,16 @@ export class DocumentService {
       } else if (trimmedItem === '---') {
         lines.push(''); // Add spacing for separator
       } else if (trimmedItem.length > 0) {
-        // Add item with basic formatting (e.g., bullet point)
-        lines.push(`• ${trimmedItem}`); 
+        if (currentSection === 'thinking') {
+          // In simplified mode, each item is a theme
+          lines.push(`• ${trimmedItem}`);
+        } else if (currentSection === 'proposals') {
+          // For proposals, keep them as is
+          lines.push(`• ${trimmedItem}`); 
+        } else {
+          // Default formatting for any other content
+          lines.push(`• ${trimmedItem}`);
+        }
       }
     });
     
@@ -556,7 +564,7 @@ export class DocumentService {
       // Check for main section headers first
       if (trimmedItem.startsWith('## 🧠')) {
         currentSection = 'thinking';
-        htmlBody += `<h2>${trimmedItem.replace('## ', '')}</h2>\n<div class="section-content thinking-step">`; // Start thinking section div
+        htmlBody += `<h2>${trimmedItem.replace('## ', '')}</h2>\n<div class="section-content thinking-themes">`; // Start thinking section div
       } else if (trimmedItem.startsWith('## 💡')) {
         if (currentSection === 'thinking') htmlBody += `</div>`; // Close previous section div
         currentSection = 'proposals';
@@ -565,38 +573,8 @@ export class DocumentService {
         htmlBody += `<hr>`;
       } else if (trimmedItem.length > 0) {
         if (currentSection === 'thinking') {
-          // Check if this is a section theme (headers for grouping content)
-          const isSectionTheme = 
-              trimmedItem.startsWith('#') || 
-              trimmedItem.includes('**') || 
-              trimmedItem.match(/^\|.*\|$/) ||
-              trimmedItem.match(/^[A-Z][A-Za-z\s]+:/) ||
-              trimmedItem.match(/^([A-Z][A-Z\s]{2,}|User Needs|Location and Context|Technical|Wellness|Interdisciplinary|CMU|Study|Analyze|Benchmark|Consult)/i) ||
-              (trimmedItem.includes(':') && !trimmedItem.match(/^[-•*]\s/)); // Has colon but isn't a bullet point
-          
-          if (isSectionTheme) {
-            // This is a section theme/header - format it as a theme header
-            currentTheme = trimmedItem
-              .replace(/^\||\|$/g, '') // Remove vertical bars
-              .replace(/\*\*/g, '')    // Remove bold markers
-              .replace(/^#+\s*/, '')   // Remove markdown heading markers
-              .trim();
-              
-            htmlBody += `<div class="theme-section">
-                          <div class="theme-header">${currentTheme}</div>
-                        </div>`;
-          } else {
-            // For regular content items
-            const plainText = trimmedItem
-              .replace(/^[-•*]\s*/, '')  // Remove bullet markers
-              .replace(/^(\d+)\.\s*/, '') // Remove numbered list markers
-              .trim();
-            
-            // Skip if the plainText is empty or too short after cleanup
-            if (plainText.length > 1) {
-              htmlBody += `<div class="content-item">${plainText}</div>`;
-            }
-          }
+          // In simplified mode, all items in thinking section are themes
+          htmlBody += `<div class="theme-bubble">${trimmedItem}</div>`;
         } else if (currentSection === 'proposals') {
           // Format proposals (e.g., as distinct blocks)
           htmlBody += `<div class="proposal">${trimmedItem.replace(/\n/g, '<br>')}</div>`;
@@ -618,9 +596,17 @@ export class DocumentService {
         h1 { color: #2c3e50; font-size: 28px; margin-bottom: 15px; }
         h2 { color: #3498db; font-size: 22px; margin-top: 25px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
         .section-content { background-color: #ffffff; padding: 12px 15px; margin: 12px 0; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
-        .theme-section { margin: 20px 0 5px 0; }
-        .theme-header { font-weight: bold; color: #2980b9; font-size: 1.05em; border-left: 3px solid #3498db; padding-left: 8px; margin-bottom: 6px; }
-        .content-item { margin: 3px 0 3px 15px; padding: 0; font-size: 0.96em; color: #333; line-height: 1.4; }
+        .thinking-themes { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px; }
+        .theme-bubble { 
+          background-color: #e8f4fc; 
+          color: #2980b9; 
+          border-radius: 20px; 
+          padding: 8px 15px; 
+          margin: 5px 0; 
+          display: inline-block;
+          font-size: 0.95em;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
         .proposal-item .proposal { margin-bottom: 15px; padding: 10px; background-color: #fdf9e8; border-left: 3px solid #f1c40f; border-radius: 4px; }
         hr { border: none; border-top: 1px solid #eee; margin: 15px 0; }
       </style>

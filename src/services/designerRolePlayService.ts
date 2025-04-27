@@ -33,7 +33,7 @@ export class DesignerRolePlayService {
    * Toggle to enable or disable sketch generation using DALL-E 3
    * Set to false to turn off automatic sketch generation with designer role play
    */
-  public static enableSketchGeneration: boolean = true;
+  public static enableSketchGeneration: boolean = false;
   
   /**
    * Makes a request to the OpenAI API endpoint for designer role play
@@ -115,11 +115,14 @@ export class DesignerRolePlayService {
     try {
       console.log(`Creating designer thinking/proposals document with ${thoughts.length} steps and ${proposals.length} proposals`);
       
-      // Combine thoughts and proposals into a single structure for the document service
+      // Extract high-level themes from the detailed thoughts
+      const themeHeadings = this.extractHighLevelThemes(thoughts);
+      
+      // Combine themes and proposals into a simplified structure for the document service
       const combinedContent = [
         // Add a clear separator or header for thoughts
         '## 🧠 Designer Thinking Process',
-        ...thoughts,
+        ...themeHeadings,
         '\n---\n', // Separator
         // Add a clear separator or header for proposals
         '## 💡 Brainstorming Proposals',
@@ -143,7 +146,8 @@ export class DesignerRolePlayService {
       // Fallback: Try creating separate documents if combined fails (less ideal)
       console.log('Falling back to separate document creation attempts');
       try {
-        await DocumentService.createThinkingProcessDocument(this.THINKING_FRAME_NAME, thoughts, { width: 600 });
+        // Use themes for the thinking process instead of full details
+        await DocumentService.createThinkingProcessDocument(this.THINKING_FRAME_NAME, this.extractHighLevelThemes(thoughts), { width: 600 });
         if (proposals.length > 0) {
           // Attempt to use the brainstorming doc function, targeting the same frame
           await DocumentService.createBrainstormingProposalsDocument(this.THINKING_FRAME_NAME, proposals, { width: 600 });
@@ -154,6 +158,51 @@ export class DesignerRolePlayService {
          throw error;
       }
     }
+  }
+
+  /**
+   * Extracts high-level themes from the detailed thinking process
+   * @param thoughts The detailed thinking process
+   * @returns Array of high-level themes
+   */
+  private static extractHighLevelThemes(thoughts: string[]): string[] {
+    const themes: string[] = [];
+    let currentTheme = '';
+
+    thoughts.forEach(thought => {
+      const trimmedThought = thought.trim();
+      
+      // Look for lines that might represent themes/headers
+      const isTheme = 
+        trimmedThought.startsWith('#') || 
+        trimmedThought.includes('**') || 
+        trimmedThought.match(/^\|.*\|$/) ||
+        trimmedThought.match(/^[A-Z][A-Za-z\s]+:/) ||
+        trimmedThought.match(/^([A-Z][A-Z\s]{2,}|User Needs|Location and Context|Technical|Wellness|Interdisciplinary|CMU|Study|Analyze|Benchmark|Consult)/i) ||
+        (trimmedThought.includes(':') && !trimmedThought.match(/^[-•*]\s/)); // Has colon but isn't a bullet point
+
+      if (isTheme) {
+        // Process the theme text to clean it up
+        currentTheme = trimmedThought
+          .replace(/^\||\|$/g, '') // Remove vertical bars
+          .replace(/\*\*/g, '')    // Remove bold markers
+          .replace(/^#+\s*/, '')   // Remove markdown heading markers
+          .trim();
+          
+        themes.push(currentTheme);
+      }
+    });
+
+    // If no themes were found, create some generic themes based on the thinking process
+    if (themes.length === 0) {
+      // Create simple phase-based themes
+      themes.push('Problem Analysis');
+      themes.push('Research & Exploration');
+      themes.push('Design Considerations');
+      themes.push('Solution Development');
+    }
+
+    return themes;
   }
 
   /**
