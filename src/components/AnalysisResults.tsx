@@ -239,17 +239,16 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
           themedResponses={themedResponses}
           useThemedDisplay={useThemedDisplay}
         />
-        {/* Clean Analysis functionality is maintained in code but button is hidden from UI */}
-        {/* 
+        {/* Clean Analysis button */}
         <button
           type="button"
           onClick={onCleanAnalysis}
           className="button button-secondary"
+          style={{ backgroundColor: '#f0f0f0', borderColor: '#cccccc', color: '#333333' }}
           disabled={isChangingTone}
         >
           Clean Analysis Board
         </button>
-        */}
       </div>
     </>
   );

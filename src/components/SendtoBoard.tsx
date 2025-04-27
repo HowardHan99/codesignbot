@@ -39,9 +39,6 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({
           return;
         }
         
-        // First, clean existing stickies from the frame
-        await MiroApiClient.deleteItemsInFrame(frame.id, ['sticky_note']);
-        
         // Get theme positions from DesignThemeService
         const themePositions = DesignThemeService.getThemePositions();
         
@@ -164,12 +161,6 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({
           category: 'response'  // Mark as response category
         }));
         
-        // Clear existing sticky notes in the frame
-        const frame = await StickyNoteService.ensureFrameExists(FRAME_TITLE);
-        if (frame) {
-          await MiroApiClient.deleteItemsInFrame(frame.id, ['sticky_note']);
-        }
-        
         // Use the unified method to create sticky notes
         await StickyNoteService.createStickyNotesFromPoints(
           FRAME_TITLE,
@@ -178,6 +169,7 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({
         );
         
         // Get the frame to zoom to it
+        const frame = await StickyNoteService.ensureFrameExists(FRAME_TITLE);
         if (frame) {
           await miro.board.viewport.zoomTo(frame);
         }

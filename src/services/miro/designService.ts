@@ -1,6 +1,7 @@
 import { MiroFrameService } from './frameService';
 import { StickyNote, Connector, Frame } from '@mirohq/websdk-types';
 import BoardTokenManager from '../../utils/boardTokenManager';
+import { MiroApiClient } from './miroApiClient';
 
 const MIRO_API_URL = 'https://api.miro.com/v2';
 
@@ -103,8 +104,7 @@ export class MiroDesignService {
   }
 
   /**
-   * Previously cleaned the Antagonistic-Response frame by removing sticky notes
-   * Now disabled to prevent accidental deletion of user content
+   * Cleans the Antagonistic-Response frame by removing all sticky notes
    */
   public static async cleanAnalysisBoard(): Promise<void> {
     try {
@@ -117,14 +117,18 @@ export class MiroDesignService {
         return;
       }
 
-      // Get all sticky notes and filter by parentId to count them
+      // Get all sticky notes and filter by parentId
       const allStickies = await miro.board.get({ type: 'sticky_note' });
       const frameStickies = allStickies.filter(sticky => sticky.parentId === responseFrame.id);
       
-      // DISABLED: Removal of sticky notes to prevent accidental deletion
-      // For backward compatibility, we'll just log what would have been deleted
-      console.log(`SAFETY: Skipped removal of ${frameStickies.length} sticky notes from Antagonistic-Response frame`);
-      console.log(`Sticky note deletion has been disabled to preserve user content`);
+      // Delete all sticky notes in the frame
+      console.log(`Removing ${frameStickies.length} sticky notes from Antagonistic-Response frame`);
+      
+      // Delete items using Miro API
+      if (frameStickies.length > 0) {
+        await MiroApiClient.deleteItemsInFrame(responseFrame.id, ['sticky_note']);
+        console.log(`Successfully removed ${frameStickies.length} sticky notes`);
+      }
       
     } catch (error) {
       console.error('Error in cleanAnalysisBoard:', error);
@@ -193,7 +197,7 @@ export class MiroDesignService {
         const connector = event.connector;
         
         // Make sure the connector has the expected structure
-        // This matches gpt-4othe SDK structure, not our MiroConnector interface
+        // This matches the SDK structure, not our MiroConnector interface
         if (!connector.start?.item || !connector.end?.item) return;
         
         // Get the connected items
