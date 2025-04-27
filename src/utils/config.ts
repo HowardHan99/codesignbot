@@ -38,6 +38,7 @@ export const stickyConfig = {
     topMargin: 100,
     leftMargin: 100
   },
+  // Sticky note shapes for specific frames, default is square, override for specific frames, change the width and height of the sticky note
   shapes: {
     // Default shape for sticky notes
     default: 'square',
@@ -45,7 +46,13 @@ export const stickyConfig = {
     frameOverrides: {
       'Design-Proposal': {
         shape: 'rectangle',
-        width: 800,
+        width: 500,
+        height: 250
+      },
+      'Antagonistic-Response': {
+        shape: 'rectangle',
+        width: 500,
+        height: 250
       }
     }
   },
