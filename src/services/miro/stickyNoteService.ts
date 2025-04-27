@@ -17,7 +17,9 @@ type ColorCategory = 'highRelevance' | 'mediumRelevance' | 'lowRelevance';
  */
 export class StickyNoteService {
   // Configurable character limit for sticky notes
-  private static STICKY_CHAR_LIMIT = 300; // Increased from 80 to 250
+  private static STICKY_CHAR_LIMIT = 300; // Increased from 80 to 25\
+  // Configurable reserved space for sticky notes
+  public static RESERVED_SPACE = 400;
 
   /**
    * Set the sticky note character limit
@@ -416,8 +418,8 @@ export class StickyNoteService {
     // Calculate the base x position for this score's section - start at left edge + minimum margin
     const sectionBaseX = frameLeft + minimumMargin + (sectionIndex * sectionWidth) + (STICKY_WIDTH / 2);
     
-    // Start very close to the top edge
-    const topStart = frameTop + minimumMargin;
+    // Reserve 400px space at the top for other content
+    const topStart = frameTop + this.RESERVED_SPACE;
     
     // Calculate initial position with adjusted spacing
     let x = sectionBaseX + (col * (STICKY_WIDTH + effectiveHorizontalSpacing));
@@ -429,7 +431,7 @@ export class StickyNoteService {
     
     // SIMPLIFIED BOTTOM BOUND:
     // Leave space for exactly one sticky note's height from the bottom
-    const bottomBound = frameTop + frameHeight - STICKY_HEIGHT - 5; // Allow very close to the bottom - just 5px margin
+    const bottomBound = frameTop + frameHeight - STICKY_HEIGHT - 5;
     
     // Handle overflow with priority on using all available space
     if (x > rightBound) {
@@ -459,14 +461,13 @@ export class StickyNoteService {
     if (y > bottomBound) {
       // First try a new column in the same section
       x += STICKY_WIDTH + effectiveHorizontalSpacing;
-      y = topStart; // Reset to the top
+      y = topStart; // Reset to the top (after the 400px space)
       
       // If that would overflow the right edge...
       if (x > rightBound) {
         // Start from the far left edge but position closer to the bottom
         x = frameLeft + minimumMargin + (STICKY_WIDTH / 2);
         // Position at 80% of frame height to use the bottom space effectively
-        //THIS IS THE KEY LINE THAT CHANGES THE BOTTOM BOUND
         y = frameTop + (frameHeight * 0.9);
       }
     }
@@ -475,7 +476,7 @@ export class StickyNoteService {
     // This is just to prevent overlap with frame borders
     const safetyMargin = 5; // Absolute minimum safety margin 
     x = Math.max(frameLeft + (STICKY_WIDTH/2) + safetyMargin, Math.min(frameLeft + frameWidth - (STICKY_WIDTH/2) - safetyMargin, x));
-    y = Math.max(frameTop + (STICKY_HEIGHT/2) + safetyMargin, Math.min(frameTop + frameHeight - (STICKY_HEIGHT/2) - safetyMargin, y));
+    y = Math.max(frameTop + (STICKY_HEIGHT/2) + this.RESERVED_SPACE, Math.min(frameTop + frameHeight - (STICKY_HEIGHT/2) - safetyMargin, y));
     
     return { x, y };
   }
@@ -763,8 +764,9 @@ export class StickyNoteService {
     const columnWidth = effectiveWidth / maxColumns;
     const columnCenter = frameLeft + margin + (width / 2) + (column * columnWidth);
     
-    // Calculate Y position with consistent spacing
-    const y = frameTop + margin + (height / 2) + (row * rowSpacing);
+    // Reserve 400px space at the top for other content
+    // Calculate Y position with consistent spacing starting 400px from the top
+    const y = frameTop + this.RESERVED_SPACE + (height / 2) + (row * rowSpacing);
     
     // Handle overflow case when we exceed the maxColumns
     if (Math.floor(totalSoFar / itemsPerColumn) >= maxColumns) {

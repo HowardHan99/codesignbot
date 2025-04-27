@@ -421,14 +421,20 @@ Example of CORRECT response format:
     const row = themeIndex % rows;
     const rowHeight = frame.height / rows;
     
-    // Instead of calculating relative to the theme bar, let's use direct row positioning
-    // Divide each row into two parts: top part for theme bar (30%), bottom part for sticky notes (70%)
-    const rowTopEdge = frame.y - frame.height/2 + (row * rowHeight);
-    const rowBottomEdge = rowTopEdge + rowHeight;
+    // Reserve 400px at the top of the frame for other content
+    // Calculate the available height for the themes after reserving 400px
+    // Remeber to update the reserved space in the stickyNoteService.ts file
+    const availableHeight = frame.height - StickyNoteService.RESERVED_SPACE;
+    const adjustedRowHeight = availableHeight / rows;
+    
+    // Start row positions after the 400px reserved space
+    // Remeber to update the reserved space in the stickyNoteService.ts file
+    const rowTopEdge = frame.y - frame.height/2 + StickyNoteService.RESERVED_SPACE + (row * adjustedRowHeight);
+    const rowBottomEdge = rowTopEdge + adjustedRowHeight;
     
     // Position the sticky notes 60% down the row height - this guarantees no overlap
     // This puts them well below the theme bar regardless of the theme bar's exact position
-    const stickyY = rowTopEdge + (rowHeight * 0.6);
+    const stickyY = rowTopEdge + (adjustedRowHeight * 0.6);
     
     console.log(`[DEBUG] Row ${row}: top=${rowTopEdge}, bottom=${rowBottomEdge}`);
     console.log(`[DEBUG] Sticky Y position at 60% of row: ${stickyY}`);

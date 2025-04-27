@@ -177,21 +177,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setLoading(true);
       setSelectedTone('');
       
-      const frames = await miro.board.get({ type: 'frame' });
-      const designFrame = frames.find(f => f.title === 'Design-Proposal');
-      
-      if (!designFrame) {
-        throw new Error('Design-Proposal frame not found');
-      }
-
-      // Get sticky notes
-      const stickyNotes = await miro.board.get({ type: 'sticky_note' });
-      
-      // Filter sticky notes that belong to the Design-Proposal frame
-      const designStickyNotes = stickyNotes.filter(
-        note => note.parentId === designFrame.id
-      );
-      
       // Get thinking dialogue context if the toggle is enabled
       let dialogueContext = ''; // Combined raw content
       let thinkingContextString = ''; // Parsed thinking process
@@ -208,7 +193,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         
         if (thinkingFrame) {
           // Get both sticky notes and text elements from the frame
-          const dialogueStickyNotes = stickyNotes.filter(
+          const stickyNotesFromBoard = await miro.board.get({ type: 'sticky_note' });
+          const dialogueStickyNotes = stickyNotesFromBoard.filter(
             note => note.parentId === thinkingFrame.id
           );
           const textElements = await miro.board.get({ type: 'text' });
@@ -264,12 +250,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       }
 
       // --- Message Construction --- 
+      // Directly use the notes parameter passed from the parent component
       const baseMessage = imageContext 
-        ? `${designStickyNotes.map((note, index) => 
-            `Design Decision ${index + 1}: ${note.content || ''}`
+        ? `${notes.map((noteContent, index) => 
+            `Design Decision ${index + 1}: ${noteContent || ''}`
           ).join('\n')}\n\nRelevant visual context from design sketches:\n${imageContext}`
-        : designStickyNotes.map((note, index) => 
-            `Design Decision ${index + 1}: ${note.content || ''}`
+        : notes.map((noteContent, index) => 
+            `Design Decision ${index + 1}: ${noteContent || ''}`
           ).join('\n');
         
       // Construct the enhanced message with clear labels for the LLM
@@ -355,7 +342,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             const analysisData = {
               timestamp: null,
               designChallenge: designChallenge,
-              decisions: designStickyNotes.map(note => note.content || ''),
+              decisions: notes, // Use notes directly instead of designStickyNotes.map()
               analysis: {
                 full: splitResponse(standardResponse),
                 simplified: []
@@ -549,7 +536,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           const analysisData = {
             timestamp: null,
             designChallenge: designChallenge,
-            decisions: designStickyNotes.map(note => note.content || ''),
+            decisions: notes, // Use notes directly instead of designStickyNotes.map()
             analysis: {
               full: useThemedDisplay ? currentResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(currentResults.response),
               simplified: []
