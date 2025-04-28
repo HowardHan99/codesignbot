@@ -17,6 +17,7 @@ import { TranscriptProcessingService } from '../services/transcriptProcessingSer
 import { DesignThemeService } from '../services/designThemeService';
 import { EmbeddingService } from '../services/embeddingService';
 import { Logger } from '../utils/logger';
+import { frameConfig } from '../utils/config';
 
 /**
  * Interface for themed response
@@ -188,67 +189,56 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       // Always check for the frame, even if toggle is off (for debugging)
       try {
         const allFrames = await miro.board.get({ type: 'frame' });
-        const thinkingFrame = allFrames.find(f => f.title === 'Thinking-Dialogue');
-        Logger.log('AntagoInteract', 'Searching for Thinking-Dialogue frame', { found: !!thinkingFrame });
+        const thinkingFrame = allFrames.find(f => f.title === frameConfig.names.thinkingDialogue);
+        const enhancedContextFrame = allFrames.find(f => f.title === frameConfig.names.ragContent);
         
-        if (thinkingFrame) {
+        Logger.log('AntagoInteract', 'Searching for frames', { 
+          foundThinking: !!thinkingFrame,
+          foundEnhancedContext: !!enhancedContextFrame
+        });
+        
+        // Function to extract content from a frame
+        const extractContentFromFrame = async (frame: any) => {
+          if (!frame) return '';
+          
           // Get both sticky notes and text elements from the frame
           const stickyNotesFromBoard = await miro.board.get({ type: 'sticky_note' });
-          const dialogueStickyNotes = stickyNotesFromBoard.filter(
-            note => note.parentId === thinkingFrame.id
+          const frameStickyNotes = stickyNotesFromBoard.filter(
+            note => note.parentId === frame.id
           );
           const textElements = await miro.board.get({ type: 'text' });
-          const dialogueTextElements = textElements.filter(
-            text => text.parentId === thinkingFrame.id
+          const frameTextElements = textElements.filter(
+            text => text.parentId === frame.id
           );
           
-          Logger.log('AntagoInteract', 'Found content elements in Thinking-Dialogue frame', { 
-            stickyNotes: dialogueStickyNotes.length,
-            textElements: dialogueTextElements.length 
-          });
-          
           // Combine content from both sources
-          const stickyNotesContent = dialogueStickyNotes.map(note => note.content || '').join('\n');
-          const textElementsContent = dialogueTextElements.map(text => text.content || '').join('\n');
-          const combinedDialogueContent = [stickyNotesContent, textElementsContent].filter(Boolean).join('\n\n').trim();
-
-          if (combinedDialogueContent) {
-            // Parse combined content into Thinking and RAG sections
-            const markerIndex = combinedDialogueContent.indexOf(THINKING_MARKER);
-            
-            if (markerIndex !== -1) {
-              ragContextString = combinedDialogueContent.substring(0, markerIndex).trim();
-              thinkingContextString = combinedDialogueContent.substring(markerIndex).trim();
-              Logger.log('AntagoInteract', 'Parsed frame content into Thinking & RAG', { 
-                ragLength: ragContextString.length,
-                thinkingLength: thinkingContextString.length 
-              });
-            } else {
-              // If marker not found, treat all content as RAG
-              ragContextString = combinedDialogueContent;
-              thinkingContextString = ''; // Explicitly empty
-              Logger.log('AntagoInteract', 'No thinking marker found, treating all frame content as RAG', { 
-                ragLength: ragContextString.length 
-              });
-            }
-            // Keep original combined content for potential backward compatibility or simpler logging if needed
-            dialogueContext = combinedDialogueContent; 
-          } else {
-            Logger.log('AntagoInteract', 'No thinking dialogue/RAG content found in frame');
-          }
-        } else {
-          Logger.warn('AntagoInteract', 'Thinking-Dialogue frame not found');
+          const stickyNotesContent = frameStickyNotes.map(note => note.content || '').join('\n');
+          const textElementsContent = frameTextElements.map(text => text.content || '').join('\n');
+          return [stickyNotesContent, textElementsContent].filter(Boolean).join('\n\n').trim();
+        };
+        
+        // Extract content from each frame separately
+        thinkingContextString = await extractContentFromFrame(thinkingFrame);
+        ragContextString = await extractContentFromFrame(enhancedContextFrame);
+        
+        // Combine for backwards compatibility if needed
+        dialogueContext = [ragContextString, thinkingContextString].filter(Boolean).join('\n\n');
+        
+        Logger.log('AntagoInteract', 'Extracted frame content', { 
+          thinkingLength: thinkingContextString.length,
+          ragLength: ragContextString.length,
+          combinedLength: dialogueContext.length
+        });
+        
+        // Set useThinkingDialogue toggle state to false if no enhanced context was actually found/parsed
+        if (!thinkingContextString && !ragContextString && useThinkingDialogue) {
+          Logger.log('AntagoInteract', 'Setting useThinkingDialogue to false (no enhanced context found)');
+          setUseThinkingDialogue(false); // Turn off toggle if no context to enhance with
         }
       } catch (dialogueError) {
         Logger.error('AntagoInteract', 'Error fetching/parsing thinking dialogue/RAG content', dialogueError);
       }
       
-      // Set useThinkingDialogue toggle state to false if no enhanced context was actually found/parsed
-      if (!thinkingContextString && !ragContextString && useThinkingDialogue) {
-        Logger.log('AntagoInteract', 'Setting useThinkingDialogue to false (no enhanced context found)');
-        setUseThinkingDialogue(false); // Turn off toggle if no context to enhance with
-      }
-
       // --- Message Construction --- 
       // Directly use the notes parameter passed from the parent component
       const baseMessage = imageContext 
@@ -544,7 +534,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             tone: selectedTone || 'normal',
             consensusPoints: consensusPoints,
             hasThinkingDialogue: useThinkingDialogue && dialogueContext && enhancedResults.response ? true : false,
-            ...(dialogueContext && enhancedResults && enhancedResults.response ? {
+            ...(thinkingContextString || ragContextString ? {
               thinkingAnalysis: {
                 full: useThemedDisplay ? enhancedResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(enhancedResults.response),
                 simplified: []
@@ -590,7 +580,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             // Simplify both standard and thinking analyses if needed
             const [simplified, thinkingSimplified] = await Promise.all([
               OpenAIService.simplifyAnalysis(standardResults.response),
-              dialogueContext && enhancedResults && enhancedResults.response 
+              (thinkingContextString || ragContextString) && enhancedResults && enhancedResults.response 
                 ? OpenAIService.simplifyAnalysis(enhancedResults.response) 
                 : Promise.resolve('')
             ]);
@@ -605,7 +595,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             }
             
             // Update UI with the appropriate simplified response
-            const currentSimplified = useThinkingDialogue && thinkingSimplified ? thinkingSimplified : simplified;
+            const currentSimplified = useThinkingDialogue ? thinkingSimplified : simplified;
             if (isSimplifiedMode && !useThemedDisplay) {
               onResponsesUpdate?.(splitResponse(currentSimplified));
             }

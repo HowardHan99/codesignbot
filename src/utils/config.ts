@@ -17,10 +17,10 @@ export const frameConfig = {
     designProposal: 'Design-Proposal',
     antagonisticResponse: 'Antagonistic-Response',
     consensus: 'Consensus',
-    incorporateSuggestions: 'Incorporate suggestions',
+    incorporateSuggestions: 'Incorporate-Suggestions',
     thinkingDialogue: 'Thinking-Dialogue',
     analysisResponse: 'Analysis-Response',
-    mainFrame: 'Main-Frame',
+    ragContent: 'Enhanced-Context',
     realTimeResponse: 'Real-time-response'
   },
   defaults: {
