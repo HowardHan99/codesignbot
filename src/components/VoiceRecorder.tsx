@@ -23,7 +23,7 @@ interface VoiceRecorderProps {
 export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   mode,
   onNewPoints,
-  enableRealTimeCritique = true
+  enableRealTimeCritique = false
 }) => {
   // UI state based on SimplifiedVoiceService status
   const [currentStatus, setCurrentStatus] = useState<RecordingStatus>(SimplifiedVoiceService.getStatus());

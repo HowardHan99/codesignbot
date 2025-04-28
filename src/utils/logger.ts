@@ -3,7 +3,7 @@
  */
 export class Logger {
   // Array of contexts to exclude from logging
-  private static excludedContexts: string[] = ['STICKY-POS','[VR-STICKY]','[VR-STICKY-POS]'];
+  private static excludedContexts: string[] = ['STICKY-POS','VR-STICKY','VR-STICKY-POS'];
   
   /**
    * Check if the context should be excluded from logging

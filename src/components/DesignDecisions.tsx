@@ -974,7 +974,8 @@ export function MainBoard({
                 <VoiceRecorder 
                   mode="decision"
                   onNewPoints={handleNewDesignPoints}
-                  enableRealTimeCritique={true}
+                  //Here is where we can enable or disable the real time critique
+                  enableRealTimeCritique={false}
                 />
               </div>
               
