@@ -16,6 +16,7 @@ import { MiroFrameService } from '../services/miro/frameService';
 import { DesignThemeDisplay } from './DesignThemeDisplay';
 import { StickyNoteService } from '../services/miro/stickyNoteService';
 import { logUserActivity, saveDesignProposals, saveThinkingDialogues, saveDesignThemes } from '../utils/firebase';
+import { frameConfig } from '../utils/config';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   loading: () => <div>Loading...</div>,
@@ -244,15 +245,19 @@ export function MainBoard({
   const getDesignFrameId = async () => {
     try {
       const frames = await miro.board.get({ type: 'frame' });
-      const designFrame = frames.find(f => f.title === 'Design-Proposal');
+      const designFrame = frames.find(f => f.title === frameConfig.names.designProposal);
       
       if (designFrame) {
         setDesignFrameId(designFrame.id);
+        console.log(`Found ${frameConfig.names.designProposal} frame ID:`, designFrame.id);
         return designFrame.id;
+      } else {
+        console.log(`${frameConfig.names.designProposal} frame not found`);
+        setDesignFrameId(null);
+        return null;
       }
-      return null;
     } catch (err) {
-      console.error('Error getting Design-Proposal frame:', err);
+      console.error(`Error getting ${frameConfig.names.designProposal} frame:`, err);
       return null;
     }
   };
@@ -260,10 +265,10 @@ export function MainBoard({
   // Function to get current sticky notes and connections
   const getCurrentDesignData = async () => {
     try {
-      const frameId = await getDesignFrameId();
+      const frameId = designFrameId || await getDesignFrameId();
       if (!frameId) {
-        console.log('Design-Proposal frame not found');
-        return { notes: [], connections: [] };
+        console.log(`${frameConfig.names.designProposal} frame not found, cannot get data.`); 
+        return { notes: [], connections: [] }; 
       }
 
       // Get the frame by ID
@@ -271,7 +276,7 @@ export function MainBoard({
       const designFrame = frames.find(f => f.id === frameId);
       
       if (!designFrame) {
-        console.log('Design-Proposal frame not found even though we have the ID');
+        console.log(`${frameConfig.names.designProposal} frame object not found even though we have the ID`); 
         return { notes: [], connections: [] };
       }
 
@@ -290,7 +295,7 @@ export function MainBoard({
     } catch (err) {
       console.error('Error getting design data:', err);
       return { notes: [], connections: [] };
-    }
+    } 
   };
 
   // Handle refresh button click
@@ -410,7 +415,7 @@ export function MainBoard({
       if (imagePaths.length > 0) {
         console.log('Images saved successfully:', imagePaths);
       } else {
-        console.log('No images found in Sketch-Reference frame');
+        console.log(`No images found in ${frameConfig.names.sketchReference} frame`); 
       }
     } catch (error) {
       console.error('Error saving images:', error);
@@ -817,6 +822,24 @@ export function MainBoard({
       return 'unknown-board';
     }
   };
+
+  // Fetch images from Miro (Sketch-Reference frame)
+  const handleFetchImages = useCallback(async () => {
+    setIsSavingImage(true);
+    console.log('Starting image fetch...');
+    try {
+      await MiroService.getAllImagesFromFrame();
+      console.log('Images fetched and saved successfully');
+    } catch (error) {
+      console.error('Error fetching or saving images:', error);
+      // Optionally check if error is specific to frame not found
+      if (error instanceof Error && error.message.includes('frame not found')) {
+        console.log(`No images found in ${frameConfig.names.sketchReference} frame`);
+      }
+    } finally {
+      setIsSavingImage(false);
+    }
+  }, []);
 
   return (
     <>
@@ -1245,7 +1268,7 @@ export function MainBoard({
             fontSize: '14px',
             border: '1px solid #e0e0e0'
           }}>
-            <p style={{ margin: 0 }}>No design decisions found in the "Design-Proposal" frame.</p>
+            <p style={{ margin: 0 }}>No design decisions found in the "{frameConfig.names.designProposal}" frame.</p>
             <p style={{ margin: '8px 0 0 0', fontSize: '13px' }}>Record your thoughts or upload an audio file to get started.</p>
           </div>
         ) : (

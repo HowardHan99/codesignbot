@@ -2,6 +2,7 @@ import { MiroFrameService } from './frameService';
 import { StickyNote, Connector, Frame } from '@mirohq/websdk-types';
 import BoardTokenManager from '../../utils/boardTokenManager';
 import { MiroApiClient } from './miroApiClient';
+import { frameConfig } from '../../utils/config';
 
 const MIRO_API_URL = 'https://api.miro.com/v2';
 
@@ -29,17 +30,17 @@ export class MiroDesignService {
    */
   public static async getDesignChallenge(): Promise<string> {
     try {
-      const challengeFrame = await MiroFrameService.findFrameByTitle('Design-Challenge');
+      const challengeFrame = await MiroFrameService.findFrameByTitle(frameConfig.names.designChallenge);
       
       if (!challengeFrame) {
-        console.log('Design-Challenge frame not found');
+        console.log(`${frameConfig.names.designChallenge} frame not found`);
         return '';
       }
 
       const challengeStickies = await MiroFrameService.getStickiesInFrame(challengeFrame);
       
       if (challengeStickies.length === 0) {
-        console.log('No sticky notes found in Design-Challenge frame');
+        console.log(`No sticky notes found in ${frameConfig.names.designChallenge} frame`);
         return '';
       }
 
@@ -60,13 +61,13 @@ export class MiroDesignService {
   public static async getConsensusPoints(): Promise<string[]> {
     try {
       console.log('Starting to fetch consensus points...');
-      const consensusFrame = await MiroFrameService.findFrameByTitle('Consensus');
+      const consensusFrame = await MiroFrameService.findFrameByTitle(frameConfig.names.consensus);
       
       if (!consensusFrame) {
-        console.log('Consensus frame not found');
+        console.log(`${frameConfig.names.consensus} frame not found`);
         return [];
       }
-      console.log('Found Consensus frame:', consensusFrame);
+      console.log(`Found ${frameConfig.names.consensus} frame:`, consensusFrame);
 
       // Get all sticky notes first to debug
       const allStickies = await miro.board.get({ type: 'sticky_note' });
@@ -88,7 +89,7 @@ export class MiroDesignService {
       console.log('Combined unique stickies:', combinedStickies);
       
       if (combinedStickies.length === 0) {
-        console.log('No sticky notes found in Consensus frame');
+        console.log(`No sticky notes found in ${frameConfig.names.consensus} frame`);
         return [];
       }
 
@@ -110,10 +111,10 @@ export class MiroDesignService {
     try {
       // Get frames first to check if they exist
       const frames = await miro.board.get({ type: 'frame' });
-      const responseFrame = frames.find(frame => frame.title === 'Antagonistic-Response');
+      const responseFrame = frames.find(frame => frame.title === frameConfig.names.antagonisticResponse);
 
       if (!responseFrame) {
-        console.log('No Antagonistic-Response frame found');
+        console.log(`No ${frameConfig.names.antagonisticResponse} frame found`);
         return;
       }
 
@@ -122,7 +123,7 @@ export class MiroDesignService {
       const frameStickies = allStickies.filter(sticky => sticky.parentId === responseFrame.id);
       
       // Delete all sticky notes in the frame
-      console.log(`Removing ${frameStickies.length} sticky notes from Antagonistic-Response frame`);
+      console.log(`Removing ${frameStickies.length} sticky notes from ${frameConfig.names.antagonisticResponse} frame`);
       
       // Delete items using Miro API
       if (frameStickies.length > 0) {
@@ -143,11 +144,11 @@ export class MiroDesignService {
 
     try {
       // Find or create the Antagonistic-Response frame
-      let responseFrame = await MiroFrameService.findFrameByTitle('Antagonistic-Response');
+      let responseFrame = await MiroFrameService.findFrameByTitle(frameConfig.names.antagonisticResponse);
       
       if (!responseFrame) {
         responseFrame = await MiroFrameService.createFrame(
-          'Antagonistic-Response',
+          frameConfig.names.antagonisticResponse,
           1000,
           0,
           400,
@@ -284,17 +285,17 @@ export class MiroDesignService {
       console.log('Starting to analyze design decisions and connections...');
       
       // Get the Design-Proposal frame
-      const designFrame = await MiroFrameService.findFrameByTitle('Design-Proposal');
+      const designFrame = await MiroFrameService.findFrameByTitle(frameConfig.names.designProposal);
       
       if (!designFrame) {
-        console.log('Design-Proposal frame not found');
+        console.log(`${frameConfig.names.designProposal} frame not found`);
         return [];
       }
-      console.log('Found Design-Proposal frame:', designFrame.id);
+      console.log(`Found ${frameConfig.names.designProposal} frame:`, designFrame.id);
  
       // Get stickies in the Design-Proposal frame
       const designStickies = await MiroFrameService.getStickiesInFrame(designFrame);
-      console.log('Found stickies in Design-Proposal frame:', designStickies.length);
+      console.log(`Found stickies in ${frameConfig.names.designProposal} frame:`, designStickies.length);
       
       // Create a map of stickies by ID for quick lookup
       const stickiesMap = new Map<string, StickyNote>();
@@ -371,7 +372,7 @@ export class MiroDesignService {
         }
       }
 
-      console.log(`Found ${designConnections.length} connections involving Design-Proposal stickies`);
+      console.log(`Found ${designConnections.length} connections involving ${frameConfig.names.designProposal} stickies`);
       
       // Return with section name and connections
       sections.push({

@@ -6,6 +6,7 @@ import { MiroService } from './miroService';
 import { TranscriptProcessingService } from './transcriptProcessingService';
 import { MiroFrameService } from './miro/frameService';
 import { DocumentService } from './miro/documentService';
+import { frameConfig } from '../utils/config';
 
 interface DesignerThinkingProcess {
   thinking: string[];                   // Designer's thought process
@@ -26,8 +27,6 @@ export enum DesignerModelType {
 
 export class DesignerRolePlayService {
   private static isProcessing: boolean = false;
-  private static readonly THINKING_FRAME_NAME = 'Thinking-Dialogue';
-  private static readonly DECISION_FRAME_NAME = 'Design-Proposal';
   
   /**
    * Toggle to enable or disable sketch generation using DALL-E 3
@@ -131,7 +130,7 @@ export class DesignerRolePlayService {
       
       // Use the native document method
       await DocumentService.createMiroNativeDocument(
-        this.THINKING_FRAME_NAME,
+        frameConfig.names.thinkingDialogue,
         'Designer Process & Concepts', // Updated title
         combinedContent,
         {
@@ -147,10 +146,10 @@ export class DesignerRolePlayService {
       console.log('Falling back to separate document creation attempts');
       try {
         // Use themes for the thinking process instead of full details
-        await DocumentService.createThinkingProcessDocument(this.THINKING_FRAME_NAME, this.extractHighLevelThemes(thoughts), { width: 600 });
+        await DocumentService.createThinkingProcessDocument(frameConfig.names.thinkingDialogue, this.extractHighLevelThemes(thoughts), { width: 600 });
         if (proposals.length > 0) {
           // Attempt to use the brainstorming doc function, targeting the same frame
-          await DocumentService.createBrainstormingProposalsDocument(this.THINKING_FRAME_NAME, proposals, { width: 600 });
+          await DocumentService.createBrainstormingProposalsDocument(frameConfig.names.thinkingDialogue, proposals, { width: 600 });
         }
       } catch (fallbackError) {
          console.error('Fallback document creation also failed:', fallbackError);
@@ -215,10 +214,10 @@ export class DesignerRolePlayService {
           proposal: decision,
           category: 'design-decision'
         })),
-        this.DECISION_FRAME_NAME
+        frameConfig.names.designProposal
       );
       
-      const designDecisionFrame = await MiroFrameService.findFrameByTitle(this.DECISION_FRAME_NAME);
+      const designDecisionFrame = await MiroFrameService.findFrameByTitle(frameConfig.names.designProposal);
       if (designDecisionFrame) {
         await miro.board.viewport.zoomTo([designDecisionFrame]);
       }
@@ -264,10 +263,10 @@ export class DesignerRolePlayService {
    */
   private static async addSketchToBoard(imageUrl: string): Promise<void> {
     try {
-      const designFrame = await MiroFrameService.findFrameByTitle(this.DECISION_FRAME_NAME);
+      const designFrame = await MiroFrameService.findFrameByTitle(frameConfig.names.designProposal);
       
       if (!designFrame) {
-        throw new Error(`Design frame '${this.DECISION_FRAME_NAME}' not found`);
+        throw new Error(`Design frame '${frameConfig.names.designProposal}' not found`);
       }
       
       // Get frame dimensions to position the image appropriately
@@ -339,11 +338,14 @@ export class DesignerRolePlayService {
    * @returns The designer's thinking process, brainstorming proposals, and decisions
    */
   public static async simulateDesigner(modelType: DesignerModelType = DesignerModelType.GPT4): Promise<DesignerThinkingProcess> {
+    let designChallenge: string | undefined;
+    
     try {
-      const designChallenge = await MiroService.getDesignChallenge();
+      // Fetch the design challenge from the Miro board
+      designChallenge = await MiroService.getDesignChallenge();
       
       if (!designChallenge) {
-        throw new Error('No design challenge found. Please create one in the Design-Challenge frame.');
+        throw new Error(`No design challenge found. Please create one in the ${frameConfig.names.designChallenge} frame.`);
       }
       
       const designerThinking = await this.generateDesignerThinking(designChallenge, modelType);

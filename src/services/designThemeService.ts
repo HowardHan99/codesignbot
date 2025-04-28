@@ -6,6 +6,8 @@ import { ProcessedDesignPoint } from '../types/common';
 import { safeApiCall } from '../utils/errorHandlingUtils';
 import { Frame, StickyNote } from '@mirohq/websdk-types';
 import { OpenAIService } from '../services/openaiService';
+import { StickyNoteService } from './miro/stickyNoteService';
+import { frameConfig } from '../utils/config';
 
 /**
  * Theme or group identified from design content
@@ -115,7 +117,7 @@ export class DesignThemeService {
    * Get design proposals from the Design-Proposal frame
    */
   private static async getDesignProposals(): Promise<string[]> {
-    const frameName = 'Design-Proposal';
+    const frameName = frameConfig.names.designProposal;
     const proposals = await this.getStickiesFromFrame(frameName);
     console.log(`Found ${proposals.length} design proposals`);
     return proposals;
@@ -125,7 +127,7 @@ export class DesignThemeService {
    * Get thinking dialogue from the Thinking-Dialogue frame
    */
   private static async getThinkingDialogue(): Promise<string[]> {
-    const frameName = 'Thinking-Dialogue';
+    const frameName = frameConfig.names.thinkingDialogue;
     const dialogue = await this.getStickiesFromFrame(frameName);
     console.log(`Found ${dialogue.length} thinking dialogue notes`);
     return dialogue;

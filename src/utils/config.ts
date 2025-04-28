@@ -12,7 +12,12 @@ export const firebaseConfig = {
 // Frame configuration
 export const frameConfig = {
   names: {
-    designDecision: 'Design-Proposal',
+    designChallenge: 'Design-Challenge',
+    sketchReference: 'Sketch-Reference',
+    designProposal: 'Design-Proposal',
+    antagonisticResponse: 'Antagonistic-Response',
+    consensus: 'Consensus',
+    incorporateSuggestions: 'Incorporate suggestions',
     thinkingDialogue: 'Thinking-Dialogue',
     analysisResponse: 'Analysis-Response',
     mainFrame: 'Main-Frame',

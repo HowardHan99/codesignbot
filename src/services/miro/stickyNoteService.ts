@@ -6,6 +6,7 @@ import { ProcessedDesignPoint, ProcessedPointWithRelevance } from '../../types/c
 import { RelevanceService } from '../relevanceService';
 import { delay } from '../../utils/fileProcessingUtils';
 import { Logger } from '../../utils/logger';
+import { frameConfig } from '../../utils/config';
 
 /**
  * Type for sticky note color categories
@@ -207,11 +208,11 @@ export class StickyNoteService {
       Logger.log('STICKY-POS', `Total stickies so far for score ${score}: ${totalSoFar}`);
       
       // For general frames that need multi-column layout, use the new positioning algorithm
-      if (frameName === 'Design-Proposal' || 
-          frameName === 'Thinking-Dialogue' || 
+      if (frameName === frameConfig.names.designProposal || 
+          frameName === frameConfig.names.thinkingDialogue || 
           frameName === 'ProposalDialogue' ||
-          frameName === 'Analysis-Response' ||
-          frameName === 'Antagonistic-Response' ||
+          frameName === frameConfig.names.analysisResponse ||
+          frameName === frameConfig.names.antagonisticResponse ||
           frameName === 'Designer-Thinking') {
         Logger.log('STICKY-POS', `Using general multi-column layout for frame "${frameName}"`);
         position = this.calculateGeneralStickyPosition(frame, totalSoFar);
@@ -597,21 +598,22 @@ export class StickyNoteService {
     relevanceThreshold?: number
   ): Promise<void> {
     try {
-      Logger.log('VR-STICKY', `StickyNoteService: createStickyNotesFromPoints called for frame "${frameName}" with ${processedPoints.length} points.`);
-      if (!processedPoints || processedPoints.length === 0) {
-        Logger.warn('VR-STICKY', `No points provided to createStickyNotesFromPoints for frame "${frameName}".`);
-        return;
-      }
+      Logger.log('VR-STICKY', `Creating ${processedPoints.length} stickies in frame: ${frameName}`, { mode });
       
-      console.log(`Creating ${processedPoints.length} sticky notes in ${frameName} frame`);
-      
-      // Get or create the frame
+      // Ensure frame exists
       const frame = await this.ensureFrameExists(frameName);
       
-      if (!frame) {
-        console.error(`Failed to get or create frame: ${frameName}`);
-        return;
-      }
+      // Get initial counters for positioning - Corrected call without frame argument
+      const initialCounters = await this.getInitialCounters(); 
+      Logger.log('STICKY-POS', 'Initial counters for frame:', initialCounters);
+      
+      // Check if relevance scoring should be used based on frame name
+      // Optimized for frames like Design-Proposal and Thinking-Dialogue where relevance scores aren't used
+      const useRelevanceScoring = 
+        !(frameName === frameConfig.names.designProposal || 
+          frameName === frameConfig.names.thinkingDialogue);
+      
+      Logger.log('VR-STICKY', `Relevance scoring ${useRelevanceScoring ? 'enabled' : 'disabled'} for frame ${frameName}`);
       
       // Get relevance configuration
       const relevanceConfig = ConfigurationService.getRelevanceConfig();

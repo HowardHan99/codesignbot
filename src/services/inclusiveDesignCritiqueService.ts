@@ -4,6 +4,7 @@ import { ConfigurationService } from './configurationService';
 import { MiroApiClient } from './miro/miroApiClient';
 import { safeApiCall } from '../utils/errorHandlingUtils';
 import { inclusiveDesignConfig } from '../utils/config';
+import { frameConfig } from '../utils/config';
 
 /**
  * Service that provides real-time critique of design decisions based on inclusive design principles
@@ -61,7 +62,7 @@ export class InclusiveDesignCritiqueService {
       console.log(`[DEBUG] Cache expired or empty, fetching fresh design decisions`);
       
       // Get design decisions from the Design-Proposal frame
-      const frameStickyNotes = await MiroApiClient.findFrameByTitle('Design-Proposal')
+      const frameStickyNotes = await MiroApiClient.findFrameByTitle(frameConfig.names.designProposal)
         .then(frame => frame ? MiroApiClient.getStickiesInFrame(frame.id) : []);
       
       // Extract content from sticky notes

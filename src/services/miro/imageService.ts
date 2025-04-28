@@ -1,5 +1,6 @@
 import { Frame } from '@mirohq/websdk-types';
 import { MiroFrameService } from './frameService';
+import { frameConfig } from '../../utils/config';
 
 interface ImageData {
   id: string;
@@ -24,7 +25,7 @@ export class MiroImageService {
   /**
    * Gets all images from a frame by its title
    */
-  public static async getAllImagesFromFrame(frameTitle: string = 'Sketch-Reference'): Promise<string[]> {
+  public static async getAllImagesFromFrame(frameTitle: string = frameConfig.names.sketchReference): Promise<string[]> {
     try {
       console.log('Starting to fetch images...');
       
