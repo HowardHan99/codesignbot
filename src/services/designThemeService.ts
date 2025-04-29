@@ -694,10 +694,13 @@ Example of CORRECT response format:
     const rows = 4; // Four rows, one for each theme
     const row = index % rows;
     
-    const rowHeight = frame.height / rows;
+    // Calculate available height after accounting for reserved space at the top
+    const availableHeight = frame.height - StickyNoteService.RESERVED_SPACE;
+    const rowHeight = availableHeight / rows;
     
-    // Calculate position inside the frame - at 25% of the row height
-    const rowTopEdge = frame.y - frame.height/2 + (row * rowHeight);
+    // Calculate position inside the frame - start after the reserved space
+    const frameTopEdge = frame.y - frame.height/2;
+    const rowTopEdge = frameTopEdge + StickyNoteService.RESERVED_SPACE + (row * rowHeight);
     //DON'T CHANGE THIS 0.05 - IT'S THE CORRECT POSITION FOR THE THEME BAR
     const themeY = rowTopEdge + (rowHeight * 0.05);
     

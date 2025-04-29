@@ -120,7 +120,7 @@ export class DesignerRolePlayService {
       // Combine themes and proposals into a simplified structure for the document service
       const combinedContent = [
         // Add a clear separator or header for thoughts
-        '## 🧠 Designer Thinking Process',
+        '## 🧠 Designer Thinking Process Key Themes',
         ...themeHeadings,
         '\n---\n', // Separator
         // Add a clear separator or header for proposals
