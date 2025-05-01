@@ -21,7 +21,9 @@ export const frameConfig = {
     thinkingDialogue: 'Thinking-Dialogue',
     analysisResponse: 'Analysis-Response',
     ragContent: 'Enhanced-Context',
-    realTimeResponse: 'Real-time-response'
+    realTimeResponse: 'Real-time-response',
+    agentPrompt: "Current-Agent-Prompt",
+    variedResponses: 'Varied-Response',
   },
   defaults: {
     width: 1200,
