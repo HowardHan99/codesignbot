@@ -161,40 +161,58 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
    * @param designChallenge - The context of the design challenge
    * @param existingPoints - Array of existing synthesized points to avoid overlap
    * @param consensusPoints - Array of consensus points that should not be questioned
+   * @param designPrinciples - Array of design principles to prioritize
+   * @param customSystemPrompt - Custom system prompt to add additional instructions
    * @returns Promise resolving to the formatted analysis
    */
   public static async generateAnalysis(
     userPrompt: string, 
     designChallenge: string,
     existingPoints: string[] = [],
-    consensusPoints: string[] = []
+    consensusPoints: string[] = [],
+    designPrinciples?: string,
+    customSystemPrompt?: string
   ): Promise<string> {
     
     const consensusPointsText = consensusPoints.length > 0
       ? `\n\nConsensus points that you should defintely follow:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
       : '';
 
-    const systemPrompt = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative questions that identify potential problems or conflicts in these decisions. The provacative questions should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design decisions.
+    // Base system prompt template
+    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative questions that identify potential problems or conflicts in these decisions. The provacative questions should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design decisions.`;
 
-Rules:
-1. NEVER question or criticize the consensus points ${consensusPointsText} - these are established agreements that must be respected
-2. Focus on potential problems, conflicts, or negative consequences
-3. Always provide EXACTLY 5 points, no more, no less
-4. Each point should be a complete, self-contained criticism
-5. Keep each point focused on a single issue
-6. CRITICALLY IMPORTANT: Format your response as 5 distinct points separated by double asterisks " ** "
-7. Each point should be shorter than 300 characters
+    // Use custom prompt if provided, otherwise use base prompt
+    let systemPrompt = customSystemPrompt || BASE_SYSTEM_PROMPT;
 
-Format example (5 points exactly):
-1. First problem: The design lacks consideration for accessibility, potentially excluding users with disabilities. ** 2. Second problem: The color scheme might cause readability issues in different lighting conditions. ** 3. Third problem: The login flow requires too many steps, increasing user frustration. ** 4. Fourth problem: [etc...] ** 5. Fifth problem: [etc...] 
+    // Construct the main message parts
+    const messageParts = [
+      `Analyze the following design decisions for a ${designChallenge || "design challenge"}:\n\n${userPrompt}`
+    ];
 
-The numbers are optional but the " ** " separators are REQUIRED. Do not include any other text before or after the 10 points. Each point must be a complete, standalone criticism.`;
+    // Add design principles if provided
+    if (designPrinciples) {
+      messageParts.push(`\n\n--- Key Design Principles to Prioritize ---\n${designPrinciples}`);
+    }
+
+    // Add synthesized points if any
+    if (existingPoints.length > 0) {
+      messageParts.push(
+        `\n\nAlso consider these synthesized themes from previous discussions:\n${existingPoints.join('\n')}`
+      );
+    }
+    
+    // Add consensus points if any
+    if (consensusPoints.length > 0) {
+      messageParts.push(
+        `\n\nConsensus points from the design team (please reflect/incorporate these in your response):\n${consensusPoints.join('\n')}`
+      );
+    }
 
     try {
       console.log('Starting generateAnalysis call to OpenAI API in the non thinking process mode');
       
       const result = await this.makeRequest('/api/openaiwrap', {
-        userPrompt,
+        userPrompt: messageParts.join('\n'),
         systemPrompt,
         useGpt4: true // Use GPT-4 for generating analysis
       });
@@ -396,19 +414,24 @@ Respond to the user's message in a helpful and constructive way.`;
    * @param themeName - The name of the design theme to focus on
    * @param designChallenge - The context of the design challenge
    * @param consensusPoints - Array of consensus points that should not be questioned
+   * @param designPrinciples - Array of design principles to prioritize
+   * @param customSystemPrompt - Custom system prompt to add additional instructions
    * @returns Promise resolving to array of points specific to the theme
    */
   public static async generateThemeSpecificAnalysis(
     userPrompt: string,
     themeName: string,
     designChallenge: string,
-    consensusPoints: string[] = []
+    consensusPoints: string[] = [],
+    designPrinciples?: string,
+    customSystemPrompt?: string
   ): Promise<string[]> {
     const consensusPointsText = consensusPoints.length > 0
       ? `\n\nConsensus points that should NOT be questioned or criticized:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
       : '';
 
-    const systemPrompt = `You are analyzing design decisions for the design challenge: "${designChallenge || 'No challenge specified'}" with a specific focus on the theme "${themeName}".
+    // Base system prompt template
+    const BASE_THEME_SYSTEM_PROMPT = `You are analyzing design decisions for the design challenge: "${designChallenge || 'No challenge specified'}" with a specific focus on the theme "${themeName}".
 
 Provide exactly 5 critical points that identify potential problems or conflicts related specifically to the "${themeName}" theme of these design decisions.
 
@@ -417,10 +440,10 @@ Rules:
 2. Focus on potential problems, conflicts, or negative consequences related to ${themeName}
 3. Always provide EXACTLY 5 points, no more, no less
 4. Each point should be a complete, self-contained criticism
-5. Keep each point focused on a single issue within the ${themeName} theme
+5. Keep each point focused on a single issue within the ${themeName} theme`;
 
-Format your response as exactly 5 points separated by ** **. Example:
-First point here ** ** Second point here ** ** Third point here ** ** Fourth point here ** ** Fifth point here${consensusPointsText}`;
+    // Use custom prompt if provided, otherwise use base prompt
+    let systemPrompt = customSystemPrompt || BASE_THEME_SYSTEM_PROMPT;
 
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt,
@@ -437,13 +460,17 @@ First point here ** ** Second point here ** ** Third point here ** ** Fourth poi
    * @param themes - Array of theme objects with name and color
    * @param designChallenge - The context of the design challenge
    * @param consensusPoints - Array of consensus points that should not be questioned
+   * @param designPrinciples - Array of design principles to prioritize
+   * @param customSystemPrompt - Custom system prompt to add additional instructions
    * @returns Promise resolving to array of themed responses
    */
   public static async generateAllThemeAnalyses(
     userPrompt: string,
     themes: Array<{name: string, color: string}>,
     designChallenge: string,
-    consensusPoints: string[] = []
+    consensusPoints: string[] = [],
+    designPrinciples?: string,
+    customSystemPrompt?: string
   ): Promise<Array<{name: string, color: string, points: string[]}>> {
     // Run all theme analyses in parallel
     const themeAnalysesPromises = themes.map(theme => 
@@ -451,7 +478,9 @@ First point here ** ** Second point here ** ** Third point here ** ** Fourth poi
         userPrompt,
         theme.name,
         designChallenge,
-        consensusPoints
+        consensusPoints,
+        designPrinciples,
+        customSystemPrompt
       ).then(points => ({
         name: theme.name,
         color: theme.color,

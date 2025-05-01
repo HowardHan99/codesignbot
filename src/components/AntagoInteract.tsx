@@ -17,7 +17,9 @@ import { TranscriptProcessingService } from '../services/transcriptProcessingSer
 import { DesignThemeService } from '../services/designThemeService';
 import { EmbeddingService } from '../services/embeddingService';
 import { Logger } from '../utils/logger';
-import { frameConfig } from '../utils/config';
+import { frameConfig, stickyConfig } from '../utils/config';
+import { MiroApiClient } from '../services/miro/miroApiClient';
+import { StickyNoteService } from '../services/miro/stickyNoteService';
 
 /**
  * Interface for themed response
@@ -35,6 +37,13 @@ interface DesignThemeWithSelection {
   relatedPoints: string[];
   color: string;
   isSelected?: boolean;
+}
+
+// Add interface for variations to send
+interface VariationsToSend {
+  rag: boolean;
+  principles: boolean;
+  prompt: boolean;
 }
 
 interface AntagoInteractProps {
@@ -100,12 +109,27 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [storedSimplifiedResponses, setStoredSimplifiedResponses] = useState<StoredResponses>({ normal: '' });
   const [useThemedDisplay, setUseThemedDisplay] = useState<boolean>(true);
   
+  // Add new state variables for varied response generation
+  const [designPrinciplesText, setDesignPrinciplesText] = useState<string | null>(null);
+  const [customPromptText, setCustomPromptText] = useState<string | null>(null);
+  const [variationsToSend, setVariationsToSend] = useState<VariationsToSend>({
+    rag: false,
+    principles: false,
+    prompt: false
+  });
+  
   // Singleton instance for managing response storage
   const responseStore = ResponseStore.getInstance();
   
   // Ref to prevent duplicate processing
   const processedRef = useRef(false);
   const processingRef = useRef(false);  // New ref to prevent concurrent processing
+
+  // Add a state variable to track the current RAG content
+  const [currentRagContent, setCurrentRagContent] = useState<string>('');
+
+  // Add a separate loading state for variations
+  const [isVariationLoading, setIsVariationLoading] = useState<boolean>(false);
 
   // Save to localStorage whenever useThinkingDialogue changes
   useEffect(() => {
@@ -191,10 +215,14 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         const allFrames = await miro.board.get({ type: 'frame' });
         const thinkingFrame = allFrames.find(f => f.title === frameConfig.names.thinkingDialogue);
         const enhancedContextFrame = allFrames.find(f => f.title === frameConfig.names.ragContent);
+        const variedResponsesFrame = allFrames.find(f => f.title === frameConfig.names.variedResponses);
+        const agentPromptFrame = allFrames.find(f => f.title === frameConfig.names.agentPrompt);
         
         Logger.log('AntagoInteract', 'Searching for frames', { 
           foundThinking: !!thinkingFrame,
-          foundEnhancedContext: !!enhancedContextFrame
+          foundEnhancedContext: !!enhancedContextFrame,
+          foundVariedResponses: !!variedResponsesFrame,
+          foundAgentPrompt: !!agentPromptFrame
         });
         
         // Function to extract content from a frame
@@ -221,14 +249,53 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         thinkingContextString = await extractContentFromFrame(thinkingFrame);
         ragContextString = await extractContentFromFrame(enhancedContextFrame);
         
+        // Extract design principles and custom agent prompt from agent prompt frame (not varied responses)
+        if (agentPromptFrame) {
+          // Use IDs instead of tag names
+          const DESIGN_PRINCIPLES_TAG_ID = "3458764626534754570";
+          const AGENT_SYSTEM_PROMPT_TAG_ID = "3458764626530355983";
+          
+          // Get sticky notes from the agent prompt frame
+          const stickyNotesFromBoard = await miro.board.get({ type: 'sticky_note' });
+          const frameStickyNotes = stickyNotesFromBoard.filter(
+            note => note.parentId === agentPromptFrame.id
+          );
+          
+          Logger.log('AntagoInteract', 'Found agent prompt stickynotes ', {
+            frameStickyNotes: frameStickyNotes
+          });
+          
+          // Find sticky notes with specific tag IDs
+          const designPrinciplesSticky = frameStickyNotes.find(note => {
+            // @ts-ignore - Miro API types issue
+            return note.tagIds && note.tagIds.includes(DESIGN_PRINCIPLES_TAG_ID);
+          });
+          
+          const agentPromptSticky = frameStickyNotes.find(note => {
+            // @ts-ignore - Miro API types issue
+            return note.tagIds && note.tagIds.includes(AGENT_SYSTEM_PROMPT_TAG_ID);
+          });
+          
+          // Update state with found content
+          if (designPrinciplesSticky) {
+            setDesignPrinciplesText(designPrinciplesSticky.content || null);
+          }
+          
+          if (agentPromptSticky) {
+            setCustomPromptText(agentPromptSticky.content || null);
+          }
+          
+          Logger.log('AntagoInteract', 'Found agent prompt content', {
+            designPrinciples: !!designPrinciplesSticky,
+            agentPrompt: !!agentPromptSticky
+          });
+        }
+        
+        // Update the current RAG content state
+        setCurrentRagContent(ragContextString);
+        
         // Combine for backwards compatibility if needed
         dialogueContext = [ragContextString, thinkingContextString].filter(Boolean).join('\n\n');
-        
-        Logger.log('AntagoInteract', 'Extracted frame content', { 
-          thinkingLength: thinkingContextString.length,
-          ragLength: ragContextString.length,
-          combinedLength: dialogueContext.length
-        });
         
         // Set useThinkingDialogue toggle state to false if no enhanced context was actually found/parsed
         if (!thinkingContextString && !ragContextString && useThinkingDialogue) {
@@ -288,11 +355,14 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             setResultsFunc: React.Dispatch<React.SetStateAction<string[]>>,
             setStoredResponsesFunc: React.Dispatch<React.SetStateAction<StoredResponses>>
           ) => {
+            // Pass design principles and custom prompt to the analysis service
             const response = await OpenAIService.generateAnalysis(
               messageContext, 
               designChallenge,
               synthesizedPoints,
-              consensusPoints
+              consensusPoints,
+              designPrinciplesText || undefined,
+              customPromptText || undefined
             );
             
             setResultsFunc([response]);
@@ -300,71 +370,99 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             return response;
           };
           
-          // Run both standard and thinking dialogue enhanced analyses in parallel
-          Logger.log('AntagoInteract', 'Generating analyses');
-          const [standardResponse, enhancedResponse] = await Promise.all([
-            // Standard analysis without thinking dialogue/RAG
-            generateAnalysis(baseMessage, setResponses, setStoredFullResponses),
-            
-            // Analysis enhanced with thinking dialogue/RAG (if context exists)
-            (thinkingContextString || ragContextString) 
-              ? generateAnalysis(enhancedMessageWithContext, setThinkingResponses, setStoredThinkingFullResponses)
-              : Promise.resolve('') // Resolve with empty if no enhanced context
-          ]);
+          // Run standard analysis first to show results quickly
+          Logger.log('AntagoInteract', 'Generating standard analysis first');
+          const standardResponse = await generateAnalysis(
+            baseMessage, 
+            setResponses, 
+            setStoredFullResponses
+          );
           
-          Logger.log('AntagoInteract', 'Analysis generation complete', {
-            standardLength: standardResponse?.length || 0,
-            enhancedLength: enhancedResponse?.length || 0,
-            hasEnhancedResults: !!enhancedResponse
-          });
-
-          // Update the hasThinkingResults state indirectly by populating the thinkingResponses array
-          if (enhancedResponse) {
-            Logger.log('AntagoInteract', 'Setting thinking/enhanced responses to enable toggle');
-            setThinkingResponses([enhancedResponse]); // Store enhanced results here
-          } else {
-            Logger.log('AntagoInteract', 'No enhanced context was found or processed');
+          // Update parent immediately with standard response
+          onResponsesUpdate?.(splitResponse(standardResponse));
+          
+          // Mark as no longer loading once we have the initial response 
+          setLoading(false);
+          
+          // Now generate the enhanced response in the background if needed
+          if (thinkingContextString || ragContextString) {
+            // Use IIFE to create background process
+            (async () => {
+              try {
+                const enhancedResponse = await generateAnalysis(
+                  enhancedMessageWithContext,
+                  setThinkingResponses,
+                  setStoredThinkingFullResponses
+                );
+                
+                Logger.log('AntagoInteract', 'Thinking dialogue enhanced analysis complete', {
+                  standardLength: standardResponse?.length || 0,
+                  enhancedLength: enhancedResponse?.length || 0,
+                  hasEnhancedResults: !!enhancedResponse
+                });
+              } catch (error) {
+                console.error('Error generating enhanced analysis in background:', error);
+              }
+            })();
+          }
+          
+          // If simplified mode is active, generate the simplified version in the background
+          if (isSimplifiedMode) {
+            (async () => {
+              try {
+                setIsChangingTone(true);
+                const simplified = await OpenAIService.simplifyAnalysis(standardResponse);
+                setSimplifiedResponses([simplified]);
+                setStoredSimplifiedResponses({ normal: simplified });
+                
+                // Update UI with simplified response if in simplified mode
+                if (isSimplifiedMode && !useThemedDisplay) {
+                  onResponsesUpdate?.(splitResponse(simplified));
+                }
+                
+                setIsChangingTone(false);
+              } catch (error) {
+                console.error('Error generating simplified response:', error);
+                setIsChangingTone(false);
+              }
+            })();
           }
           
           // Save to Firebase in the background
-          try {
-            // Save analysis data
-            const analysisData = {
-              timestamp: null,
-              designChallenge: designChallenge,
-              decisions: notes, // Use notes directly instead of designStickyNotes.map()
-              analysis: {
-                full: splitResponse(standardResponse),
-                simplified: []
-              },
-              tone: selectedTone || 'normal',
-              consensusPoints: consensusPoints,
-              hasThinkingDialogue: useThinkingDialogue,
-              ...(useThinkingDialogue && enhancedResponse ? {
-                thinkingAnalysis: {
-                  full: splitResponse(enhancedResponse),
+          (async () => {
+            try {
+              // First save the main analysis data
+              const analysisData = {
+                timestamp: null,
+                designChallenge: designChallenge,
+                decisions: notes,
+                analysis: {
+                  full: splitResponse(standardResponse),
                   simplified: []
+                },
+                tone: selectedTone || 'normal',
+                consensusPoints: consensusPoints,
+                hasThinkingDialogue: useThinkingDialogue
+              };
+              await saveAnalysis(analysisData);
+              
+              // Log user activity
+              logUserActivity({
+                action: 'generate_analysis',
+                additionalData: {
+                  hasThemes: false,
+                  themedDisplay: false,
+                  challengeLength: designChallenge?.length || 0,
+                  consensusCount: consensusPoints?.length || 0,
+                  useThinkingDialogue: useThinkingDialogue,
+                  thinkingDialogueLength: dialogueContext?.length || 0
                 }
-              } : {})
-            };
-            await saveAnalysis(analysisData);
-            
-            // Log user activity
-            logUserActivity({
-              action: 'generate_analysis',
-              additionalData: {
-                hasThemes: false,
-                themedDisplay: false,
-                challengeLength: designChallenge?.length || 0,
-                consensusCount: consensusPoints?.length || 0,
-                useThinkingDialogue: useThinkingDialogue,
-                thinkingDialogueLength: dialogueContext?.length || 0
-              }
-            });
-          } catch (saveError) {
-            console.error('Error saving analysis data to Firebase:', saveError);
-            // Error handled silently to not disrupt user experience
-          }
+              });
+            } catch (error) {
+              console.error('Error saving analysis data to Firebase:', error);
+              // Error handled silently to not disrupt user experience
+            }
+          })();
           
           // Complete the loading state
           setLoading(false);
@@ -435,12 +533,14 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       ) => {
         // Generate all theme analyses in parallel with standard response
         const [themedResponsesData, response] = await Promise.all([
-          // Generate all theme analyses in parallel
+          // Generate all theme analyses in parallel, passing design principles and custom prompt
           OpenAIService.generateAllThemeAnalyses(
             messageContext,
             selectedThemes,
             designChallenge,
-            consensusPoints
+            consensusPoints,
+            designPrinciplesText || undefined,
+            customPromptText || undefined
           ),
           
           // Also generate original response for compatibility and fallback
@@ -448,7 +548,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             messageContext, 
             designChallenge,
             synthesizedPoints,
-            consensusPoints
+            consensusPoints,
+            designPrinciplesText || undefined,
+            customPromptText || undefined
           )
         ]);
         
@@ -460,175 +562,131 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         return { themedResponsesData, response };
       };
 
-      // Run both standard and thinking dialogue enhanced analyses in parallel
-      Logger.log('AntagoInteract', 'Generating themed analyses');
-      const [standardResults, enhancedResults] = await Promise.all([
-        // Standard themed analysis without thinking dialogue/RAG
-        generateThemedAnalysis(
-          baseMessage, 
-          setResponses, 
-          setThemedResponses, 
-          setStoredFullResponses
-        ),
-        
-        // Themed analysis enhanced with thinking dialogue/RAG (if context exists)
-        (thinkingContextString || ragContextString) 
-          ? generateThemedAnalysis(
-              enhancedMessageWithContext,
-              setThinkingResponses, // Still use thinking state vars for enhanced results
-              setThinkingThemedResponses,
-              setStoredThinkingFullResponses
-            )
-          : Promise.resolve({ themedResponsesData: [], response: '' }) // Resolve with empty if no enhanced context
-      ]);
-      
-      Logger.log('AntagoInteract', 'Themed analysis generation complete', {
-        standardLength: standardResults.response?.length || 0,
-        enhancedLength: enhancedResults.response?.length || 0,
-        hasEnhancedResults: !!enhancedResults.response
-      });
-      
-      // Update the hasThinkingResults state indirectly by populating the thinkingResponses array
-      if (enhancedResults && enhancedResults.response) {
-        Logger.log('AntagoInteract', 'Setting thinking/enhanced responses to enable toggle (themed)');
-        setThinkingResponses([enhancedResults.response]); // Store enhanced standard response
-        setThinkingThemedResponses(enhancedResults.themedResponsesData); // Store enhanced themed responses
-      } else {
-        Logger.log('AntagoInteract', 'No enhanced context was found or processed for themed generation');
-      }
-      
-      // Use the appropriate results based on current toggle state
-      const currentResults = useThinkingDialogue && enhancedResults.response 
-        ? enhancedResults 
-        : standardResults;
-      
+      // Generate standard themed analysis first to show results quickly
+      Logger.log('AntagoInteract', 'Generating standard themed analysis first');
+      const standardResults = await generateThemedAnalysis(
+        baseMessage, 
+        setResponses, 
+        setThemedResponses, 
+        setStoredFullResponses
+      );
+
       // Create a combined list of all points for backward compatibility
-      const allPoints = currentResults.themedResponsesData.flatMap(theme => theme.points);
-      
-      // Update parent with appropriate responses
+      const allPoints = standardResults.themedResponsesData.flatMap(theme => theme.points);
+
+      // Update parent with appropriate responses immediately 
       if (useThemedDisplay) {
-        // If using themed display, we still need to pass array of strings for compatibility
+        // If using themed display, pass all themed points
         onResponsesUpdate?.(allPoints);
       } else {
         // Otherwise, use the standard response format
-        const splitResponses = splitResponse(currentResults.response);
-        onResponsesUpdate?.(splitResponses);
+        onResponsesUpdate?.(splitResponse(standardResults.response));
       }
-      
-   
-      // Create a tracking variable for background operations
-      const backgroundPromises = [];
-      
-      // Always save to Firebase in the background
-      const savePromise = (async () => {
+
+      // Mark as no longer loading once we have the initial results
+      setLoading(false);
+
+      // Now generate the enhanced response in the background if needed
+      if (thinkingContextString || ragContextString) {
+        // Use IIFE to create background process
+        (async () => {
+          try {
+            const enhancedResults = await generateThemedAnalysis(
+              enhancedMessageWithContext,
+              setThinkingResponses,
+              setThinkingThemedResponses,
+              setStoredThinkingFullResponses
+            );
+            
+            Logger.log('AntagoInteract', 'Thinking dialogue enhanced themed analysis complete', {
+              standardThemes: standardResults.themedResponsesData.length || 0,
+              enhancedThemes: enhancedResults.themedResponsesData.length || 0
+            });
+          } catch (error) {
+            console.error('Error generating enhanced themed analysis in background:', error);
+          }
+        })();
+      }
+
+      // If simplified mode is active, generate the simplified version in the background
+      if (isSimplifiedMode) {
+        (async () => {
+          try {
+            setIsChangingTone(true);
+            
+            // Simplify standard response
+            const simplified = await OpenAIService.simplifyAnalysis(standardResults.response);
+            setSimplifiedResponses([simplified]);
+            setStoredSimplifiedResponses({ normal: simplified });
+            
+            // Update UI with simplified response if in simplified mode and not themed display
+            if (isSimplifiedMode && !useThemedDisplay) {
+              onResponsesUpdate?.(splitResponse(simplified));
+            }
+            
+            setIsChangingTone(false);
+          } catch (error) {
+            console.error('Error generating simplified response:', error);
+            setIsChangingTone(false);
+          }
+        })();
+      }
+
+      // Save to Firebase in the background
+      (async () => {
         try {
           // First save the main analysis data
           const analysisData = {
             timestamp: null,
             designChallenge: designChallenge,
-            decisions: notes, // Use notes directly instead of designStickyNotes.map()
+            decisions: notes,
             analysis: {
-              full: useThemedDisplay ? currentResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(currentResults.response),
+              full: useThemedDisplay ? standardResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(standardResults.response),
               simplified: []
             },
             tone: selectedTone || 'normal',
             consensusPoints: consensusPoints,
-            hasThinkingDialogue: useThinkingDialogue && dialogueContext && enhancedResults.response ? true : false,
-            ...(thinkingContextString || ragContextString ? {
-              thinkingAnalysis: {
-                full: useThemedDisplay ? enhancedResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(enhancedResults.response),
-                simplified: []
-              }
-            } : {})
+            hasThinkingDialogue: useThinkingDialogue
           };
           await saveAnalysis(analysisData);
           
           // If we have themed responses, also save them as design themes
-          if (currentResults.themedResponsesData.length > 0) {
+          if (standardResults.themedResponsesData.length > 0) {
             await saveDesignThemes({
-              themes: currentResults.themedResponsesData.map(theme => ({
+              themes: standardResults.themedResponsesData.map(theme => ({
                 name: theme.name,
                 color: theme.color,
                 description: theme.points.join(' | ')
               }))
             });
-            
-            if (useThinkingDialogue && currentResults.themedResponsesData.length > 0) {
-              await saveDesignThemes({
-                themes: currentResults.themedResponsesData.map(theme => ({
-                  name: `${theme.name} (with thinking dialogue)`,
-                  color: theme.color,
-                  description: theme.points.join(' | ')
-                }))
-              });
-            }
           }
+          
+          // Log user activity
+          logUserActivity({
+            action: 'generate_analysis',
+            additionalData: {
+              hasThemes: standardResults.themedResponsesData.length > 0, 
+              themedDisplay: useThemedDisplay,
+              challengeLength: designChallenge?.length || 0,
+              consensusCount: consensusPoints?.length || 0,
+              useThinkingDialogue: useThinkingDialogue,
+              thinkingDialogueLength: dialogueContext?.length || 0
+            }
+          });
         } catch (error) {
           console.error('Error saving analysis data to Firebase:', error);
           // Error handled silently to not disrupt user experience
         }
       })();
-      backgroundPromises.push(savePromise);
       
-      // Generate simplified version immediately if in simplified mode
-      if (isSimplifiedMode) {
-        
-        const simplifyPromise = (async () => {
-          try {
-            setIsChangingTone(true);
-            
-            // Simplify both standard and thinking analyses if needed
-            const [simplified, thinkingSimplified] = await Promise.all([
-              OpenAIService.simplifyAnalysis(standardResults.response),
-              (thinkingContextString || ragContextString) && enhancedResults && enhancedResults.response 
-                ? OpenAIService.simplifyAnalysis(enhancedResults.response) 
-                : Promise.resolve('')
-            ]);
-            
-            // Store simplifications
-            setSimplifiedResponses([simplified]);
-            setStoredSimplifiedResponses({ normal: simplified });
-            
-            if (useThinkingDialogue && thinkingSimplified) {
-              setThinkingSimplifiedResponses([thinkingSimplified]);
-              setStoredThinkingSimplifiedResponses({ normal: thinkingSimplified });
-            }
-            
-            // Update UI with the appropriate simplified response
-            const currentSimplified = useThinkingDialogue ? thinkingSimplified : simplified;
-            if (isSimplifiedMode && !useThemedDisplay) {
-              onResponsesUpdate?.(splitResponse(currentSimplified));
-            }
-            
-            setIsChangingTone(false);
-          } catch (error) {
-            setIsChangingTone(false);
-          }
-        })();
-        backgroundPromises.push(simplifyPromise);
-      }
+      // Add a small delay to ensure all background processes have started
+      await new Promise(resolve => setTimeout(resolve, 200));
       
-      // Wait for all background tasks to complete
-      await Promise.all(backgroundPromises);
-      
-      // Clean up
-      setLoading(false);
+      // Clean up and complete
       processingRef.current = false;
+      
+      // Call onComplete to signal we have at least the initial results ready
       onComplete?.();
-      
-      // Log user activity
-      logUserActivity({
-        action: 'generate_analysis',
-        additionalData: {
-          hasThemes: existingThemes.length > 0, 
-          themedDisplay: useThemedDisplay,
-          challengeLength: designChallenge?.length || 0,
-          consensusCount: consensusPoints?.length || 0,
-          useThinkingDialogue: useThinkingDialogue,
-          thinkingDialogueLength: dialogueContext?.length || 0
-        }
-      });
-      
     } catch (error) {
       setError('Failed to process notes: ' + (error as Error).message);
       setLoading(false);
@@ -1088,6 +1146,227 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }
   }, []);
 
+  /**
+   * Handle sending variations to the board
+   */
+  const handleSendVariations = useCallback(async () => {
+    try {
+      // Find the varied responses frame
+      const allFrames = await miro.board.get({ type: 'frame' });
+      const variedResponsesFrame = allFrames.find(f => f.title === frameConfig.names.variedResponses);
+      
+      if (!variedResponsesFrame) {
+        console.error('Varied Responses frame not found');
+        return;
+      }
+      
+      // Create message context from sticky notes
+      const designDecisionsContext = stickyNotes.map((noteContent, index) => 
+        `Design Decision ${index + 1}: ${noteContent || ''}`
+      ).join('\n');
+      
+      // Set a separate loading state for variations that doesn't affect the main UI
+      setIsVariationLoading(true);
+      
+      // Define specific positions for each variation type
+      //DON'T CHANGE THESE POSITIONS AS THEY ARE THE ONLY ONES THAT WORK
+      const positions = {
+        rag: {
+          x: variedResponsesFrame.x -800, // Position to align with RAG-Content header
+          y: variedResponsesFrame.y -800, // Position below the RAG-Content header
+          width: variedResponsesFrame.width - 400 // More space for content
+        },
+        principles: {
+          x: variedResponsesFrame.x -800, // Position to align with Design Principles header
+          y: variedResponsesFrame.y -100, // Position below the Design Principles header
+          width: variedResponsesFrame.width - 400 // More space for content
+        },
+        prompt: {
+          x: variedResponsesFrame.x -800, // Position to align with Customize System Prompt header
+          y: variedResponsesFrame.y +600, // Position below the Customize System Prompt header
+          width: variedResponsesFrame.width - 400 // More space for content
+        }
+      };
+      
+      // Custom function to create horizontal layout of sticky notes
+      const createHorizontalStickyNotes = async (
+        points: string[], 
+        baseX: number, 
+        baseY: number, 
+        maxWidth: number,
+        color: string
+      ) => {
+        if (!points.length) return;
+        
+        //DON'T CHANGE THESE VALUES AS THEY ARE THE ONLY ONES THAT WORK
+        const stickyWidth = 500;     // Width of each sticky note - increased from 240
+        const stickyHeight = 200;    // Height for row spacing calculation - increased from 160
+        const spacing = 30;          // Spacing between sticky notes - increased from 25
+        
+        // Calculate how many sticky notes can fit horizontally
+        const maxPerRow = Math.floor(maxWidth / (stickyWidth + spacing));
+        
+        // Create sticky notes in a horizontal layout
+        for (let i = 0; i < points.length; i++) {
+          // Calculate position (horizontally first, then new row)
+          const col = i % maxPerRow;
+          const row = Math.floor(i / maxPerRow);
+          
+          const x = baseX + col * (stickyWidth + spacing);
+          const y = baseY + row * (stickyHeight + spacing); // Use sticky height for row spacing
+          
+          // Create the sticky note with rectangular shape
+          await MiroApiClient.createStickyNote({
+            content: points[i],
+            x: x,
+            y: y,
+            width: stickyWidth,
+            shape: 'rectangle', // Use shape parameter instead of height
+            style: {
+              fillColor: color
+            }
+          });
+          
+          // Add a small delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      };
+      
+      // Process each selected variation
+      if (variationsToSend.rag) {
+        try {
+          // For RAG content, use the EXISTING antagonistic points 
+          // (the ones already generated with RAG in the background)
+          const currentResponse = useThinkingDialogue 
+            ? (isSimplifiedMode ? thinkingSimplifiedResponses[0] : thinkingResponses[0])
+            : (isSimplifiedMode ? simplifiedResponses[0] : responses[0]);
+          
+          if (currentResponse) {
+            // Split the response into individual points
+            const points = splitResponse(currentResponse);
+            
+            // Create sticky notes with horizontal layout
+            await createHorizontalStickyNotes(
+              points,
+              positions.rag.x,
+              positions.rag.y,
+              positions.rag.width,
+              'light_blue'
+            );
+          }
+        } catch (error) {
+          console.error('Error creating RAG sticky notes:', error);
+        }
+      }
+      
+      // For design principles, generate NEW points using only design principles
+      if (variationsToSend.principles && designPrinciplesText) {
+        try {
+          // Generate a NEW analysis using only the design principles
+          const principlesResponse = await OpenAIService.generateAnalysis(
+            designDecisionsContext,  // Use the created context
+            designChallenge,
+            synthesizedPoints, 
+            consensusPoints,
+            designPrinciplesText, // Use design principles
+            undefined // No custom prompt
+          );
+          
+          // Split the response into individual points
+          const points = splitResponse(principlesResponse);
+          
+          // Create sticky notes with horizontal layout
+          await createHorizontalStickyNotes(
+            points,
+            positions.principles.x,
+            positions.principles.y,
+            positions.principles.width,
+            'light_yellow'
+          );
+        } catch (error) {
+          console.error('Error generating principles-based analysis:', error);
+        }
+      }
+      
+      // For custom prompt, generate NEW points using only custom prompt
+      if (variationsToSend.prompt && customPromptText) {
+        try {
+          // Generate a NEW analysis using only the custom prompt
+          const customPromptResponse = await OpenAIService.generateAnalysis(
+            designDecisionsContext,  // Use the created context
+            designChallenge,
+            synthesizedPoints, 
+            consensusPoints,
+            undefined, // No design principles
+            customPromptText // Use custom prompt
+          );
+          
+          // Split the response into individual points
+          const points = splitResponse(customPromptResponse);
+          
+          // Create sticky notes with horizontal layout
+          await createHorizontalStickyNotes(
+            points,
+            positions.prompt.x,
+            positions.prompt.y,
+            positions.prompt.width,
+            'light_green'
+          );
+        } catch (error) {
+          console.error('Error generating custom-prompt-based analysis:', error);
+        }
+      }
+      
+      // Reset selection state
+      setVariationsToSend({
+        rag: false,
+        principles: false,
+        prompt: false
+      });
+      
+      // Log user activity
+      logUserActivity({
+        action: 'send_variations_to_board',
+        additionalData: {
+          sentRAG: variationsToSend.rag,
+          sentPrinciples: variationsToSend.principles,
+          sentPrompt: variationsToSend.prompt,
+        }
+      });
+      
+      // Always reset the variation loading state when done
+      setIsVariationLoading(false);
+    } catch (error) {
+      console.error('Error sending variations to board:', error);
+      // Ensure loading state is reset even on error
+      setIsVariationLoading(false);
+    }
+  }, [
+    designPrinciplesText, 
+    customPromptText, 
+    variationsToSend, 
+    responses, 
+    simplifiedResponses, 
+    thinkingResponses, 
+    thinkingSimplifiedResponses, 
+    isSimplifiedMode, 
+    useThinkingDialogue,
+    designChallenge,
+    synthesizedPoints,
+    consensusPoints,
+    stickyNotes
+  ]);
+
+  /**
+   * Handle variation selection change
+   */
+  const handleVariationSelectionChange = useCallback((variation: keyof VariationsToSend, selected: boolean) => {
+    setVariationsToSend(prev => ({
+      ...prev,
+      [variation]: selected
+    }));
+  }, []);
+
   if (error) {
     return <div className="error-message">{error}</div>;
   }
@@ -1126,6 +1405,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               useThinkingDialogue={useThinkingDialogue}
               onThinkingDialogueToggle={handleThinkingDialogueToggle}
               hasThinkingResults={thinkingResponses.length > 0}
+              // Add new props for variations
+              hasRagContent={!!currentRagContent}
+              hasPrinciples={!!designPrinciplesText}
+              hasPrompt={!!customPromptText}
+              variationsToSend={variationsToSend}
+              onVariationSelectionChange={handleVariationSelectionChange}
+              onSendVariations={handleSendVariations}
             />
             {/* Analysis Results - Moved above controls */}
             <AnalysisResults
@@ -1142,7 +1428,82 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               useThemedDisplay={useThemedDisplay}
             />
             
-            
+            <div className="mb-2">
+              <h3 className="font-semibold text-lg mb-2">Send To Board:</h3>
+              <div className="mb-3">
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                  <label style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    opacity: !!currentRagContent ? 1 : 0.5, 
+                    cursor: !!currentRagContent ? 'pointer' : 'not-allowed',
+                    backgroundColor: !!currentRagContent ? (variationsToSend.rag ? '#e6f7ff' : 'transparent') : '#f5f5f5',
+                    padding: '5px 10px',
+                    borderRadius: '4px',
+                    border: `1px solid ${!!currentRagContent ? (variationsToSend.rag ? '#4a86e8' : '#e0e0e0') : '#e0e0e0'}`,
+                    transition: 'all 0.2s ease'
+                  }}>
+                    <input 
+                      type="checkbox" 
+                      checked={variationsToSend.rag} 
+                      onChange={(e) => setVariationsToSend(prev => ({ ...prev, rag: e.target.checked }))}
+                      disabled={!currentRagContent}
+                      style={{ marginRight: '5px' }}
+                    />
+                    RAG Content
+                  </label>
+                  
+                  <label style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    opacity: !!designPrinciplesText ? 1 : 0.5, 
+                    cursor: !!designPrinciplesText ? 'pointer' : 'not-allowed',
+                    backgroundColor: !!designPrinciplesText ? (variationsToSend.principles ? '#e6f7ff' : 'transparent') : '#f5f5f5',
+                    padding: '5px 10px',
+                    borderRadius: '4px',
+                    border: `1px solid ${!!designPrinciplesText ? (variationsToSend.principles ? '#4a86e8' : '#e0e0e0') : '#e0e0e0'}`,
+                    transition: 'all 0.2s ease'
+                  }}>
+                    <input 
+                      type="checkbox" 
+                      checked={variationsToSend.principles} 
+                      onChange={(e) => setVariationsToSend(prev => ({ ...prev, principles: e.target.checked }))}
+                      disabled={!designPrinciplesText}
+                      style={{ marginRight: '5px' }}
+                    />
+                    Design Principles
+                  </label>
+                  
+                  <label style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    opacity: !!customPromptText ? 1 : 0.5, 
+                    cursor: !!customPromptText ? 'pointer' : 'not-allowed',
+                    backgroundColor: !!customPromptText ? (variationsToSend.prompt ? '#e6f7ff' : 'transparent') : '#f5f5f5',
+                    padding: '5px 10px',
+                    borderRadius: '4px',
+                    border: `1px solid ${!!customPromptText ? (variationsToSend.prompt ? '#4a86e8' : '#e0e0e0') : '#e0e0e0'}`,
+                    transition: 'all 0.2s ease'
+                  }}>
+                    <input 
+                      type="checkbox" 
+                      checked={variationsToSend.prompt} 
+                      onChange={(e) => setVariationsToSend(prev => ({ ...prev, prompt: e.target.checked }))}
+                      disabled={!customPromptText}
+                      style={{ marginRight: '5px' }}
+                    />
+                    Agent Prompt
+                  </label>
+                </div>
+                <button
+                  onClick={handleSendVariations}
+                  className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 font-medium transition-colors"
+                  disabled={isVariationLoading || !(variationsToSend.rag || variationsToSend.principles || variationsToSend.prompt)}
+                >
+                  {isVariationLoading ? "Processing variations..." : "Send Selected Variations to Board"}
+                </button>
+              </div>
+            </div>
           </div>
         </>
       )}

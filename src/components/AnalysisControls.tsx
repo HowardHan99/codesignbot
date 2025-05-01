@@ -1,6 +1,12 @@
 /**
  * Props interface for the AnalysisControls component
  */
+interface VariationsToSend {
+  rag: boolean;
+  principles: boolean;
+  prompt: boolean;
+}
+
 interface AnalysisControlsProps {
   selectedTone: string;              // Currently selected tone for the analysis
   isSimplifiedMode: boolean;         // Whether simplified mode is active
@@ -13,6 +19,13 @@ interface AnalysisControlsProps {
   onShowSynthesizedPoints: () => void;           // Handler for showing synthesized points
   onDisplayToggle?: () => void;                  // Handler for display mode toggle (optional for backward compatibility)
   onThinkingDialogueToggle?: () => void;         // Handler for thinking dialogue toggle
+  // New props for variations
+  hasRagContent: boolean;
+  hasPrinciples: boolean;
+  hasPrompt: boolean;
+  variationsToSend: VariationsToSend;
+  onVariationSelectionChange: (variation: keyof VariationsToSend, selected: boolean) => void;
+  onSendVariations: () => void;
 }
 
 /**
@@ -31,6 +44,13 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
   onShowSynthesizedPoints,
   onDisplayToggle = () => {},
   onThinkingDialogueToggle = () => {},
+  // New props for variations
+  hasRagContent,
+  hasPrinciples,
+  hasPrompt,
+  variationsToSend,
+  onVariationSelectionChange,
+  onSendVariations
 }) => {
   return (
     <div style={{ 
@@ -241,6 +261,91 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
           💡 Currently showing themed points. Each theme contains points related to that theme's focus.
         </div>
       )}
+
+      {/* New section for variations */}
+      <div style={{ marginTop: '10px', borderTop: '1px solid #ddd', paddingTop: '10px' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Send Variations to Board:</div>
+        
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+          <label style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            opacity: hasRagContent ? 1 : 0.5, 
+            cursor: hasRagContent ? 'pointer' : 'not-allowed',
+            backgroundColor: hasRagContent ? (variationsToSend.rag ? '#e6f7ff' : 'transparent') : '#f5f5f5',
+            padding: '5px 10px',
+            borderRadius: '4px',
+            border: `1px solid ${hasRagContent ? (variationsToSend.rag ? '#4a86e8' : '#e0e0e0') : '#e0e0e0'}`,
+            transition: 'all 0.2s ease'
+          }}>
+            <input 
+              type="checkbox" 
+              checked={variationsToSend.rag} 
+              onChange={(e) => onVariationSelectionChange('rag', e.target.checked)}
+              disabled={!hasRagContent}
+              style={{ marginRight: '5px' }}
+            />
+            RAG Content
+          </label>
+          
+          <label style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            opacity: hasPrinciples ? 1 : 0.5, 
+            cursor: hasPrinciples ? 'pointer' : 'not-allowed',
+            backgroundColor: hasPrinciples ? (variationsToSend.principles ? '#e6f7ff' : 'transparent') : '#f5f5f5',
+            padding: '5px 10px',
+            borderRadius: '4px',
+            border: `1px solid ${hasPrinciples ? (variationsToSend.principles ? '#4a86e8' : '#e0e0e0') : '#e0e0e0'}`,
+            transition: 'all 0.2s ease'
+          }}>
+            <input 
+              type="checkbox" 
+              checked={variationsToSend.principles} 
+              onChange={(e) => onVariationSelectionChange('principles', e.target.checked)}
+              disabled={!hasPrinciples}
+              style={{ marginRight: '5px' }}
+            />
+            Design Principles
+          </label>
+          
+          <label style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            opacity: hasPrompt ? 1 : 0.5, 
+            cursor: hasPrompt ? 'pointer' : 'not-allowed',
+            backgroundColor: hasPrompt ? (variationsToSend.prompt ? '#e6f7ff' : 'transparent') : '#f5f5f5',
+            padding: '5px 10px',
+            borderRadius: '4px',
+            border: `1px solid ${hasPrompt ? (variationsToSend.prompt ? '#4a86e8' : '#e0e0e0') : '#e0e0e0'}`,
+            transition: 'all 0.2s ease'
+          }}>
+            <input 
+              type="checkbox" 
+              checked={variationsToSend.prompt} 
+              onChange={(e) => onVariationSelectionChange('prompt', e.target.checked)}
+              disabled={!hasPrompt}
+              style={{ marginRight: '5px' }}
+            />
+            Agent Prompt
+          </label>
+        </div>
+        
+        <button 
+          onClick={onSendVariations}
+          disabled={!(variationsToSend.rag || variationsToSend.principles || variationsToSend.prompt)}
+          style={{
+            backgroundColor: (variationsToSend.rag || variationsToSend.principles || variationsToSend.prompt) ? '#4a86e8' : '#ccc',
+            color: 'white',
+            border: 'none',
+            padding: '5px 10px',
+            borderRadius: '3px',
+            cursor: (variationsToSend.rag || variationsToSend.principles || variationsToSend.prompt) ? 'pointer' : 'not-allowed'
+          }}
+        >
+          Place Selected on Board
+        </button>
+      </div>
     </div>
   );
 }; 
