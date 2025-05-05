@@ -8,6 +8,10 @@ import { Frame, StickyNote } from '@mirohq/websdk-types';
 import { OpenAIService } from '../services/openaiService';
 import { StickyNoteService } from './miro/stickyNoteService';
 import { frameConfig } from '../utils/config';
+import { Logger } from '../utils/logger';
+
+// Log context for this service
+const LOG_CONTEXT = 'DESIGN-THEME';
 
 /**
  * Theme or group identified from design content
@@ -60,7 +64,7 @@ export class DesignThemeService {
    * Clear cached theme positions to force a fresh calculation
    */
   public static clearThemePositions(): void {
-    console.log('Clearing cached theme positions');
+    Logger.log(LOG_CONTEXT, 'Clearing cached theme positions');
     this.themePositions.clear();
   }
 
@@ -76,7 +80,7 @@ export class DesignThemeService {
    * This is a mock implementation - the actual method should be added to OpenAIService
    */
   private static async mockGenerateThemes(text: string): Promise<ThemeResponse[]> {
-    console.log("Mocking theme generation - please implement OpenAIService.generateThemes");
+    Logger.log(LOG_CONTEXT, "Mocking theme generation - please implement OpenAIService.generateThemes");
     return [
       { name: "User Experience", description: "Focus on user interactions and experiences" },
       { name: "Technical Feasibility", description: "Consideration of technical implementation challenges" },
@@ -119,7 +123,7 @@ export class DesignThemeService {
   private static async getDesignProposals(): Promise<string[]> {
     const frameName = frameConfig.names.designProposal;
     const proposals = await this.getStickiesFromFrame(frameName);
-    console.log(`Found ${proposals.length} design proposals`);
+    Logger.log(LOG_CONTEXT, `Found ${proposals.length} design proposals`);
     return proposals;
   }
 
@@ -129,7 +133,7 @@ export class DesignThemeService {
   private static async getThinkingDialogue(): Promise<string[]> {
     const frameName = frameConfig.names.thinkingDialogue;
     const dialogue = await this.getStickiesFromFrame(frameName);
-    console.log(`Found ${dialogue.length} thinking dialogue notes`);
+    Logger.log(LOG_CONTEXT, `Found ${dialogue.length} thinking dialogue notes`);
     return dialogue;
   }
 
@@ -140,14 +144,14 @@ export class DesignThemeService {
     try {
       const frame = await MiroFrameService.findFrameByTitle(frameName);
       if (!frame) {
-        console.log(`${frameName} frame not found`);
+        Logger.log(LOG_CONTEXT, `${frameName} frame not found`);
         return [];
       }
 
       const stickies = await MiroApiClient.getStickiesInFrame(frame.id);
       return stickies.map(sticky => sticky.content || '');
     } catch (error) {
-      console.error(`Error getting stickies from ${frameName}:`, error);
+      Logger.error(LOG_CONTEXT, `Error getting stickies from ${frameName}:`, error);
       return [];
     }
   }
@@ -209,15 +213,15 @@ Example of CORRECT response format:
       const result = await response.json();
 
       // Add detailed logging
-      console.log('Raw API response received:', typeof result.response);
-      console.log('Response preview:', result.response.substring(0, 100) + '...');
+      Logger.log(LOG_CONTEXT, `Raw API response received: ${typeof result.response}`);
+      Logger.log(LOG_CONTEXT, `Response preview: ${result.response.substring(0, 100)}...`);
       
       // Parse the JSON response
       let themes: DesignTheme[] = [];
       try {
         // Extract JSON content if it's wrapped in markdown code blocks
         const jsonContent = this.extractJsonFromMarkdown(result.response);
-        console.log('Extracted JSON content:', jsonContent.substring(0, 100) + '...');
+        Logger.log(LOG_CONTEXT, `Extracted JSON content: ${jsonContent.substring(0, 100)}...`);
         
         // Parse the JSON content
         let parsed: any[] = [];
@@ -251,15 +255,15 @@ Example of CORRECT response format:
         // Limit to 4 themes if we have more
         themes = themes.slice(0, 4);
         
-        console.log(`Successfully prepared ${themes.length} themes`);
+        Logger.log(LOG_CONTEXT, `Successfully prepared ${themes.length} themes`);
       } catch (error) {
-        console.error('Error parsing themes:', error);
+        Logger.error(LOG_CONTEXT, 'Error parsing themes:', error);
         throw new Error('Failed to parse theme data. Please check the API response format.');
       }
 
       return themes;
     } catch (error) {
-      console.error('Error analyzing content for themes:', error);
+      Logger.error(LOG_CONTEXT, 'Error analyzing content for themes:', error);
       throw error;
     }
   }
@@ -273,7 +277,7 @@ Example of CORRECT response format:
     const match = text.match(jsonCodeBlockRegex);
     
     if (match && match[1]) {
-      console.log('Found JSON content in markdown code block');
+      Logger.log(LOG_CONTEXT, 'Found JSON content in markdown code block');
       return match[1].trim();
     }
     
@@ -297,7 +301,7 @@ Example of CORRECT response format:
     }
     
     if (start !== -1 && end !== -1) {
-      console.log('Found balanced JSON-like structure');
+      Logger.log(LOG_CONTEXT, 'Found balanced JSON-like structure');
       return text.substring(start, end + 1);
     }
     
@@ -306,18 +310,18 @@ Example of CORRECT response format:
     const jsonMatch = text.match(possibleJsonRegex);
     
     if (jsonMatch && jsonMatch[1]) {
-      console.log('Found JSON-like content without markdown wrapper');
+      Logger.log(LOG_CONTEXT, 'Found JSON-like content without markdown wrapper');
       return jsonMatch[1].trim();
     }
     
     // Check if it's possibly just a single object without array wrapper
     if (text.includes('"name"') && text.includes('"description"') && text.includes('"relatedPoints"')) {
-      console.log('Found JSON-like properties without proper structure');
+      Logger.log(LOG_CONTEXT, 'Found JSON-like properties without proper structure');
       return text.trim();
     }
     
     // If all else fails, return the original text and let JSON.parse handle any errors
-    console.log('No JSON pattern found, returning original text');
+    Logger.log(LOG_CONTEXT, 'No JSON pattern found, returning original text');
     return text.trim();
   }
 
@@ -333,13 +337,13 @@ Example of CORRECT response format:
       const themeFrame = existingFrames.find(frame => frame.title === this.THEME_FRAME_NAME);
       
       if (themeFrame) {
-        console.log(`Found existing theme frame: ${themeFrame.id}`);
-        console.log(`Using existing theme frame without modifying its contents`);
+        Logger.log(LOG_CONTEXT, `Found existing theme frame: ${themeFrame.id}`);
+        Logger.log(LOG_CONTEXT, `Using existing theme frame without modifying its contents`);
         return themeFrame;
       }
       
       // Frame not found, create new frame
-      console.log('Theme frame not found, creating new frame');
+      Logger.log(LOG_CONTEXT, 'Theme frame not found, creating new frame');
       
       // Get the current viewport
       const viewport = await miro.board.viewport.get();
@@ -352,7 +356,7 @@ Example of CORRECT response format:
       const frameX = viewport.x + viewport.width / 2;
       const frameY = viewport.y + viewport.height / 2;
       
-      console.log(`Creating theme frame at position: x=${frameX}, y=${frameY}, width=${frameWidth}, height=${frameHeight}`);
+      Logger.log(LOG_CONTEXT, `Creating theme frame at position: x=${frameX}, y=${frameY}, width=${frameWidth}, height=${frameHeight}`);
       
       // Create the frame
       const newFrame = await miro.board.createFrame({
@@ -366,7 +370,7 @@ Example of CORRECT response format:
         }
       });
       
-      console.log(`Created new theme frame: ${newFrame.id}`);
+      Logger.log(LOG_CONTEXT, `Created new theme frame: ${newFrame.id}`);
       
       // Wait a moment for Miro to process the frame
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -376,7 +380,7 @@ Example of CORRECT response format:
       
       return newFrame;
     } catch (error) {
-      console.error('Error ensuring theme frame:', error);
+      Logger.error(LOG_CONTEXT, 'Error ensuring theme frame:', error);
       throw error;
     }
   }
@@ -416,7 +420,7 @@ Example of CORRECT response format:
    */
   public static calculateStickyNotePosition(frame: Frame, themeIndex: number): {x: number, y: number} {
     // POSITIONING BREAKDOWN:
-    console.log(`[DEBUG] Frame dimensions: width=${frame.width}, height=${frame.height}`);
+    Logger.log(LOG_CONTEXT, `[DEBUG] Frame dimensions: width=${frame.width}, height=${frame.height}`);
     
     // 1. VERTICAL POSITIONING
     const rows = 4; // Four rows, one for each theme
@@ -438,8 +442,8 @@ Example of CORRECT response format:
     // This puts them well below the theme bar regardless of the theme bar's exact position
     const stickyY = rowTopEdge + (adjustedRowHeight * 0.6);
     
-    console.log(`[DEBUG] Row ${row}: top=${rowTopEdge}, bottom=${rowBottomEdge}`);
-    console.log(`[DEBUG] Sticky Y position at 60% of row: ${stickyY}`);
+    Logger.log(LOG_CONTEXT, `[DEBUG] Row ${row}: top=${rowTopEdge}, bottom=${rowBottomEdge}`);
+    Logger.log(LOG_CONTEXT, `[DEBUG] Sticky Y position at 60% of row: ${stickyY}`);
     
     // 2. HORIZONTAL POSITIONING
     //DON'T CHANGE THIS 200 - IT'S THE CORRECT POSITION FOR THE STICKY NOTES
@@ -461,8 +465,8 @@ Example of CORRECT response format:
       // Calculate position for the sticky note
       const position = this.calculateStickyNotePosition(frame, themeIndex);
       
-      console.log(`[DEBUG] Test sticky note for "${theme.name}" at: x=${position.x}, y=${position.y}`);
-      console.log(`[DEBUG] Distance from frame top: ${position.y - (frame.y - frame.height/2)}px`);
+      Logger.log(LOG_CONTEXT, `[DEBUG] Test sticky note for "${theme.name}" at: x=${position.x}, y=${position.y}`);
+      Logger.log(LOG_CONTEXT, `[DEBUG] Distance from frame top: ${position.y - (frame.y - frame.height/2)}px`);
       
       // We no longer need to store the position here since it's stored in createThemeGroup
       // this.themePositions.set(theme.name, {
@@ -489,12 +493,12 @@ Example of CORRECT response format:
         }
       });
       
-      console.log(`[DEBUG] Created test sticky: ${sticky.id}`);
+      Logger.log(LOG_CONTEXT, `[DEBUG] Created test sticky: ${sticky.id}`);
       
       // Wait for Miro to process
       await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error) {
-      console.error(`[ERROR] Failed to create test sticky note for "${theme.name}":`, error);
+      Logger.error(LOG_CONTEXT, `[ERROR] Failed to create test sticky note for "${theme.name}":`, error);
     }
   }
   
@@ -504,7 +508,7 @@ Example of CORRECT response format:
   public static async placeStickyNotesUnderTheme(themeName: string, stickyContents: string[]): Promise<void> {
     const position = this.themePositions.get(themeName);
     if (!position) {
-      console.error(`No position found for theme: ${themeName}`);
+      Logger.error(LOG_CONTEXT, `No position found for theme: ${themeName}`);
       return;
     }
     
@@ -516,7 +520,7 @@ Example of CORRECT response format:
     const theme = await this.getThemeByName(themeName);
     const color = theme ? theme.color : 'light_yellow';
     
-    console.log(`[DEBUG] Placing ${stickyContents.length} stickies under "${themeName}" at (${position.x}, ${position.y})`);
+    Logger.log(LOG_CONTEXT, `[DEBUG] Placing ${stickyContents.length} stickies under "${themeName}" at (${position.x}, ${position.y})`);
     
     // Create each sticky note with proper spacing
     for (let i = 0; i < stickyContents.length; i++) {
@@ -533,9 +537,9 @@ Example of CORRECT response format:
           }
         });
         
-        console.log(`[DEBUG] Created sticky: ${sticky.id} at x=${position.x + offsetX}, y=${position.y}`);
+        Logger.log(LOG_CONTEXT, `[DEBUG] Created sticky: ${sticky.id} at x=${position.x + offsetX}, y=${position.y}`);
       } catch (error) {
-        console.error(`[ERROR] Failed to create sticky note: "${stickyContents[i].substring(0, 30)}..."`);
+        Logger.error(LOG_CONTEXT, `[ERROR] Failed to create sticky note: "${stickyContents[i].substring(0, 30)}..."`);
       }
       
       // Small delay between sticky notes
@@ -552,7 +556,7 @@ Example of CORRECT response format:
       let themes = await this.generateDesignThemes();
       return themes.find(t => t.name === themeName) || null;
     } catch (error) {
-      console.error(`Error finding theme by name: ${themeName}`, error);
+      Logger.error(LOG_CONTEXT, `Error finding theme by name: ${themeName}`, error);
       return null;
     }
   }
@@ -570,26 +574,26 @@ Example of CORRECT response format:
     // This ensures no test sticky notes are ever created
     this.testStickyNotesEnabled = false;
     
-    console.log(`[DEBUG] Test sticky notes DISABLED (parameter ignored for safety)`);
+    Logger.log(LOG_CONTEXT, `[DEBUG] Test sticky notes DISABLED (parameter ignored for safety)`);
     
     try {
-      console.log(`Visualizing ${themes.length} themes in '${this.THEME_FRAME_NAME}' frame...`);
+      Logger.log(LOG_CONTEXT, `Visualizing ${themes.length} themes in '${this.THEME_FRAME_NAME}' frame...`);
       
       // Create or find themes frame
       const themeFrame = await this.ensureThemeFrame();
-      console.log(`Frame ready: ${themeFrame.id} (${themeFrame.title})`);
+      Logger.log(LOG_CONTEXT, `Frame ready: ${themeFrame.id} (${themeFrame.title})`);
 
       // Skip clearing process - we're not removing any items
-      console.log('Preserving all existing content in theme frame (no items will be removed)');
+      Logger.log(LOG_CONTEXT, 'Preserving all existing content in theme frame (no items will be removed)');
 
       // Handle case where no themes were found
       if (themes.length === 0) {
-        console.log('No themes to visualize, skipping visualization');
+        Logger.log(LOG_CONTEXT, 'No themes to visualize, skipping visualization');
         return;
       }
 
       // Check for existing themes to avoid duplicates
-      console.log("Checking for existing themes to avoid duplicates...");
+      Logger.log(LOG_CONTEXT, "Checking for existing themes to avoid duplicates...");
       const existingThemeNames = new Set<string>();
       
       // Get text elements within the frame to identify existing theme names
@@ -601,35 +605,35 @@ Example of CORRECT response format:
         }
       }
       
-      console.log(`Found ${existingThemeNames.size} existing theme names in frame`);
+      Logger.log(LOG_CONTEXT, `Found ${existingThemeNames.size} existing theme names in frame`);
       
       // Filter out themes that already exist on the board
       const themesToShow = themes.filter(theme => {
         const lowerThemeName = theme.name.toLowerCase();
         if (existingThemeNames.has(lowerThemeName)) {
-          console.log(`Theme "${theme.name}" already exists on board, skipping visualization`);
+          Logger.log(LOG_CONTEXT, `Theme "${theme.name}" already exists on board, skipping visualization`);
           return false;
         }
         return true;
       });
       
-      console.log(`Creating ${themesToShow.length} new themes (${themes.length - themesToShow.length} skipped as duplicates)`);
+      Logger.log(LOG_CONTEXT, `Creating ${themesToShow.length} new themes (${themes.length - themesToShow.length} skipped as duplicates)`);
       
       // Create theme groups only for new themes
       for (let i = 0; i < themesToShow.length; i++) {
-        console.log(`Creating theme ${i+1}/${themesToShow.length}: "${themesToShow[i].name}"`);
+        Logger.log(LOG_CONTEXT, `Creating theme ${i+1}/${themesToShow.length}: "${themesToShow[i].name}"`);
         await this.createThemeGroup(themesToShow[i], themeFrame, i);
       }
 
       // Ensure we calculate positions for all themes, including existing ones
       // This ensures we have positions for sticky note placement
-      console.log("Calculating positions for all themes...");
+      Logger.log(LOG_CONTEXT, "Calculating positions for all themes...");
       for (let i = 0; i < themes.length; i++) {
         const theme = themes[i];
         
         // Skip if we already calculated position for this theme
         if (this.themePositions.has(theme.name)) {
-          console.log(`Position for "${theme.name}" already calculated, skipping`);
+          Logger.log(LOG_CONTEXT, `Position for "${theme.name}" already calculated, skipping`);
           continue;
         }
         
@@ -643,21 +647,21 @@ Example of CORRECT response format:
           themeIndex: i % 4
         });
         
-        console.log(`Calculated position for "${theme.name}": x=${position.x}, y=${position.y}`);
+        Logger.log(LOG_CONTEXT, `Calculated position for "${theme.name}": x=${position.x}, y=${position.y}`);
       }
 
-      console.log('All themes created, zooming to frame');
+      Logger.log(LOG_CONTEXT, 'All themes created, zooming to frame');
       // Zoom to frame
       await miro.board.viewport.zoomTo(themeFrame);
-      console.log('Visualization complete');
+      Logger.log(LOG_CONTEXT, 'Visualization complete');
       
       // Log all theme positions for debugging
-      console.log('[DEBUG] Final theme positions map:');
+      Logger.log(LOG_CONTEXT, '[DEBUG] Final theme positions map:');
       this.themePositions.forEach((pos, name) => {
-        console.log(`  "${name}": x=${pos.x}, y=${pos.y}, index=${pos.themeIndex}`);
+        Logger.log(LOG_CONTEXT, `  "${name}": x=${pos.x}, y=${pos.y}, index=${pos.themeIndex}`);
       });
     } catch (error) {
-      console.error('Error visualizing themes:', error);
+      Logger.error(LOG_CONTEXT, 'Error visualizing themes:', error);
       throw error;
     }
   }
@@ -668,21 +672,21 @@ Example of CORRECT response format:
    */
   public static async generateAndVisualizeThemes(createTestStickies: boolean = true): Promise<void> {
     try {
-      console.log('[DEBUG] Starting theme generation (test stickies always disabled)');
+      Logger.log(LOG_CONTEXT, '[DEBUG] Starting theme generation (test stickies always disabled)');
       
-      console.log('Generating design themes...');
+      Logger.log(LOG_CONTEXT, 'Generating design themes...');
       const themes = await this.generateDesignThemes();
       
-      console.log(`Generated ${themes.length} design themes`);
+      Logger.log(LOG_CONTEXT, `Generated ${themes.length} design themes`);
       await this.visualizeThemes(themes, false); // Always pass false for safety
       
-      console.log('Design themes visualized successfully');
-      console.log('[DEBUG] Theme positions:', 
+      Logger.log(LOG_CONTEXT, 'Design themes visualized successfully');
+      Logger.log(LOG_CONTEXT, '[DEBUG] Theme positions:', 
         Array.from(this.themePositions.entries()).map(([name, pos]) => 
           `${name}: (${pos.x}, ${pos.y})`)
       );
     } catch (error) {
-      console.error('Error generating and visualizing themes:', error);
+      Logger.error(LOG_CONTEXT, 'Error generating and visualizing themes:', error);
       throw error;
     }
   }
@@ -705,8 +709,8 @@ Example of CORRECT response format:
     const themeY = rowTopEdge + (rowHeight * 0.05);
     
     // Log frame details for debugging
-    console.log(`[DEBUG] Frame details: id=${frame.id}, width=${frame.width}, height=${frame.height}`);
-    console.log(`[DEBUG] Row ${row}: top=${rowTopEdge}, theme Y=${themeY}, height=${rowHeight}`);
+    Logger.log(LOG_CONTEXT, `[DEBUG] Frame details: id=${frame.id}, width=${frame.width}, height=${frame.height}`);
+    Logger.log(LOG_CONTEXT, `[DEBUG] Row ${row}: top=${rowTopEdge}, theme Y=${themeY}, height=${rowHeight}`);
     
     // Create a full-width shape (horizontal bar)
     await miro.board.createShape({
@@ -746,7 +750,7 @@ Example of CORRECT response format:
       themeIndex: index
     });
     
-    console.log(`[DEBUG] Position marked for theme "${theme.name}": x=${position.x}, y=${position.y}`);
+    Logger.log(LOG_CONTEXT, `[DEBUG] Position marked for theme "${theme.name}": x=${position.x}, y=${position.y}`);
     
     // We never create test sticky notes or position markers now
     // Test sticky notes and position markers have been disabled to prevent any
@@ -763,13 +767,13 @@ Example of CORRECT response format:
    */
   public static async getCurrentThemesFromBoard(): Promise<DesignTheme[]> {
     try {
-      console.log(`Getting current themes from ${this.THEME_FRAME_NAME} frame...`);
+      Logger.log(LOG_CONTEXT, `Getting current themes from ${this.THEME_FRAME_NAME} frame...`);
       
       // Find the theme frame
       const themeFrame = await MiroFrameService.findFrameByTitle(this.THEME_FRAME_NAME);
       
       if (!themeFrame) {
-        console.log(`${this.THEME_FRAME_NAME} frame not found`);
+        Logger.log(LOG_CONTEXT, `${this.THEME_FRAME_NAME} frame not found`);
         return [];
       }
       
@@ -780,11 +784,11 @@ Example of CORRECT response format:
       const textsInFrame = await MiroFrameService.getItemsWithinFrame(themeFrame, ['text']);
       
       if (textsInFrame.length === 0) {
-        console.log(`No text elements found in ${this.THEME_FRAME_NAME} frame`);
+        Logger.log(LOG_CONTEXT, `No text elements found in ${this.THEME_FRAME_NAME} frame`);
         return [];
       }
       
-      console.log(`Found ${textsInFrame.length} text elements in the frame`);
+      Logger.log(LOG_CONTEXT, `Found ${textsInFrame.length} text elements in the frame`);
       
       // Clean the text content
       const cleanedTexts = textsInFrame.map(text => {
@@ -795,9 +799,9 @@ Example of CORRECT response format:
       });
 
       // Log all found text elements
-      console.log("All text elements in frame:");
+      Logger.log(LOG_CONTEXT, "All text elements in frame:");
       cleanedTexts.forEach(text => {
-        console.log(`- "${text.content}" at position ${text.x}, ${text.y}`);
+        Logger.log(LOG_CONTEXT, `- "${text.content}" at position ${text.x}, ${text.y}`);
       });
       
       // Filter for potential theme headers - main theme titles
@@ -817,7 +821,7 @@ Example of CORRECT response format:
         return isCentered && isPossiblyHeader;
       });
       
-      console.log(`Found ${potentialThemes.length} potential theme headers`);
+      Logger.log(LOG_CONTEXT, `Found ${potentialThemes.length} potential theme headers`);
       
       // Sort themes by vertical position (top to bottom)
       potentialThemes.sort((a, b) => a.y - b.y);
@@ -840,7 +844,7 @@ Example of CORRECT response format:
         
         // Skip duplicate themes (don't add number suffix, just skip)
         if (seenThemeNames.has(themeText.content.toLowerCase())) {
-          console.log(`Skipping duplicate theme: "${themeText.content}"`);
+          Logger.log(LOG_CONTEXT, `Skipping duplicate theme: "${themeText.content}"`);
           continue;
         }
         
@@ -872,17 +876,17 @@ Example of CORRECT response format:
           color: themeColor
         });
         
-        console.log(`Added theme "${themeText.content}" with color ${themeColor} in row ${row}`);
+        Logger.log(LOG_CONTEXT, `Added theme "${themeText.content}" with color ${themeColor} in row ${row}`);
       }
       
-      console.log(`Returning ${themes.length} themes found in the frame:`);
+      Logger.log(LOG_CONTEXT, `Returning ${themes.length} themes found in the frame:`);
       themes.forEach((theme, idx) => {
-        console.log(`[${idx}] "${theme.name}" with color ${theme.color}`);
+        Logger.log(LOG_CONTEXT, `[${idx}] "${theme.name}" with color ${theme.color}`);
       });
       
       return themes;
     } catch (error) {
-      console.error(`Error getting current themes from board:`, error);
+      Logger.error(LOG_CONTEXT, `Error getting current themes from board:`, error);
       return [];
     }
   }
@@ -931,16 +935,16 @@ Example of CORRECT response format:
     }[];
   }> {
     try {
-      console.log('Getting design decision structure...');
+      Logger.log(LOG_CONTEXT, 'Getting design decision structure...');
       
       // Get current themes from the Antagonistic-Response frame
       const themes = await this.getCurrentThemesFromBoard();
-      console.log(`Found ${themes.length} themes for the design decision structure`);
+      Logger.log(LOG_CONTEXT, `Found ${themes.length} themes for the design decision structure`);
       
       // Find decisions in the Design-Proposal frame
       // Get sticky notes from the Design-Proposal frame
       const proposals = await this.getDesignProposals();
-      console.log(`Found ${proposals.length} design proposals for decisions`);
+      Logger.log(LOG_CONTEXT, `Found ${proposals.length} design proposals for decisions`);
       
       // Simple theme-based decision categorization
       // Each proposal will be categorized into the most relevant theme
@@ -1000,7 +1004,7 @@ Example of CORRECT response format:
       
       return result;
     } catch (error) {
-      console.error('Error getting design decision structure:', error);
+      Logger.error(LOG_CONTEXT, 'Error getting design decision structure:', error);
       return { themes: [] };
     }
   }
@@ -1027,20 +1031,20 @@ Example of CORRECT response format:
         throw new Error('Insufficient points to categorize. Need at least 10 points.');
       }
 
-      console.log(`Categorizing ${points.length} antagonistic points into themes`);
+      Logger.log(LOG_CONTEXT, `Categorizing ${points.length} antagonistic points into themes`);
       
       // Get the themes - either use existing ones or generate new ones
       let themes: (DesignTheme & { isSelected?: boolean })[];
       if (existingThemes && existingThemes.length > 0) {
-        console.log(`Using ${existingThemes.length} existing themes for categorization`);
+        Logger.log(LOG_CONTEXT, `Using ${existingThemes.length} existing themes for categorization`);
         themes = existingThemes;
       } else {
-        console.log('No existing themes provided, generating new themes');
+        Logger.log(LOG_CONTEXT, 'No existing themes provided, generating new themes');
         themes = await this.generateDesignThemes();
         // Mark all newly generated themes as selected by default
         themes = themes.map(theme => ({ ...theme, isSelected: true }));
       }
-      console.log(`Using ${themes.length} design themes for categorization`);
+      Logger.log(LOG_CONTEXT, `Using ${themes.length} design themes for categorization`);
       
       // Filter to only use selected themes (or all if none are marked as selected)
       const selectedThemes = themes.filter(theme => theme.isSelected !== false);
@@ -1048,7 +1052,7 @@ Example of CORRECT response format:
       // If no themes are selected, use all themes (first use case or fallback)
       const themesToUse = selectedThemes.length > 0 ? selectedThemes : themes;
       
-      console.log(`Using ${themesToUse.length} themes for point categorization`);
+      Logger.log(LOG_CONTEXT, `Using ${themesToUse.length} themes for point categorization`);
       
       // Use OpenAI to categorize points by theme
       const result = await this.categorizationWithOpenAI(points, themesToUse);
@@ -1090,11 +1094,11 @@ Example of CORRECT response format:
         };
       });
       
-      console.log(`Successfully categorized points into ${finalThemes.length} themes`);
+      Logger.log(LOG_CONTEXT, `Successfully categorized points into ${finalThemes.length} themes`);
       
       return { themes: finalThemes };
     } catch (error) {
-      console.error('Error categorizing antagonistic points:', error);
+      Logger.error(LOG_CONTEXT, 'Error categorizing antagonistic points:', error);
       
       // Fallback: split points evenly between two generic themes
       const points10 = points.slice(0, 10);
@@ -1224,7 +1228,7 @@ ${points.map((point, index) => `${index + 1}. ${point}`).join('\n')}`;
       
       return validatedResult;
     } catch (error) {
-      console.error('Error in OpenAI categorization:', error);
+      Logger.error(LOG_CONTEXT, 'Error in OpenAI categorization:', error);
       
       // Fallback: distribute points evenly between themes
       const result: Record<string, string[]> = {};

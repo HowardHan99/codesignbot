@@ -17,6 +17,10 @@ import { DesignThemeDisplay } from './DesignThemeDisplay';
 import { StickyNoteService } from '../services/miro/stickyNoteService';
 import { logUserActivity, saveDesignProposals, saveThinkingDialogues, saveDesignThemes } from '../utils/firebase';
 import { frameConfig } from '../utils/config';
+import { Logger } from '../utils/logger';
+
+// Log context for this component
+const LOG_CONTEXT = 'DESIGN-DECISIONS';
 
 const AntagoInteract = dynamic(() => import('./AntagoInteract'), { 
   loading: () => <div>Loading...</div>,
@@ -49,7 +53,7 @@ interface DesignOutput {
 
 // Helper function to build a decision tree from notes and connections
 const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
-  console.log('Building decision tree from:', { 
+  Logger.log(LOG_CONTEXT, 'Building decision tree from:', { 
     notes: notes.length, 
     connections: connections.length 
   });
@@ -66,7 +70,7 @@ const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
   });
 
   // Log all note content for debugging
-  console.log('Notes in tree:', Array.from(noteMap.keys()));
+  Logger.log(LOG_CONTEXT, 'Notes in tree:', Array.from(noteMap.keys()));
 
   // Create a map to track children for each note
   const childrenMap = new Map<string, Set<string>>();
@@ -86,7 +90,7 @@ const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
     
     // Skip if we don't have either note in our map
     if (!noteMap.has(fromContent) || !noteMap.has(toContent)) {
-      console.log('Connection refers to notes not in the map:', { from: fromContent, to: toContent });
+      Logger.log(LOG_CONTEXT, 'Connection refers to notes not in the map:', { from: fromContent, to: toContent });
       return;
     }
     
@@ -104,7 +108,7 @@ const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
   });
 
   // Log relationship maps for debugging
-  console.log('Relationship data:', {
+  Logger.log(LOG_CONTEXT, 'Relationship data:', {
     notes: noteMap.size,
     connections: connections.length,
     childrenCount: Array.from(childrenMap.entries()).map(([k, v]) => ({ note: k, children: v.size })),
@@ -115,12 +119,12 @@ const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
   const rootNodes = Array.from(noteMap.keys())
     .filter(content => !parentMap.get(content)?.size);
   
-  console.log('Root nodes:', rootNodes);
+  Logger.log(LOG_CONTEXT, 'Root nodes:', rootNodes);
 
   // Recursive function to build the tree structure
   const buildTree = (content: string, visited = new Set<string>()): any => {
     if (visited.has(content)) {
-      console.log('Circular reference detected:', content);
+      Logger.log(LOG_CONTEXT, 'Circular reference detected:', content);
       return null; // Prevent circular references
     }
     visited.add(content);
@@ -141,7 +145,7 @@ const buildDecisionTree = (notes: StickyNote[], connections: Connection[]) => {
   
   // If no root nodes found, use all notes as separate trees
   if (trees.length === 0 && noteMap.size > 0) {
-    console.log('No root nodes found, using all notes as separate trees');
+    Logger.log(LOG_CONTEXT, 'No root nodes found, using all notes as separate trees');
     return Array.from(noteMap.keys()).map(content => ({
       content,
       id: noteMap.get(content)?.id,
@@ -249,15 +253,15 @@ export function MainBoard({
       
       if (designFrame) {
         setDesignFrameId(designFrame.id);
-        console.log(`Found ${frameConfig.names.designProposal} frame ID:`, designFrame.id);
+        Logger.log(LOG_CONTEXT, `Found ${frameConfig.names.designProposal} frame ID:`, designFrame.id);
         return designFrame.id;
       } else {
-        console.log(`${frameConfig.names.designProposal} frame not found`);
+        Logger.log(LOG_CONTEXT, `${frameConfig.names.designProposal} frame not found`);
         setDesignFrameId(null);
         return null;
       }
     } catch (err) {
-      console.error(`Error getting ${frameConfig.names.designProposal} frame:`, err);
+      Logger.error(LOG_CONTEXT, `Error getting ${frameConfig.names.designProposal} frame:`, err);
       return null;
     }
   };
@@ -267,7 +271,7 @@ export function MainBoard({
     try {
       const frameId = designFrameId || await getDesignFrameId();
       if (!frameId) {
-        console.log(`${frameConfig.names.designProposal} frame not found, cannot get data.`); 
+        Logger.log(LOG_CONTEXT, `${frameConfig.names.designProposal} frame not found, cannot get data.`); 
         return { notes: [], connections: [] }; 
       }
 
@@ -276,11 +280,13 @@ export function MainBoard({
       const designFrame = frames.find(f => f.id === frameId);
       
       if (!designFrame) {
-        console.log(`${frameConfig.names.designProposal} frame object not found even though we have the ID`); 
+        Logger.log(LOG_CONTEXT, `${frameConfig.names.designProposal} frame object not found even though we have the ID`); 
         return { notes: [], connections: [] };
       }
 
-      // Use the new method to get frame content with connections
+      Logger.log(LOG_CONTEXT, `Getting data from ${frameConfig.names.designProposal} frame with ID: ${frameId}`);
+      
+      // Use the frame service to get content with connections
       const { stickies, connections } = await MiroFrameService.getFrameContentWithConnections(designFrame);
       
       // Format the data for our component
@@ -289,11 +295,16 @@ export function MainBoard({
         content: item.content || ''
       }));
       
-      console.log(`Retrieved ${notes.length} design notes and ${connections.length} connections`);
+      Logger.log(LOG_CONTEXT, `Retrieved ${notes.length} design notes and ${connections.length} connections from ${frameConfig.names.designProposal} frame`);
+
+      // Log the first few notes for debugging
+      if (notes.length > 0) {
+        Logger.log(LOG_CONTEXT, `First 3 design notes: ${notes.slice(0, 3).map(n => n.content.substring(0, 30) + '...').join(', ')}`);
+      }
 
       return { notes, connections };
     } catch (err) {
-      console.error('Error getting design data:', err);
+      Logger.error(LOG_CONTEXT, 'Error getting design data:', err);
       return { notes: [], connections: [] };
     } 
   };
@@ -330,7 +341,7 @@ export function MainBoard({
       
       // Also trigger a refresh of the design themes
       setThemeRefreshTrigger(prev => prev + 1);
-      console.log('Triggered design theme refresh');
+      Logger.log(LOG_CONTEXT, 'Triggered design theme refresh');
       
       logUserActivity({
         action: 'refresh_design_decisions'
@@ -343,13 +354,13 @@ export function MainBoard({
           proposals: proposalTexts,
           boardId: await getCurrentBoardId()
         });
-        console.log(`Saved ${proposalTexts.length} design proposals to Firebase`);
+        Logger.log(LOG_CONTEXT, `Saved ${proposalTexts.length} design proposals to Firebase`);
       } catch (error) {
-        console.error('Error saving design proposals to Firebase:', error);
+        Logger.error(LOG_CONTEXT, 'Error saving design proposals to Firebase:', error);
       }
       
     } catch (error) {
-      console.error('Error refreshing design decisions:', error);
+      Logger.error(LOG_CONTEXT, 'Error refreshing design decisions:', error);
       miro.board.notifications.showError('Failed to refresh design decisions. Please try again.');
     } finally {
       setIsRefreshing(false);
@@ -363,9 +374,9 @@ export function MainBoard({
         const { notes, connections } = await getCurrentDesignData();
         setDesignNotes(notes);
         setDesignConnections(connections);
-        console.log(`Initial data loaded: ${notes.length} notes, ${connections.length} connections`);
+        Logger.log(LOG_CONTEXT, `Initial data loaded: ${notes.length} notes, ${connections.length} connections`);
       } catch (error) {
-        console.error('Error loading initial design data:', error);
+        Logger.error(LOG_CONTEXT, 'Error loading initial design data:', error);
       }
     };
     
@@ -401,7 +412,7 @@ export function MainBoard({
         }
       });
     } catch (error) {
-      console.error('Error during analysis:', error);
+      Logger.error(LOG_CONTEXT, 'Error during analysis:', error);
       miro.board.notifications.showError('Failed to refresh analysis. Please try again.');
       onAnalysisComplete();
     }
@@ -413,12 +424,12 @@ export function MainBoard({
       setIsSavingImage(true);
       const imagePaths = await MiroService.getAllImagesFromFrame();
       if (imagePaths.length > 0) {
-        console.log('Images saved successfully:', imagePaths);
+        Logger.log(LOG_CONTEXT, 'Images saved successfully:', imagePaths);
       } else {
-        console.log(`No images found in ${frameConfig.names.sketchReference} frame`); 
+        Logger.log(LOG_CONTEXT, `No images found in ${frameConfig.names.sketchReference} frame`); 
       }
     } catch (error) {
-      console.error('Error saving images:', error);
+      Logger.error(LOG_CONTEXT, 'Error saving images:', error);
     } finally {
       setIsSavingImage(false);
     }
@@ -435,7 +446,7 @@ export function MainBoard({
         setImageContext(combinedContext);
       }
     } catch (error) {
-      console.error('Error parsing images:', error);
+      Logger.error(LOG_CONTEXT, 'Error parsing images:', error);
     } finally {
       setIsParsingImage(false);
     }
@@ -486,29 +497,29 @@ export function MainBoard({
       //   'Design-Proposal'
       // );
       
-      console.log(`[DesignDecisions] handleNewDesignPoints received ${points.length} points (sticky creation handled by VoiceRecorder).`);
+      Logger.log(LOG_CONTEXT, `[DesignDecisions] handleNewDesignPoints received ${points.length} points (sticky creation handled by VoiceRecorder).`);
       
       // Optional: Trigger refresh if necessary, but seems redundant as it's called below?
       // Consider if handleRefreshDesignDecisions is still needed here or if it's implicitly covered.
       // await handleRefreshDesignDecisions(); 
     } catch (error) {
-      console.error('Error processing design points callback:', error);
+      Logger.error(LOG_CONTEXT, 'Error processing design points callback:', error);
     }
   }, [/* keep relevant dependencies like handleRefreshDesignDecisions if needed */ handleRefreshDesignDecisions]);
 
   // New function to handle designer role play
   const handleDesignerRolePlay = async () => {
     if (isRolePlayingDesigner) {
-      console.log('[DESIGNER ROLE PLAY UI] Button clicked but already role playing, ignoring');
+      Logger.log(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Button clicked but already role playing, ignoring');
       return;
     }
     
-    console.log('[DESIGNER ROLE PLAY UI] Role play designer button clicked');
+    Logger.log(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Role play designer button clicked');
     const startTime = Date.now();
     
     try {
       setIsRolePlayingDesigner(true);
-      console.log(`[DESIGNER ROLE PLAY UI] Starting designer role play simulation with model: ${selectedDesignerModel}`);
+      Logger.log(LOG_CONTEXT, `[DESIGNER ROLE PLAY UI] Starting designer role play simulation with model: ${selectedDesignerModel}`);
       
       // If Claude is selected, show a message about the thinking process
       if (selectedDesignerModel === DesignerModelType.CLAUDE) {
@@ -517,11 +528,11 @@ export function MainBoard({
       
       // Call the designer role play service
       const designerThinking = await DesignerRolePlayService.simulateDesigner(selectedDesignerModel);
-      console.log('[DESIGNER ROLE PLAY UI] Designer role play simulation completed successfully');
+      Logger.log(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Designer role play simulation completed successfully');
       
       // Log detailed information about the thinking content for debugging
       if (designerThinking && designerThinking.thinking && designerThinking.thinking.length > 0) {
-        console.log('[DESIGNER ROLE PLAY UI] Received thinking content:', {
+        Logger.log(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Received thinking content:', {
           thinkingPointsCount: designerThinking.thinking.length,
           firstThinkingPoint: designerThinking.thinking[0].substring(0, 150) + '...',
           isFromAPIExtendedThinking: selectedDesignerModel === DesignerModelType.CLAUDE,
@@ -535,17 +546,17 @@ export function MainBoard({
           miro.board.notifications.showInfo('Designer role play completed with extended thinking! View the thinking process in the Thinking-Dialogue frame.');
         }
       } else {
-        console.log('[DESIGNER ROLE PLAY UI] No thinking content received from the API');
+        Logger.log(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] No thinking content received from the API');
         setThinking([]);
       }
       
       // Refresh design decisions after role play
-      console.log('[DESIGNER ROLE PLAY UI] Refreshing design decisions');
+      Logger.log(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Refreshing design decisions');
       await handleRefreshDesignDecisions();
-      console.log('[DESIGNER ROLE PLAY UI] Design decisions refreshed');
+      Logger.log(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Design decisions refreshed');
       
       const duration = Date.now() - startTime;
-      console.log(`[DESIGNER ROLE PLAY UI] Complete designer role play process finished in ${duration}ms`);
+      Logger.log(LOG_CONTEXT, `[DESIGNER ROLE PLAY UI] Complete designer role play process finished in ${duration}ms`);
       
       // Show success notification
       miro.board.notifications.showInfo('Designer role play completed successfully!');
@@ -568,14 +579,14 @@ export function MainBoard({
             boardId: await getCurrentBoardId(),
             modelType: selectedDesignerModel
           });
-          console.log(`Saved ${designerThinking.thinking.length} thinking dialogues to Firebase`);
+          Logger.log(LOG_CONTEXT, `Saved ${designerThinking.thinking.length} thinking dialogues to Firebase`);
         } catch (error) {
-          console.error('Error saving thinking dialogues to Firebase:', error);
+          Logger.error(LOG_CONTEXT, 'Error saving thinking dialogues to Firebase:', error);
         }
       }
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.error(`[DESIGNER ROLE PLAY UI] Error role playing designer after ${duration}ms:`, error);
+      Logger.error(LOG_CONTEXT, `[DESIGNER ROLE PLAY UI] Error role playing designer after ${duration}ms:`, error);
       
       // Create a detailed error message, especially for Claude
       let errorMessage = 'Failed to role play designer. Please try again.';
@@ -594,13 +605,13 @@ export function MainBoard({
           errorMessage += 'Claude service error. The API might be temporarily unavailable.';
         } else if (error.message.includes('Validation error') || error.message.includes('character(s)')) {
           errorMessage += 'Message format validation error. This is likely an issue with our implementation. Please try GPT-4 while we fix this.';
-          console.error('[DESIGNER ROLE PLAY UI] Validation error details:', error.message);
+          Logger.error(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Validation error details:', error.message);
         } else if (error.message.includes('not_found_error') || error.message.includes('No available Claude models found')) {
           errorMessage += 'None of the Claude models are available with your API key. Please check your Anthropic account permissions and available models.';
-          console.error('[DESIGNER ROLE PLAY UI] Model availability error details:', error.message);
+          Logger.error(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Model availability error details:', error.message);
         } else if (error.message.includes('model:') && error.message.includes('404')) {
           errorMessage += 'The Claude model was not found. This has been fixed to use the correct model name format. Please try again.';
-          console.error('[DESIGNER ROLE PLAY UI] Model name error:', error.message);
+          Logger.error(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Model name error:', error.message);
         } else if (error.message.includes('thinking: Input should be') || 
                   error.message.includes('invalid_request_error') ||
                   error.message.includes('thinking.type: Field required') ||
@@ -609,7 +620,7 @@ export function MainBoard({
                   error.message.includes('content.type') ||
                   error.message.includes('thinking blocks')) {
           errorMessage += 'Error with the extended thinking feature format. This has been fixed and will work the next time you try.';
-          console.error('[DESIGNER ROLE PLAY UI] Thinking parameter error:', error.message);
+          Logger.error(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Thinking parameter error:', error.message);
         } else {
           // Include the actual error message for debugging
           errorMessage += error.message;
@@ -620,35 +631,35 @@ export function MainBoard({
       miro.board.notifications.showError(errorMessage);
     } finally {
       setIsRolePlayingDesigner(false);
-      console.log('[DESIGNER ROLE PLAY UI] Reset role playing state');
+      Logger.log(LOG_CONTEXT, '[DESIGNER ROLE PLAY UI] Reset role playing state');
     }
   };
 
   // Handle model change
   const handleModelChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedDesignerModel(event.target.value as DesignerModelType);
-    console.log(`[DESIGNER ROLE PLAY UI] Model changed to: ${event.target.value}`);
+    Logger.log(LOG_CONTEXT, `[DESIGNER ROLE PLAY UI] Model changed to: ${event.target.value}`);
   };
 
   // New function to handle design theme generation
   const handleGenerateThemes = async () => {
     if (isGeneratingThemes) {
-      console.log('[DESIGN THEMES UI] Button clicked but already generating themes, ignoring');
+      Logger.log(LOG_CONTEXT, '[DESIGN THEMES UI] Button clicked but already generating themes, ignoring');
       return;
     }
     
-    console.log('[DESIGN THEMES UI] Generate themes button clicked');
+    Logger.log(LOG_CONTEXT, '[DESIGN THEMES UI] Generate themes button clicked');
     const startTime = Date.now();
     
     try {
       setIsGeneratingThemes(true);
-      console.log('[DESIGN THEMES UI] Starting theme generation');
+      Logger.log(LOG_CONTEXT, '[DESIGN THEMES UI] Starting theme generation');
       
       await DesignThemeService.generateAndVisualizeThemes();
-      console.log('[DESIGN THEMES UI] Theme generation completed successfully');
+      Logger.log(LOG_CONTEXT, '[DESIGN THEMES UI] Theme generation completed successfully');
       
       const duration = Date.now() - startTime;
-      console.log(`[DESIGN THEMES UI] Complete theme generation process finished in ${duration}ms`);
+      Logger.log(LOG_CONTEXT, `[DESIGN THEMES UI] Complete theme generation process finished in ${duration}ms`);
       
       // Show success notification
       miro.board.notifications.showInfo('Design themes generated successfully!');
@@ -672,20 +683,20 @@ export function MainBoard({
             })),
             boardId: await getCurrentBoardId()
           });
-          console.log(`Saved ${generatedThemes.length} design themes to Firebase`);
+          Logger.log(LOG_CONTEXT, `Saved ${generatedThemes.length} design themes to Firebase`);
         }
       } catch (error) {
-        console.error('Error saving design themes to Firebase:', error);
+        Logger.error(LOG_CONTEXT, 'Error saving design themes to Firebase:', error);
       }
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.error(`[DESIGN THEMES UI] Error generating themes after ${duration}ms:`, error);
+      Logger.error(LOG_CONTEXT, `[DESIGN THEMES UI] Error generating themes after ${duration}ms:`, error);
       
       // Show error to user
       miro.board.notifications.showError('Failed to generate design themes. Please try again.');
     } finally {
       setIsGeneratingThemes(false);
-      console.log('[DESIGN THEMES UI] Reset theme generation state');
+      Logger.log(LOG_CONTEXT, '[DESIGN THEMES UI] Reset theme generation state');
     }
   };
 
@@ -705,64 +716,66 @@ export function MainBoard({
     if (!isNaN(newLimit) && newLimit > 0) {
       setStickyCharLimit(newLimit);
       StickyNoteService.setStickyCharLimit(newLimit);
-      console.log(`Sticky note character limit updated to ${newLimit}`);
+      Logger.log(LOG_CONTEXT, `Sticky note character limit updated to ${newLimit}`);
       miro.board.notifications.showInfo(`Sticky note character limit updated to ${newLimit}`);
     }
   };
 
   const callClaudeDesigner = async (designPrompt: string): Promise<DesignOutput> => {
-    console.log('[DesignDecisions] Calling Claude designer with prompt length:', designPrompt.length);
-    console.log('[DesignDecisions] Prompt preview:', designPrompt.substring(0, 100) + '...');
+    Logger.log(LOG_CONTEXT, `[DesignDecisions] Calling Claude designer with prompt length: ${designPrompt.length}`);
+    Logger.log(LOG_CONTEXT, `[DesignDecisions] Prompt preview: ${designPrompt.substring(0, 100)}...`);
     
     try {
       const start = performance.now();
-      console.log('[DesignDecisions] Sending request to /api/designer-roleplay');
+      Logger.log(LOG_CONTEXT, '[DesignDecisions] Sending request to /api/designer-roleplay');
       
       const response = await fetch('/api/designer-roleplay', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           prompt: designPrompt,
-        }),
+          model: 'claude-3-opus-20240229',
+          useClaudeDirect: true
+        })
       });
 
       const duration = performance.now() - start;
-      console.log(`[DesignDecisions] Request completed in ${duration.toFixed(0)}ms`);
+      Logger.log(LOG_CONTEXT, `[DesignDecisions] Request completed in ${duration.toFixed(0)}ms`);
       
       // Log response status
-      console.log('[DesignDecisions] Response status:', response.status, response.statusText);
+      Logger.log(LOG_CONTEXT, `[DesignDecisions] Response status: ${response.status} ${response.statusText}`);
       
       if (!response.ok) {
-        console.error('[DesignDecisions] Error response from API:', response.status, response.statusText);
+        Logger.error(LOG_CONTEXT, `[DesignDecisions] Error response from API: ${response.status} ${response.statusText}`);
         
         // Try to extract error details if possible
         try {
           const errorText = await response.text();
-          console.error('[DesignDecisions] Error details:', errorText);
+          Logger.error(LOG_CONTEXT, `[DesignDecisions] Error details: ${errorText}`);
           
           try {
             // Try to parse as JSON
             const errorJson = JSON.parse(errorText);
-            console.error('[DesignDecisions] Parsed error:', errorJson);
+            Logger.error(LOG_CONTEXT, `[DesignDecisions] Parsed error: ${JSON.stringify(errorJson)}`);
             
             if (errorJson?.error?.message) {
-              throw new Error(`Claude API error: ${errorJson.error.message}`);
+              throw new Error(errorJson.error.message);
             }
           } catch (e) {
             // Not JSON or JSON parsing failed
-            console.error('[DesignDecisions] Could not parse error as JSON');
+            Logger.error(LOG_CONTEXT, '[DesignDecisions] Could not parse error as JSON');
           }
         } catch (e) {
-          console.error('[DesignDecisions] Could not extract error text', e);
+          Logger.error(LOG_CONTEXT, '[DesignDecisions] Could not extract error text', e);
         }
         
-        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
-      console.log('[DesignDecisions] API response received:', {
+      Logger.log(LOG_CONTEXT, '[DesignDecisions] API response received:', {
         thinkingPointsCount: data.thinking?.length || 0,
         designDecisionsCount: data.designDecisions?.length || 0,
         firstThinkingPreview: data.thinking && data.thinking.length > 0 
@@ -775,21 +788,21 @@ export function MainBoard({
       
       // Validate response data
       if (!data.designDecisions || !Array.isArray(data.designDecisions)) {
-        console.error('[DesignDecisions] Invalid response format - missing designDecisions array', data);
+        Logger.error(LOG_CONTEXT, '[DesignDecisions] Invalid response format - missing designDecisions array', data);
         throw new Error('Invalid API response: missing designDecisions');
       }
       
-      console.log('[DesignDecisions] Processing complete, returning design output');
+      Logger.log(LOG_CONTEXT, '[DesignDecisions] Processing complete, returning design output');
       return data;
     } catch (error) {
-      console.error('[DesignDecisions] Error calling Claude designer:', error);
+      Logger.error(LOG_CONTEXT, '[DesignDecisions] Error calling Claude designer:', error);
       
       // Enhanced error handling
       let errorMessage = 'Failed to generate design decisions';
       
       if (error instanceof Error) {
-        console.error('[DesignDecisions] Error details:', error.message);
-        console.error('[DesignDecisions] Error stack:', error.stack);
+        Logger.error(LOG_CONTEXT, '[DesignDecisions] Error details:', error.message);
+        Logger.error(LOG_CONTEXT, '[DesignDecisions] Error stack:', error.stack);
         
         errorMessage = error.message;
         
@@ -803,7 +816,7 @@ export function MainBoard({
           error.message.includes('content.type') ||
           error.message.includes('thinking blocks')
         ) {
-          console.error('[DesignDecisions] Detected Claude API format error');
+          Logger.error(LOG_CONTEXT, '[DesignDecisions] Detected Claude API format error');
           errorMessage = 'There was an error with the extended thinking feature format. This has been fixed for future attempts.';
         }
       }
@@ -818,7 +831,7 @@ export function MainBoard({
       const boardInfo = await miro.board.getInfo();
       return boardInfo.id;
     } catch (error) {
-      console.error('Error getting board ID:', error);
+      Logger.error(LOG_CONTEXT, 'Error getting board ID:', error);
       return 'unknown-board';
     }
   };
@@ -826,15 +839,15 @@ export function MainBoard({
   // Fetch images from Miro (Sketch-Reference frame)
   const handleFetchImages = useCallback(async () => {
     setIsSavingImage(true);
-    console.log('Starting image fetch...');
+    Logger.log(LOG_CONTEXT, 'Starting image fetch...');
     try {
       await MiroService.getAllImagesFromFrame();
-      console.log('Images fetched and saved successfully');
+      Logger.log(LOG_CONTEXT, 'Images fetched and saved successfully');
     } catch (error) {
-      console.error('Error fetching or saving images:', error);
+      Logger.error(LOG_CONTEXT, 'Error fetching or saving images:', error);
       // Optionally check if error is specific to frame not found
       if (error instanceof Error && error.message.includes('frame not found')) {
-        console.log(`No images found in ${frameConfig.names.sketchReference} frame`);
+        Logger.log(LOG_CONTEXT, `No images found in ${frameConfig.names.sketchReference} frame`);
       }
     } finally {
       setIsSavingImage(false);

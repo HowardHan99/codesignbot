@@ -6,6 +6,10 @@ import { ProcessedDesignPoint, ProcessedPointWithRelevance } from '../types/comm
 import { StickyNoteService } from './miro/stickyNoteService';
 import { MiroApiClient } from './miro/miroApiClient';
 import { saveConsensusPoints } from '../utils/firebase';
+import { Logger } from '../utils/logger';
+
+// Log context for this service
+const LOG_CONTEXT = 'MIRO-SERVICE';
 
 /**
  * Main service class for Miro operations
@@ -48,11 +52,11 @@ export class MiroService {
           points,
           boardId: boardInfo.id
         });
-        console.log(`Saved ${points.length} consensus points to Firebase`);
+        Logger.log(LOG_CONTEXT, `Saved ${points.length} consensus points to Firebase`);
       }
       return points;
     } catch (err) {
-      console.error('Error getting consensus points:', err);
+      Logger.error(LOG_CONTEXT, 'Error getting consensus points:', err);
       return [];
     }
   }
@@ -71,7 +75,7 @@ export class MiroService {
    */
   public static async addConsensusPoints(points: string[]): Promise<void> {
     try {
-      console.log(`Adding ${points.length} consensus points`);
+      Logger.log(LOG_CONTEXT, `Adding ${points.length} consensus points`);
       
       // Convert string points to ProcessedDesignPoint format
       const processedPoints: ProcessedDesignPoint[] = points.map(point => ({
@@ -93,14 +97,14 @@ export class MiroService {
           points,
           boardId: boardInfo.id
         });
-        console.log(`Saved ${points.length} new consensus points to Firebase`);
+        Logger.log(LOG_CONTEXT, `Saved ${points.length} new consensus points to Firebase`);
       } catch (error) {
-        console.error('Error saving new consensus points to Firebase:', error);
+        Logger.error(LOG_CONTEXT, 'Error saving new consensus points to Firebase:', error);
       }
       
-      console.log(`Added ${points.length} consensus points`);
+      Logger.log(LOG_CONTEXT, `Added ${points.length} consensus points`);
     } catch (error) {
-      console.error('Error adding consensus points:', error);
+      Logger.error(LOG_CONTEXT, 'Error adding consensus points:', error);
       throw error;
     }
   }
@@ -126,12 +130,12 @@ export class MiroService {
       
       // If there are connections to create, we need to fetch the created stickies
       if (existingConnections && existingConnections.length > 0) {
-        console.log(`Creating ${existingConnections.length} connections between sticky notes`);
+        Logger.log(LOG_CONTEXT, `Creating ${existingConnections.length} connections between sticky notes`);
         
         // Find the frame
         const frame = await MiroFrameService.findFrameByTitle(frameName);
         if (!frame) {
-          console.error(`Frame ${frameName} not found for creating connections`);
+          Logger.error(LOG_CONTEXT, `Frame ${frameName} not found for creating connections`);
           return;
         }
         
@@ -170,13 +174,13 @@ export class MiroService {
               // Add delay between connector creations
               await new Promise(resolve => setTimeout(resolve, 500));
             } catch (error) {
-              console.error('Error creating connector:', error);
+              Logger.error(LOG_CONTEXT, 'Error creating connector:', error);
             }
           }
         }
       }
     } catch (error) {
-      console.error('Error creating stickies from points:', error);
+      Logger.error(LOG_CONTEXT, 'Error creating stickies from points:', error);
       throw error;
     }
   }

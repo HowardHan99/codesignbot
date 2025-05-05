@@ -5,6 +5,10 @@
 import { MiroFrameService } from './frameService';
 import { Frame } from '@mirohq/websdk-types';
 import BoardTokenManager from '../../utils/boardTokenManager';
+import { Logger } from '../../utils/logger';
+
+// Log context for this service
+const LOG_CONTEXT = 'DOCUMENT-SERVICE';
 
 interface DocumentStyling {
   fontSize?: number;
@@ -107,7 +111,7 @@ export class DocumentService {
       
       return textBox;
     } catch (error) {
-      console.error('Error creating document:', error);
+      Logger.error(LOG_CONTEXT, 'Error creating document:', error);
       throw error;
     }
   }
@@ -219,7 +223,7 @@ export class DocumentService {
       
       return textBox;
     } catch (error) {
-      console.error('Error creating research document:', error);
+      Logger.error(LOG_CONTEXT, 'Error creating research document:', error);
       throw error;
     }
   }
@@ -266,7 +270,7 @@ export class DocumentService {
   ): Promise<any> {
     try {
       // No direct call to createMiroNativeDocument here to avoid loops
-      console.warn('Using fallback createThinkingProcessDocument (TextBox method)');
+      Logger.warn(LOG_CONTEXT, 'Using fallback createThinkingProcessDocument (TextBox method)');
       
       // Find or create the frame
       let frame = await MiroFrameService.findFrameByTitle(frameTitle);
@@ -307,7 +311,7 @@ export class DocumentService {
       
       return textBox;
     } catch (error) {
-      console.error('Error creating thinking process document (fallback TextBox method):', error);
+      Logger.error(LOG_CONTEXT, 'Error creating thinking process document (fallback TextBox method):', error);
       throw error;
     }
   }
@@ -365,7 +369,7 @@ export class DocumentService {
       try {
         return await this.createMiroNativeDocument(frameTitle, 'Design Concept Proposals', proposals);
       } catch (docError) {
-        console.warn('Failed to create native Miro document for brainstorming, falling back to text box:', docError);
+        Logger.warn(LOG_CONTEXT, 'Failed to create native Miro document for brainstorming, falling back to text box:', docError);
       }
       
       // Fall back to text box if native document API fails
@@ -407,7 +411,7 @@ export class DocumentService {
       
       return textBox;
     } catch (error) {
-      console.error('Error creating brainstorming proposals document:', error);
+      Logger.error(LOG_CONTEXT, 'Error creating brainstorming proposals document:', error);
       throw error;
     }
   }
@@ -463,15 +467,15 @@ export class DocumentService {
       height?: number 
     } = {}
   ): Promise<any> {
-    console.log('Starting native document creation process...', { frameTitle, title });
+    Logger.log(LOG_CONTEXT, 'Starting native document creation process...', { frameTitle, title });
     
     try {
       // Find or create frame (logic remains the same)
       let frame = await MiroFrameService.findFrameByTitle(frameTitle);
-      console.log('Frame found/created:', frame ? { id: frame.id, title: frame.title } : 'Frame not found');
+      Logger.log(LOG_CONTEXT, 'Frame found/created:', frame ? { id: frame.id, title: frame.title } : 'Frame not found');
       
       if (!frame) {
-        console.log('Creating new frame with title:', frameTitle);
+        Logger.log(LOG_CONTEXT, 'Creating new frame with title:', frameTitle);
         frame = await MiroFrameService.createFrame(
           frameTitle,
           -1000,
@@ -479,16 +483,16 @@ export class DocumentService {
           1500,
           900
         );
-        console.log('New frame created:', { id: frame.id, title: frame.title });
+        Logger.log(LOG_CONTEXT, 'New frame created:', { id: frame.id, title: frame.title });
       }
       
       // Generate HTML content using the updated helper
       const htmlContent = this.generateHtmlDocument(title, content); // Pass combined content
-      console.log('HTML content generated, length:', htmlContent.length);
+      Logger.log(LOG_CONTEXT, 'HTML content generated, length:', htmlContent.length);
       
       // Set default position if not provided
       const position = options.position || { x: frame.x, y: frame.y };
-      console.log('Using position:', position);
+      Logger.log(LOG_CONTEXT, 'Using position:', position);
       
       let documentUrl;
       try {
@@ -497,7 +501,7 @@ export class DocumentService {
           htmlContent, 
           `miro_doc_${title.replace(/[^a-z0-9]/gi, '').toLowerCase()}_${Date.now()}.html`
         );
-        console.log('Successfully created Firebase URL for HTML content:', documentUrl);
+        Logger.log(LOG_CONTEXT, 'Successfully created Firebase URL for HTML content:', documentUrl);
         
         // Create a sticky note with the URL
         await miro.board.createStickyNote({
@@ -513,7 +517,7 @@ export class DocumentService {
         // Generate a screenshot of the HTML content and add it to the frame
         await this.generateScreenshot(htmlContent, frame, { x: position.x, y: position.y + 300 });
       } catch (firebaseError) {
-        console.error('Failed to create URL via Firebase:', firebaseError);
+        Logger.error(LOG_CONTEXT, 'Failed to create URL via Firebase:', firebaseError);
         documentUrl = null;
       }
       
@@ -535,17 +539,17 @@ export class DocumentService {
       
       // Focus the view on the created elements
       try {
-        console.log('Zooming to frame...');
+        Logger.log(LOG_CONTEXT, 'Zooming to frame...');
         await miro.board.viewport.zoomTo(frame);
-        console.log('Successfully zoomed to frame');
+        Logger.log(LOG_CONTEXT, 'Successfully zoomed to frame');
       } catch (zoomError) {
-        console.error('Failed to zoom to frame, but elements were created:', zoomError);
+        Logger.error(LOG_CONTEXT, 'Failed to zoom to frame, but elements were created:', zoomError);
         // Don't throw error here, as the elements were created successfully
       }
       
       return textElement;
     } catch (error) {
-      console.error('Error in createMiroNativeDocument:', error);
+      Logger.error(LOG_CONTEXT, 'Error in createMiroNativeDocument:', error);
       throw error;
     }
   }
@@ -632,7 +636,7 @@ export class DocumentService {
     position: { x: number, y: number }
   ): Promise<void> {
     try {
-      console.log('Generating HTML screenshot...');
+      Logger.log(LOG_CONTEXT, 'Generating HTML screenshot...');
       
       // Create a temporary div to render the HTML
       const tempDiv = document.createElement('div');
@@ -674,9 +678,9 @@ export class DocumentService {
           width: 1200
         });
         
-        console.log('Screenshot added to Miro board');
+        Logger.log(LOG_CONTEXT, 'Screenshot added to Miro board');
       } catch (canvasError) {
-        console.error('Error generating canvas screenshot:', canvasError);
+        Logger.error(LOG_CONTEXT, 'Error generating canvas screenshot:', canvasError);
         
         // Fallback: Create a placeholder image with text explaining the issue
         await miro.board.createText({
@@ -696,7 +700,7 @@ export class DocumentService {
       document.body.removeChild(tempDiv);
       
     } catch (error) {
-      console.error('Error generating screenshot:', error);
+      Logger.error(LOG_CONTEXT, 'Error generating screenshot:', error);
       // Don't throw - this is a non-critical feature
     }
   }

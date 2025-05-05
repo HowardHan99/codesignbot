@@ -1,6 +1,11 @@
 import { Frame } from '@mirohq/websdk-types';
 import { UserAuthService } from './userAuthService';
 import BoardTokenManager from '../../utils/boardTokenManager';
+import { Logger } from '../../utils/logger';
+
+// Log context constants for this service
+const LOG_CONTEXT = 'MIRO-FRAME';
+const FRAME_CONTENT_CONTEXT = 'FRAME-CONTENT';
 
 /**
  * Service for handling Miro frame operations
@@ -66,19 +71,19 @@ export class MiroFrameService {
     types: string[] = ['sticky_note', 'text', 'shape', 'connector']
   ): Promise<T[]> {
     try {
-      console.log(`Getting items of types [${types.join(', ')}] within frame: ${frame.title} (${frame.id})`);
+      Logger.log(LOG_CONTEXT, `Getting items of types [${types.join(', ')}] within frame: ${frame.title} (${frame.id})`);
       
       // Get all items of the specified types
       const allItems = await miro.board.get({ type: types });
-      console.log(`Found ${allItems.length} total items of requested types`);
+      Logger.log(LOG_CONTEXT, `Found ${allItems.length} total items of requested types`);
       
       // Filter items that are within the frame's bounds
       const itemsInFrame = allItems.filter(item => this.isItemInFrame(item, frame));
-      console.log(`Found ${itemsInFrame.length} items within frame ${frame.title}`);
+      Logger.log(LOG_CONTEXT, `Found ${itemsInFrame.length} items within frame ${frame.title}`);
       
       return itemsInFrame as T[];
     } catch (error) {
-      console.error(`Error getting items within frame ${frame.title}:`, error);
+      Logger.error(LOG_CONTEXT, `Error getting items within frame ${frame.title}:`, error);
       return [] as T[];
     }
   }
@@ -87,22 +92,16 @@ export class MiroFrameService {
    * Gets sticky notes within a frame's boundaries
    */
   public static async getStickiesInFrame(frame: Frame): Promise<any[]> {
-    console.log(`Getting sticky notes in frame: ${frame.title} (${frame.id})`);
+    Logger.log(LOG_CONTEXT, `Getting sticky notes in frame: ${frame.title} (${frame.id})`);
     
-    // First try using parentId
+    // Get all sticky notes
     const allStickies = await miro.board.get({ type: 'sticky_note' });
+    
+    // Only use parentId to find stickies (most reliable when parentId is set)
     const stickyNotesByParentId = allStickies.filter(sticky => sticky.parentId === frame.id);
+    Logger.log(LOG_CONTEXT, `Found ${stickyNotesByParentId.length} sticky notes by parentId in frame ${frame.title}`);
     
-    console.log(`Found ${stickyNotesByParentId.length} sticky notes by parentId in frame ${frame.title}`);
-    
-    // If we didn't find any by parentId, try using coordinates
-    if (stickyNotesByParentId.length === 0) {
-      const stickyNotesByCoords = await this.getItemsInFrameBounds(frame);
-      console.log(`Found ${stickyNotesByCoords.length} sticky notes by coordinates in frame ${frame.title}`);
-      
-      return stickyNotesByCoords;
-    }
-    
+    // Return the stickies found by parentId, or empty array if none found
     return stickyNotesByParentId;
   }
 
@@ -188,7 +187,7 @@ export class MiroFrameService {
     // Check if current user is authorized
     const isAuthorized = await UserAuthService.isAuthorizedForFrame(frame.id);
     if (!isAuthorized) {
-      console.log('User not authorized to access this frame');
+      Logger.log(LOG_CONTEXT, 'User not authorized to access this frame');
       return;
     }
 
@@ -305,7 +304,7 @@ export class MiroFrameService {
 
       return true;
     } catch (error) {
-      console.error('Error marking frame as restricted:', error);
+      Logger.error(LOG_CONTEXT, 'Error marking frame as restricted:', error);
       return false;
     }
   }
@@ -319,7 +318,7 @@ export class MiroFrameService {
       await this.markFrameAsRestricted(frame, userEmails);
       return frame;
     } catch (error) {
-      console.error('Error creating restricted frame:', error);
+      Logger.error(LOG_CONTEXT, 'Error creating restricted frame:', error);
       return null;
     }
   }
@@ -334,19 +333,48 @@ export class MiroFrameService {
     connections: {from: string, to: string}[]
   }> {
     try {
-      console.log(`Getting content with connections for frame: ${frame.title} (${frame.id})`);
+      Logger.log(FRAME_CONTENT_CONTEXT, `Getting content with connections for frame: ${frame.title} (${frame.id})`);
       
-      // Get sticky notes in the frame
-      const stickies = await this.getStickiesInFrame(frame);
+      // Array to store all items with content (sticky notes and shapes)
+      let itemsWithContent: any[] = [];
       
-      // Create a set of sticky IDs for checking connections
-      const stickyIds = new Set(stickies.map(sticky => sticky.id));
+      // Get all sticky notes
+      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      Logger.log(FRAME_CONTENT_CONTEXT, `Found ${allStickies.length} total sticky notes on the board`);
+      
+      // Important: Only use parentId to find stickies in the frame
+      const stickiesInFrame = allStickies.filter(sticky => sticky.parentId === frame.id);
+      Logger.log(FRAME_CONTENT_CONTEXT, `Found ${stickiesInFrame.length} sticky notes with parentId=${frame.id} in frame ${frame.title}`);
+      
+      // Add sticky notes to the items array
+      itemsWithContent = [...stickiesInFrame];
+      
+      // Get all shapes that might have text content
+      const allShapes = await miro.board.get({ type: 'shape' });
+      Logger.log(FRAME_CONTENT_CONTEXT, `Found ${allShapes.length} total shapes on the board`);
+      
+      // Filter shapes in the frame by parentId
+      const shapesInFrame = allShapes.filter(shape => 
+        shape.parentId === frame.id && 
+        shape.content && 
+        shape.content.trim() !== ''
+      );
+      Logger.log(FRAME_CONTENT_CONTEXT, `Found ${shapesInFrame.length} shapes with content and parentId=${frame.id} in frame ${frame.title}`);
+      
+      // Add shapes to the items array
+      itemsWithContent = [...itemsWithContent, ...shapesInFrame];
+      
+      // Log summary of all content items found
+      Logger.log(FRAME_CONTENT_CONTEXT, `Total content items (stickies + shapes) in frame: ${itemsWithContent.length}`);
+      
+      // Create a set of item IDs for checking connections
+      const itemIds = new Set(itemsWithContent.map(item => item.id));
       
       // Get all connectors on the board
       const connectors = await miro.board.get({ type: 'connector' });
-      console.log(`Found ${connectors.length} total connectors on the board`);
+      Logger.log(FRAME_CONTENT_CONTEXT, `Found ${connectors.length} total connectors on the board`);
       
-      // Filter connectors that connect stickies in this frame
+      // Filter connectors that connect items in this frame
       const frameConnections: {from: string, to: string}[] = [];
       
       for (const connector of connectors) {
@@ -356,29 +384,29 @@ export class MiroFrameService {
         const startItemId = connector.start.item;
         const endItemId = connector.end.item;
         
-        // Only include connections where both stickies are in this frame
-        if (stickyIds.has(startItemId) && stickyIds.has(endItemId)) {
-          // Get the content of connected stickies
-          const startSticky = stickies.find(s => s.id === startItemId);
-          const endSticky = stickies.find(s => s.id === endItemId);
+        // Only include connections where both items are in this frame
+        if (itemIds.has(startItemId) && itemIds.has(endItemId)) {
+          // Get the content of connected items
+          const startItem = itemsWithContent.find(item => item.id === startItemId);
+          const endItem = itemsWithContent.find(item => item.id === endItemId);
           
-          if (startSticky && endSticky) {
+          if (startItem && endItem) {
             frameConnections.push({
-              from: startSticky.content.replace(/<\/?p>/g, '').trim(),
-              to: endSticky.content.replace(/<\/?p>/g, '').trim()
+              from: startItem.content.replace(/<\/?p>/g, '').trim(),
+              to: endItem.content.replace(/<\/?p>/g, '').trim()
             });
           }
         }
       }
       
-      console.log(`Found ${frameConnections.length} connections between stickies in frame ${frame.title}`);
+      Logger.log(FRAME_CONTENT_CONTEXT, `Found ${frameConnections.length} connections between items in frame ${frame.title}`);
       
       return { 
-        stickies, 
+        stickies: itemsWithContent, 
         connections: frameConnections 
       };
     } catch (error) {
-      console.error(`Error getting content with connections for frame ${frame.title}:`, error);
+      Logger.error(FRAME_CONTENT_CONTEXT, `Error getting content with connections for frame ${frame.title}:`, error);
       return { stickies: [], connections: [] };
     }
   }
