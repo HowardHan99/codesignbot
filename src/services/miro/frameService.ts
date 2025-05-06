@@ -324,6 +324,66 @@ export class MiroFrameService {
   }
 
   /**
+   * Gets content from a frame by its title
+   * @param frameTitle The title of the frame to get content from
+   * @returns Array of content strings from sticky notes and shapes in the frame
+   */
+  public static async getContentFromFrame(frameTitle: string): Promise<string[]> {
+    try {
+      Logger.log(FRAME_CONTENT_CONTEXT, `Getting content from frame with title: ${frameTitle}`);
+      
+      // Find the frame by title
+      const frame = await this.findFrameByTitle(frameTitle);
+      
+      if (!frame) {
+        Logger.log(FRAME_CONTENT_CONTEXT, `Frame with title ${frameTitle} not found`);
+        return [];
+      }
+      
+      // Get all sticky notes
+      const allStickies = await miro.board.get({ type: 'sticky_note' });
+      
+      // Filter stickies in the frame by parentId
+      const stickiesInFrame = allStickies.filter(sticky => sticky.parentId === frame.id);
+      Logger.log(FRAME_CONTENT_CONTEXT, `Found ${stickiesInFrame.length} sticky notes in frame ${frameTitle}`);
+      
+      // Get all shapes
+      const allShapes = await miro.board.get({ type: 'shape' });
+      
+      // Filter shapes in the frame by parentId and that have content
+      const shapesInFrame = allShapes.filter(shape => 
+        shape.parentId === frame.id && 
+        shape.content && 
+        shape.content.trim() !== ''
+      );
+      Logger.log(FRAME_CONTENT_CONTEXT, `Found ${shapesInFrame.length} shapes with content in frame ${frameTitle}`);
+      
+      // Get text elements in the frame
+      const allTexts = await miro.board.get({ type: 'text' });
+      const textsInFrame = allTexts.filter(text => 
+        text.parentId === frame.id && 
+        text.content && 
+        text.content.trim() !== ''
+      );
+      Logger.log(FRAME_CONTENT_CONTEXT, `Found ${textsInFrame.length} text elements in frame ${frameTitle}`);
+      
+      // Combine all content
+      const allContents = [
+        ...stickiesInFrame.map(sticky => sticky.content.replace(/<\/?p>/g, '').trim()),
+        ...shapesInFrame.map(shape => shape.content.replace(/<\/?p>/g, '').trim()),
+        ...textsInFrame.map(text => text.content.replace(/<\/?p>/g, '').trim())
+      ].filter(content => content !== ''); // Filter out empty content
+      
+      Logger.log(FRAME_CONTENT_CONTEXT, `Retrieved ${allContents.length} content items from frame ${frameTitle}`);
+      
+      return allContents;
+    } catch (error) {
+      Logger.error(FRAME_CONTENT_CONTEXT, `Error getting content from frame ${frameTitle}:`, error);
+      return [];
+    }
+  }
+
+  /**
    * Gets frame content including sticky notes and connectors between them
    * @param frame The frame to get content for
    * @returns Object containing sticky notes and connections

@@ -24,24 +24,43 @@ export const MiroConversationModal: React.FC<MiroConversationModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(undefined);
 
-  // Initialize with welcome message
+  // Initialize with welcome message and listen to BroadcastChannel
   useEffect(() => {
-    const welcomeMessage = {
-      role: 'assistant' as const,
-      content: `Here are the criticism points for your design:
+    const channel = new BroadcastChannel('miro-conversation');
+    const messageHandler = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'INIT_MODAL') {
+        const { designChallenge: dc, currentCriticism: cc, sessionId: sid } = event.data;
+        // Initialize with welcome message using received data
+        const welcomeMessage = {
+          role: 'assistant' as const,
+          content: `Here are the criticism points for your design:
 
-${currentCriticism.map((point, index) => `${index + 1}. ${point}`).join('\n')}
+${(cc || []).map((point: string, index: number) => `${index + 1}. ${point}`).join('\n')}
 
 You can:
 - Accept all points if you agree with the feedback
 - Ignore all points if you disagree
 - Or start a detailed discussion about specific points
 `,
-      timestamp: new Date()
+          timestamp: new Date()
+        };
+        setMessages([welcomeMessage]);
+        if (sid) {
+          setCurrentSessionId(sid);
+        }
+      }
     };
-    setMessages([welcomeMessage]);
-  }, [currentCriticism]);
+
+    channel.addEventListener('message', messageHandler);
+
+    // Cleanup
+    return () => {
+      channel.removeEventListener('message', messageHandler);
+      channel.close();
+    };
+  }, []); // Empty dependency array: run once on mount
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
@@ -85,7 +104,7 @@ You can:
         
         try {
           // Add to consensus frame
-          await MiroService.addConsensusPoints([consensusPoint]);
+          await MiroService.addConsensusPoints([consensusPoint], currentSessionId);
           
           const conversationContext = messages
             .map(msg => `${msg.role}: ${msg.content}`)

@@ -94,33 +94,33 @@ export class MiroDesignService {
       }
       Logger.log(LOG_CONTEXT, `Found ${frameConfig.names.consensus} frame:`, consensusFrame);
 
-      // Get all sticky notes first to debug
+      // Get all sticky notes on the board
       const allStickies = await miro.board.get({ type: 'sticky_note' });
-      Logger.log(LOG_CONTEXT, 'All sticky notes on board:', allStickies.map(s => ({
-        id: s.id,
-        content: s.content,
-        parentId: s.parentId
-      })));
+      Logger.log(LOG_CONTEXT, 'All sticky notes on board:', allStickies.map(s => ({ id: s.id, content: s.content, parentId: s.parentId })));
 
+      // Filter stickies by parentId ONLY
       const consensusStickies = allStickies.filter(sticky => sticky.parentId === consensusFrame.id);
-      Logger.log(LOG_CONTEXT, 'Filtered consensus stickies by parentId:', consensusStickies);
+      Logger.log(LOG_CONTEXT, 'Filtered consensus stickies by parentId ONLY:', consensusStickies.map(s => ({ id: s.id, content: s.content, parentId: s.parentId })));
       
-      // Also try getting by coordinates
-      const stickiesByCoords = await MiroFrameService.getItemsInFrameBounds(consensusFrame);
-      Logger.log(LOG_CONTEXT, 'Stickies found by coordinates:', stickiesByCoords);
+      // --- Removed logic for getItemsInFrameBounds and combining --- 
+      // const stickiesByCoordsRaw = await MiroFrameService.getItemsInFrameBounds(consensusFrame); 
+      // const stickiesByCoords = stickiesByCoordsRaw.filter(item => item.type === 'sticky_note' && typeof (item as any).content === 'string') as StickyNote[];
+      // Logger.log(LOG_CONTEXT, 'Stickies found by coordinates:', stickiesByCoords.map(s => ({ id: s.id, content: s.content, parentId: s.parentId })));
       
-      // Combine both methods
-      const combinedStickies = [...new Set([...consensusStickies, ...stickiesByCoords])];
-      Logger.log(LOG_CONTEXT, 'Combined unique stickies:', combinedStickies);
+      // const combinedStickiesMap = new Map<string, StickyNote>();
+      // consensusStickies.forEach(sticky => combinedStickiesMap.set(sticky.id, sticky));
+      // stickiesByCoords.forEach(sticky => combinedStickiesMap.set(sticky.id, sticky));
+      // const combinedStickies = Array.from(combinedStickiesMap.values());
+      // Logger.log(LOG_CONTEXT, 'Combined unique stickies:', combinedStickies.map(s => ({ id: s.id, content: s.content, parentId: s.parentId })));
       
-      if (combinedStickies.length === 0) {
-        Logger.log(LOG_CONTEXT, `No sticky notes found in ${frameConfig.names.consensus} frame`);
+      if (consensusStickies.length === 0) {
+        Logger.log(LOG_CONTEXT, `No sticky notes found in ${frameConfig.names.consensus} frame (using parentId only)`);
         return [];
       }
 
-      // Return array of consensus points
-      const points = combinedStickies.map(sticky => sticky.content);
-      Logger.log(LOG_CONTEXT, 'Extracted consensus points:', points);
+      // Return array of consensus points from stickies found by parentId
+      const points = consensusStickies.map(sticky => sticky.content || ''); // Ensure content is a string
+      Logger.log(LOG_CONTEXT, 'Extracted consensus points (parentId only):', points);
       return points;
 
     } catch (err) {

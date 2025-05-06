@@ -15,12 +15,10 @@ import { VoiceRecorder } from './VoiceRecorder';
 import { FileUploadTest } from './FileUploadTest';
 import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 import { DesignThemeService } from '../services/designThemeService';
-import { EmbeddingService } from '../services/embeddingService';
 import { Logger } from '../utils/logger';
 import { frameConfig, stickyConfig } from '../utils/config';
 import { MiroApiClient } from '../services/miro/miroApiClient';
-import { StickyNoteService } from '../services/miro/stickyNoteService';
-import { MiroFrameService } from '../services/miro/frameService';
+import { saveFrameData } from '../utils/firebase';
 
 /**
  * Interface for themed response
@@ -152,7 +150,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   useEffect(() => {
     Promise.all([
       MiroService.getDesignChallenge(),
-      MiroService.getConsensusPoints()
+      MiroService.getConsensusPoints(sessionId)
     ]).then(([challenge, consensus]) => {
       // console.log('Fetched initial consensus points:', consensus);
       setDesignChallenge(challenge);
@@ -432,39 +430,34 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             })();
           }
           
-          // Save to Firebase in the background
+          // Save to Firebase in the background (NON-THEMED ANALYSIS)
           (async () => {
             try {
-              // First save the main analysis data
-              const analysisData = {
-                timestamp: null,
-                designChallenge: designChallenge,
-                decisions: notes,
-                analysis: {
-                  full: splitResponse(standardResponse),
-                  simplified: []
-                },
-                tone: selectedTone || 'normal',
-                consensusPoints: consensusPoints,
-                hasThinkingDialogue: useThinkingDialogue
+              if (!sessionId) {
+                Logger.warn('AntagoInteract', 'Skipping Firebase save for non-themed analysis due to missing sessionId');
+                return;
+              }
+
+              const antagonisticResponseData = {
+                critiques: standardResponse ? splitResponse(standardResponse) : [],
+                usedThinkingDialogueInput: useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== '')
               };
-              await saveAnalysis(analysisData, sessionId);
+              await saveFrameData(sessionId, 'antagonisticResponse', antagonisticResponseData);
               
-              // Log user activity
               logUserActivity({
-                action: 'generate_analysis',
+                action: 'generate_analysis_completed',
                 additionalData: {
                   hasThemes: false,
                   themedDisplay: false,
                   challengeLength: designChallenge?.length || 0,
-                  consensusCount: consensusPoints?.length || 0,
-                  useThinkingDialogue: useThinkingDialogue,
-                  thinkingDialogueLength: dialogueContext?.length || 0
+                  responseCount: standardResponse ? splitResponse(standardResponse).length : 0,
+                  simplifiedResponseCount: simplifiedResponses.length,
+                  useThinkingDialogueInput: antagonisticResponseData.usedThinkingDialogueInput,
+                  duration: Date.now() - startTime 
                 }
               }, sessionId);
             } catch (error) {
-              console.error('Error saving analysis data to Firebase:', error);
-              // Error handled silently to not disrupt user experience
+              Logger.error('AntagoInteract', 'Error saving non-themed analysis data to Firebase:', error);
             }
           })();
           
@@ -636,59 +629,55 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         })();
       }
 
-      // Save to Firebase in the background
+      // Save to Firebase in the background (THEMED ANALYSIS)
       (async () => {
         try {
-          // First save the main analysis data
-          const analysisDataToSave = {
-            timestamp: null, // Firebase will set this with serverTimestamp
-            designChallenge: designChallenge,
-            decisions: notes,
-            analysis: {
-              full: useThemedDisplay ? standardResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(standardResults.response),
-              simplified: simplifiedResponses
-            },
-            tone: selectedTone || 'normal',
-            consensusPoints: consensusPoints,
-            hasThinkingDialogue: useThinkingDialogue,
-            thinkingAnalysis: useThinkingDialogue ? {
-              full: thinkingResponses.length > 0 ? splitResponse(thinkingResponses[0]) : [],
-              simplified: thinkingSimplifiedResponses
-            } : undefined
-          };
-          await saveAnalysis(analysisDataToSave, sessionId);
+          if (!sessionId) {
+            Logger.warn('AntagoInteract', 'Skipping Firebase save for themed analysis due to missing sessionId');
+            return;
+          }
+
+          let critiquesToSave: string[];
+          let usedThinkingForThisOutput = useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== '');
+
+          if (useThemedDisplay && standardResults.themedResponsesData.length > 0) {
+            critiquesToSave = standardResults.themedResponsesData.flatMap(theme => theme.points);
+          } else if (standardResults.response) {
+            critiquesToSave = splitResponse(standardResults.response);
+          } else {
+            critiquesToSave = [];
+          }
           
-          // If we have themed responses, also save them as design themes
+          const antagonisticResponseDataThemed = {
+            critiques: critiquesToSave,
+            usedThinkingDialogueInput: usedThinkingForThisOutput 
+          };
+          await saveFrameData(sessionId, 'antagonisticResponse', antagonisticResponseDataThemed);
+
           if (standardResults.themedResponsesData.length > 0) {
-            const boardId = await MiroFrameService.getCurrentBoardId();
             await saveDesignThemes({
               themes: standardResults.themedResponsesData.map(theme => ({
                 name: theme.name,
                 color: theme.color,
-                description: theme.points.join(' | '),
-                boardId: boardId
-              })),
-              boardId: boardId
+                description: theme.points.join(' | ')
+              }))
             }, sessionId);
           }
-          
-          // Log user activity: Analysis generation completed
+            
           logUserActivity({
             action: 'generate_analysis_completed',
             additionalData: {
               hasThemes: standardResults.themedResponsesData.length > 0, 
               themedDisplay: useThemedDisplay,
               challengeLength: designChallenge?.length || 0,
-              consensusCount: consensusPoints?.length || 0,
-              responseCount: responses.length,
+              responseCount: critiquesToSave.length,
               simplifiedResponseCount: simplifiedResponses.length,
-              useThinkingDialogue: useThinkingDialogue,
+              useThinkingDialogueInput: antagonisticResponseDataThemed.usedThinkingDialogueInput,
               duration: Date.now() - startTime 
             }
           }, sessionId);
         } catch (error) {
-          console.error('Error saving analysis data to Firebase:', error);
-          // Error handled silently to not disrupt user experience
+          Logger.error('AntagoInteract', 'Error saving themed analysis data to Firebase:', error);
         }
       })();
       

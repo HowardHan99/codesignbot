@@ -9,13 +9,12 @@ import { ConversationPanel } from './ConversationPanel';
 import { MiroDesignService } from '../services/miro/designService';
 import { VoiceRecorder } from './VoiceRecorder';
 import { FileUploadTest } from './FileUploadTest';
-import { TranscriptProcessingService } from '../services/transcriptProcessingService';
 import { DesignerRolePlayService, DesignerModelType } from '../services/designerRolePlayService';
 import { DesignThemeService } from '../services/designThemeService';
 import { MiroFrameService } from '../services/miro/frameService';
 import { DesignThemeDisplay } from './DesignThemeDisplay';
 import { StickyNoteService } from '../services/miro/stickyNoteService';
-import { logUserActivity, saveDesignProposals, saveThinkingDialogues, saveDesignThemes } from '../utils/firebase';
+import { logUserActivity, saveDesignProposals, saveThinkingDialogues, saveDesignThemes, saveFrameData } from '../utils/firebase';
 import { frameConfig } from '../utils/config';
 import { Logger } from '../utils/logger';
 import { getFirebaseDB, ref, push, serverTimestamp, get, query, orderByChild, equalTo, limitToLast, set } from '../utils/firebase';
@@ -317,6 +316,7 @@ export function MainBoard({
     
     try {
       setIsRefreshing(true);
+      const startTime = Date.now();
       
       // Get current data for comparison
       const currentNotes = designNotes.map(note => note.content);
@@ -329,11 +329,11 @@ export function MainBoard({
       const newNotes = notes.map(note => note.content);
       const newConnections = connections.map(conn => `${conn.from}-${conn.to}`);
       
-      const hasChanges = 
+      const hasDesignChanges = 
         JSON.stringify(currentNotes) !== JSON.stringify(newNotes) ||
         JSON.stringify(currentConnections) !== JSON.stringify(newConnections);
       
-      if (hasChanges) {
+      if (hasDesignChanges) {
         setDesignNotes(notes);
         setDesignConnections(connections);
         miro.board.notifications.showInfo('Design decisions refreshed successfully.');
@@ -345,20 +345,136 @@ export function MainBoard({
       setThemeRefreshTrigger(prev => prev + 1);
       Logger.log(LOG_CONTEXT, 'Triggered design theme refresh');
       
+      // Log user activity
       logUserActivity({
-        action: 'refresh_design_decisions'
+        action: 'refresh_design_decisions',
+        additionalData: {
+          hasDesignChanges,
+          refreshDuration: Date.now() - startTime
+        }
       }, currentSessionId || undefined);
       
-      // Save design proposals to Firebase
+      // Check and save data for multiple frame types
+      if (!currentSessionId) {
+        Logger.warn(LOG_CONTEXT, 'No session ID available. Some data may not be saved.');
+      }
+      
+      // 1. Save design proposals to Firebase
       try {
         const proposalTexts = notes.map(note => note.content);
-        await saveDesignProposals({
-          proposals: proposalTexts,
-          boardId: await getCurrentBoardId()
-        }, currentSessionId || undefined);
-        Logger.log(LOG_CONTEXT, `Saved ${proposalTexts.length} design proposals to Firebase`);
+        if (currentSessionId) {
+          await saveFrameData(currentSessionId, 'designProposal', proposalTexts);
+          Logger.log(LOG_CONTEXT, `Saved ${proposalTexts.length} design proposals to Firebase`);
+        } else {
+          // Fall back to old method if no session ID
+          await saveDesignProposals({
+            proposals: proposalTexts,
+            boardId: await getCurrentBoardId()
+          }, undefined);
+          Logger.log(LOG_CONTEXT, `Saved ${proposalTexts.length} design proposals using legacy method`);
+        }
       } catch (error) {
         Logger.error(LOG_CONTEXT, 'Error saving design proposals to Firebase:', error);
+      }
+      
+      // 2. Check and save thinking dialogues
+      try {
+        if (currentSessionId) {
+          const thinkingDialogues = await MiroFrameService.getContentFromFrame(frameConfig.names.thinkingDialogue);
+          if (thinkingDialogues.length > 0) {
+            await saveFrameData(currentSessionId, 'thinkingDialogue', thinkingDialogues);
+            Logger.log(LOG_CONTEXT, `Saved ${thinkingDialogues.length} thinking dialogues to Firebase during refresh`);
+          }
+        }
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error saving thinking dialogues during refresh:', error);
+      }
+      
+      // 3. Check and save antagonistic responses (critiques)
+      try {
+        if (currentSessionId) {
+          const critiques = await MiroFrameService.getContentFromFrame(frameConfig.names.antagonisticResponse);
+          if (critiques.length > 0) {
+            const antagonisticResponseData = {
+              critiques: critiques,
+              usedThinkingDialogueInput: false // Default to false during refresh
+            };
+            await saveFrameData(currentSessionId, 'antagonisticResponse', antagonisticResponseData);
+            Logger.log(LOG_CONTEXT, `Saved ${critiques.length} critiques to Firebase during refresh`);
+          }
+        }
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error saving antagonistic responses during refresh:', error);
+      }
+      
+      // 4. Check and save design themes/consensus
+      try {
+        if (currentSessionId) {
+          const themes = await DesignThemeService.getCurrentThemesFromBoard();
+          if (themes.length > 0) {
+            const themeData = themes.map(theme => ({
+              name: theme.name,
+              color: theme.color,
+              description: theme.description || ''
+            }));
+            await saveFrameData(currentSessionId, 'consensus', themeData);
+            Logger.log(LOG_CONTEXT, `Saved ${themes.length} design themes to Firebase during refresh`);
+          }
+        }
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error saving design themes during refresh:', error);
+      }
+      
+      // 5. Check and save incorporate suggestions
+      try {
+        if (currentSessionId) {
+          const incorporateSuggestions = await MiroFrameService.getContentFromFrame(frameConfig.names.incorporateSuggestions);
+          if (incorporateSuggestions.length > 0) {
+            await saveFrameData(currentSessionId, 'incorporateSuggestions', incorporateSuggestions);
+            Logger.log(LOG_CONTEXT, `Saved ${incorporateSuggestions.length} incorporate suggestions to Firebase during refresh`);
+          }
+        }
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error saving incorporate suggestions during refresh:', error);
+      }
+      
+      // 6. Check and save RAG content
+      try {
+        if (currentSessionId) {
+          const ragContent = await MiroFrameService.getContentFromFrame(frameConfig.names.ragContent);
+          if (ragContent.length > 0) {
+            await saveFrameData(currentSessionId, 'ragContent', ragContent);
+            Logger.log(LOG_CONTEXT, `Saved ${ragContent.length} RAG content items to Firebase during refresh`);
+          }
+        }
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error saving RAG content during refresh:', error);
+      }
+      
+      // 7. Check and save agent prompt
+      try {
+        if (currentSessionId) {
+          const agentPrompt = await MiroFrameService.getContentFromFrame(frameConfig.names.agentPrompt);
+          if (agentPrompt.length > 0) {
+            await saveFrameData(currentSessionId, 'agentPrompt', agentPrompt);
+            Logger.log(LOG_CONTEXT, `Saved ${agentPrompt.length} agent prompt items to Firebase during refresh`);
+          }
+        }
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error saving agent prompt during refresh:', error);
+      }
+      
+      // 8. Check and save varied responses
+      try {
+        if (currentSessionId) {
+          const variedResponses = await MiroFrameService.getContentFromFrame(frameConfig.names.variedResponses);
+          if (variedResponses.length > 0) {
+            await saveFrameData(currentSessionId, 'variedResponses', variedResponses);
+            Logger.log(LOG_CONTEXT, `Saved ${variedResponses.length} varied responses to Firebase during refresh`);
+          }
+        }
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error saving varied responses during refresh:', error);
       }
       
     } catch (error) {
@@ -474,11 +590,12 @@ export function MainBoard({
       channel.postMessage({
         type: 'INIT_MODAL',
         designChallenge,
-        currentCriticism: currentResponses
+        currentCriticism: currentResponses,
+        sessionId: currentSessionId || undefined
       });
       channel.close();
     }, 500);
-  }, [designChallenge, currentResponses]);
+  }, [designChallenge, currentResponses, currentSessionId]);
 
   // Handle new design points from voice recording
   const handleNewDesignPoints = useCallback(async (points: string[]) => {
@@ -578,12 +695,18 @@ export function MainBoard({
       // Save thinking dialogues to Firebase
       if (designerThinking && designerThinking.thinking && designerThinking.thinking.length > 0) {
         try {
-          await saveThinkingDialogues({
-            dialogues: designerThinking.thinking,
-            boardId: await getCurrentBoardId(),
-            modelType: selectedDesignerModel
-          }, currentSessionId || undefined);
-          Logger.log(LOG_CONTEXT, `Saved ${designerThinking.thinking.length} thinking dialogues to Firebase`);
+          if (currentSessionId) {
+            await saveFrameData(currentSessionId, 'thinkingDialogue', designerThinking.thinking);
+            Logger.log(LOG_CONTEXT, `Saved ${designerThinking.thinking.length} thinking dialogues to Firebase`);
+          } else {
+            // Fall back to old method if no session ID
+            await saveThinkingDialogues({
+              dialogues: designerThinking.thinking,
+              boardId: await getCurrentBoardId(),
+              modelType: selectedDesignerModel
+            }, undefined);
+            Logger.log(LOG_CONTEXT, `Saved ${designerThinking.thinking.length} thinking dialogues using legacy method`);
+          }
         } catch (error) {
           Logger.error(LOG_CONTEXT, 'Error saving thinking dialogues to Firebase:', error);
         }
@@ -679,15 +802,26 @@ export function MainBoard({
       try {
         const generatedThemes = await DesignThemeService.getCurrentThemesFromBoard();
         if (generatedThemes.length > 0) {
-          await saveDesignThemes({
-            themes: generatedThemes.map(theme => ({
+          if (currentSessionId) {
+            const themeData = generatedThemes.map(theme => ({
               name: theme.name,
               color: theme.color,
               description: theme.description || ''
-            })),
-            boardId: await getCurrentBoardId()
-          }, currentSessionId || undefined);
-          Logger.log(LOG_CONTEXT, `Saved ${generatedThemes.length} design themes to Firebase`);
+            }));
+            await saveFrameData(currentSessionId, 'consensus', themeData);
+            Logger.log(LOG_CONTEXT, `Saved ${generatedThemes.length} design themes to Firebase`);
+          } else {
+            // Fall back to old method if no session ID
+            await saveDesignThemes({
+              themes: generatedThemes.map(theme => ({
+                name: theme.name,
+                color: theme.color,
+                description: theme.description || ''
+              })),
+              boardId: await getCurrentBoardId()
+            }, undefined);
+            Logger.log(LOG_CONTEXT, `Saved ${generatedThemes.length} design themes using legacy method`);
+          }
         }
       } catch (error) {
         Logger.error(LOG_CONTEXT, 'Error saving design themes to Firebase:', error);
@@ -878,6 +1012,12 @@ export function MainBoard({
         originalPushKey: pushKey // Optional: store original key if needed
       });
       
+      // Save to localStorage to persist across page refreshes
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('currentSessionId', newSessionIdWithPrefix);
+        localStorage.setItem('sessionBoardId', boardId);
+      }
+      
       setCurrentSessionId(newSessionIdWithPrefix); // Update state with the new prefixed session ID
       miro.board.notifications.showInfo(`New session started: ${newSessionIdWithPrefix}`);
       Logger.log(LOG_CONTEXT, `New session started: ${newSessionIdWithPrefix} for board ${boardId}`);
@@ -891,8 +1031,24 @@ export function MainBoard({
   // Initialize session or load the latest one
   const initializeSession = async () => {
     try {
-      const database = await getFirebaseDB();
       const boardId = await getCurrentBoardId();
+      
+      // First check localStorage for existing session
+      if (typeof window !== 'undefined') {
+        const storedSessionId = localStorage.getItem('currentSessionId');
+        const storedBoardId = localStorage.getItem('sessionBoardId');
+        
+        // If we have a stored session ID that matches the current board
+        if (storedSessionId && storedBoardId === boardId) {
+          setCurrentSessionId(storedSessionId);
+          Logger.log(LOG_CONTEXT, `Loaded existing session from localStorage: ${storedSessionId} for board ${boardId}`);
+          miro.board.notifications.showInfo(`Continuing session: ${storedSessionId}`);
+          return; // Exit early - no need to query Firebase or create new session
+        }
+      }
+      
+      // If no valid session in localStorage, check Firebase
+      const database = await getFirebaseDB();
       const sessionsQuery = query(
         ref(database, 'sessions'), // Path to the parent 'sessions' node
         orderByChild('boardId'),    // Order by boardId within each session<ID> node
@@ -904,8 +1060,15 @@ export function MainBoard({
       if (snapshot.exists()) {
         const sessionData = snapshot.val(); // This will be an object like { "session-XYZ": { boardId: "...", timestamp: "..." } }
         const sessionId = Object.keys(sessionData)[0]; // This will be "session-XYZ"
+        
+        // Store in localStorage for future page loads
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('currentSessionId', sessionId);
+          localStorage.setItem('sessionBoardId', boardId);
+        }
+        
         setCurrentSessionId(sessionId);
-        Logger.log(LOG_CONTEXT, `Loaded existing session: ${sessionId} for board ${boardId}`);
+        Logger.log(LOG_CONTEXT, `Loaded existing session from Firebase: ${sessionId} for board ${boardId}`);
         miro.board.notifications.showInfo(`Continuing session: ${sessionId}`);
       } else {
         Logger.log(LOG_CONTEXT, `No existing session found for board ${boardId}, creating a new one.`);
@@ -913,7 +1076,16 @@ export function MainBoard({
       }
     } catch (error) {
       Logger.error(LOG_CONTEXT, 'Error initializing session:', error);
-      // Fallback to creating a new session if there's an error loading
+      // Check if we have a fallback in localStorage before creating a new session
+      if (typeof window !== 'undefined') {
+        const storedSessionId = localStorage.getItem('currentSessionId');
+        if (storedSessionId) {
+          setCurrentSessionId(storedSessionId);
+          Logger.log(LOG_CONTEXT, `Using fallback session from localStorage: ${storedSessionId} after error`);
+          return;
+        }
+      }
+      // Only create a new session if we don't have a fallback
       await handleNewSession();
     }
   };

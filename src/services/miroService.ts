@@ -43,17 +43,9 @@ export class MiroService {
    * Retrieves consensus points from the Consensus frame
    * @returns Promise resolving to an array of consensus points
    */
-  public static async getConsensusPoints(): Promise<string[]> {
+  public static async getConsensusPoints(sessionId?: string): Promise<string[]> {
     try {
       const points = await MiroDesignService.getConsensusPoints();
-      if (points.length > 0) {
-        const boardInfo = await miro.board.getInfo();
-        await saveConsensusPoints({
-          points,
-          boardId: boardInfo.id
-        });
-        Logger.log(LOG_CONTEXT, `Saved ${points.length} consensus points to Firebase`);
-      }
       return points;
     } catch (err) {
       Logger.error(LOG_CONTEXT, 'Error getting consensus points:', err);
@@ -73,7 +65,7 @@ export class MiroService {
    * Adds new consensus points to the Consensus frame
    * @param points - Array of consensus points to add
    */
-  public static async addConsensusPoints(points: string[]): Promise<void> {
+  public static async addConsensusPoints(points: string[], sessionId?: string): Promise<void> {
     try {
       Logger.log(LOG_CONTEXT, `Adding ${points.length} consensus points`);
       
@@ -96,7 +88,7 @@ export class MiroService {
         await saveConsensusPoints({
           points,
           boardId: boardInfo.id
-        });
+        }, sessionId);
         Logger.log(LOG_CONTEXT, `Saved ${points.length} new consensus points to Firebase`);
       } catch (error) {
         Logger.error(LOG_CONTEXT, 'Error saving new consensus points to Firebase:', error);
