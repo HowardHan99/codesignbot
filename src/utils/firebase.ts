@@ -1,7 +1,7 @@
 'use client';
 
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getDatabase, ref, push, serverTimestamp, get, Database } from 'firebase/database';
+import { getDatabase, ref, push, serverTimestamp, get, Database, query, orderByChild, equalTo, limitToLast, set } from 'firebase/database';
 import { getStorage, ref as storageRef, uploadString, getDownloadURL } from 'firebase/storage';
 import { firebaseConfig } from './config';
 import { mergeSimilarPoints } from './textProcessing'
@@ -159,10 +159,11 @@ function aggressiveMergePoints(points: string[]): string[] {
   return mergedPoints;
 }
 
-export async function saveAnalysis(data: AnalysisData) {
+export async function saveAnalysis(data: AnalysisData, sessionId?: string) {
   try {
     const database = getFirebaseDB();
-    const analysisRef = ref(database, 'analyses');
+    const path = sessionId ? `sessions/${sessionId}/analyses` : 'analyses';
+    const analysisRef = ref(database, path);
     
     // Save with timestamp
     await push(analysisRef, {
@@ -221,10 +222,11 @@ export async function getSynthesizedPoints() {
  * Logs user activity to Firebase Realtime Database
  * @param data User activity data to log
  */
-export async function logUserActivity(data: UserActivityData) {
+export async function logUserActivity(data: UserActivityData, sessionId?: string) {
   try {
     const database = getFirebaseDB();
-    const activityRef = ref(database, 'userActivity');
+    const path = sessionId ? `sessions/${sessionId}/userActivity` : 'userActivity';
+    const activityRef = ref(database, path);
     
     // Save with timestamp if not provided
     await push(activityRef, {
@@ -242,10 +244,11 @@ export async function logUserActivity(data: UserActivityData) {
  * Saves design proposals to Firebase
  * @param data Design proposal data to save
  */
-export async function saveDesignProposals(data: DesignProposalData): Promise<void> {
+export async function saveDesignProposals(data: DesignProposalData, sessionId?: string): Promise<void> {
   try {
     const database = getFirebaseDB();
-    const proposalsRef = ref(database, 'designProposals');
+    const path = sessionId ? `sessions/${sessionId}/designProposals` : 'designProposals';
+    const proposalsRef = ref(database, path);
     
     // Save with timestamp
     await push(proposalsRef, {
@@ -311,10 +314,11 @@ export async function getLatestDesignProposals(useCachedData: boolean = true): P
  * Saves thinking dialogues to Firebase
  * @param data Thinking dialogue data to save
  */
-export async function saveThinkingDialogues(data: ThinkingDialogueData): Promise<void> {
+export async function saveThinkingDialogues(data: ThinkingDialogueData, sessionId?: string): Promise<void> {
   try {
     const database = getFirebaseDB();
-    const dialoguesRef = ref(database, 'thinkingDialogues');
+    const path = sessionId ? `sessions/${sessionId}/thinkingDialogues` : 'thinkingDialogues';
+    const dialoguesRef = ref(database, path);
     
     // Save with timestamp
     await push(dialoguesRef, {
@@ -380,10 +384,11 @@ export async function getLatestThinkingDialogues(useCachedData: boolean = true):
  * Saves consensus points to Firebase
  * @param data Consensus point data to save
  */
-export async function saveConsensusPoints(data: ConsensusPointData): Promise<void> {
+export async function saveConsensusPoints(data: ConsensusPointData, sessionId?: string): Promise<void> {
   try {
     const database = getFirebaseDB();
-    const consensusRef = ref(database, 'consensusPoints');
+    const path = sessionId ? `sessions/${sessionId}/consensusPoints` : 'consensusPoints';
+    const consensusRef = ref(database, path);
     
     // Save with timestamp
     await push(consensusRef, {
@@ -449,10 +454,11 @@ export async function getLatestConsensusPoints(useCachedData: boolean = true): P
  * Saves design themes to Firebase
  * @param data Theme data to save
  */
-export async function saveDesignThemes(data: ThemeData): Promise<void> {
+export async function saveDesignThemes(data: ThemeData, sessionId?: string): Promise<void> {
   try {
     const database = getFirebaseDB();
-    const themesRef = ref(database, 'designThemes');
+    const path = sessionId ? `sessions/${sessionId}/designThemes` : 'designThemes';
+    const themesRef = ref(database, path);
     
     // Save with timestamp
     await push(themesRef, {
@@ -558,4 +564,6 @@ export async function uploadHtmlToFirebase(
     console.error('Error uploading HTML to Firebase:', error);
     throw error;
   }
-} 
+}
+
+export { ref, push, serverTimestamp, get, query, orderByChild, equalTo, limitToLast, set }; 

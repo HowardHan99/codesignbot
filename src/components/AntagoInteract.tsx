@@ -20,6 +20,7 @@ import { Logger } from '../utils/logger';
 import { frameConfig, stickyConfig } from '../utils/config';
 import { MiroApiClient } from '../services/miro/miroApiClient';
 import { StickyNoteService } from '../services/miro/stickyNoteService';
+import { MiroFrameService } from '../services/miro/frameService';
 
 /**
  * Interface for themed response
@@ -52,6 +53,7 @@ interface AntagoInteractProps {
   onResponsesUpdate?: (responses: string[]) => void;  // Callback to update parent with new responses
   shouldRefresh?: boolean;        // Flag to trigger a refresh of the analysis
   imageContext?: string;          // Context from analyzed images
+  sessionId?: string;             // Optional session ID for logging
 }
 
 interface StoredResponses {
@@ -66,7 +68,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   onComplete,
   onResponsesUpdate,
   shouldRefresh = false,
-  imageContext
+  imageContext,
+  sessionId
 }) => {
   // State management for responses and UI
   const [responses, setResponses] = useState<string[]>([]);
@@ -174,6 +177,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
    * Process sticky notes to generate analysis
    */
   const processNotes = useCallback(async (notes: string[], forceProcess: boolean = false) => {
+    const startTime = Date.now(); // Define startTime
     // If forcing process, reset state flags first
     if (forceProcess) {
       Logger.log('AntagoInteract', 'Force processing requested, resetting state');
@@ -444,7 +448,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
                 consensusPoints: consensusPoints,
                 hasThinkingDialogue: useThinkingDialogue
               };
-              await saveAnalysis(analysisData);
+              await saveAnalysis(analysisData, sessionId);
               
               // Log user activity
               logUserActivity({
@@ -457,7 +461,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
                   useThinkingDialogue: useThinkingDialogue,
                   thinkingDialogueLength: dialogueContext?.length || 0
                 }
-              });
+              }, sessionId);
             } catch (error) {
               console.error('Error saving analysis data to Firebase:', error);
               // Error handled silently to not disrupt user experience
@@ -636,43 +640,52 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       (async () => {
         try {
           // First save the main analysis data
-          const analysisData = {
-            timestamp: null,
+          const analysisDataToSave = {
+            timestamp: null, // Firebase will set this with serverTimestamp
             designChallenge: designChallenge,
             decisions: notes,
             analysis: {
               full: useThemedDisplay ? standardResults.themedResponsesData.flatMap(theme => theme.points) : splitResponse(standardResults.response),
-              simplified: []
+              simplified: simplifiedResponses
             },
             tone: selectedTone || 'normal',
             consensusPoints: consensusPoints,
-            hasThinkingDialogue: useThinkingDialogue
+            hasThinkingDialogue: useThinkingDialogue,
+            thinkingAnalysis: useThinkingDialogue ? {
+              full: thinkingResponses.length > 0 ? splitResponse(thinkingResponses[0]) : [],
+              simplified: thinkingSimplifiedResponses
+            } : undefined
           };
-          await saveAnalysis(analysisData);
+          await saveAnalysis(analysisDataToSave, sessionId);
           
           // If we have themed responses, also save them as design themes
           if (standardResults.themedResponsesData.length > 0) {
+            const boardId = await MiroFrameService.getCurrentBoardId();
             await saveDesignThemes({
               themes: standardResults.themedResponsesData.map(theme => ({
                 name: theme.name,
                 color: theme.color,
-                description: theme.points.join(' | ')
-              }))
-            });
+                description: theme.points.join(' | '),
+                boardId: boardId
+              })),
+              boardId: boardId
+            }, sessionId);
           }
           
-          // Log user activity
+          // Log user activity: Analysis generation completed
           logUserActivity({
-            action: 'generate_analysis',
+            action: 'generate_analysis_completed',
             additionalData: {
               hasThemes: standardResults.themedResponsesData.length > 0, 
               themedDisplay: useThemedDisplay,
               challengeLength: designChallenge?.length || 0,
               consensusCount: consensusPoints?.length || 0,
+              responseCount: responses.length,
+              simplifiedResponseCount: simplifiedResponses.length,
               useThinkingDialogue: useThinkingDialogue,
-              thinkingDialogueLength: dialogueContext?.length || 0
+              duration: Date.now() - startTime 
             }
-          });
+          }, sessionId);
         } catch (error) {
           console.error('Error saving analysis data to Firebase:', error);
           // Error handled silently to not disrupt user experience
@@ -692,7 +705,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setLoading(false);
       processingRef.current = false;
     }
-  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints, useThemedDisplay, useThinkingDialogue]);
+  }, [designChallenge, imageContext, isSimplifiedMode, onComplete, onResponsesUpdate, selectedTone, synthesizedPoints, consensusPoints, useThemedDisplay, useThinkingDialogue, sessionId]);
 
   // Process notes when they change or when shouldRefresh is true
   useEffect(() => {
@@ -700,7 +713,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       processNotes(stickyNotes, shouldRefresh || false)
         .catch(console.error);
     }
-  }, [stickyNotes, shouldRefresh, processNotes]);
+  }, [stickyNotes, shouldRefresh, processNotes, sessionId]);
 
   /**
    * Toggle between standard and thinking dialogue enhanced analysis
@@ -742,7 +755,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           newMode,
           hasThinkingResults: thinkingResponses.length > 0
         }
-      });
+      }, sessionId);
       
       return newMode;
     });
@@ -755,7 +768,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     simplifiedResponses, 
     useThemedDisplay, 
     isSimplifiedMode, 
-    onResponsesUpdate
+    onResponsesUpdate,
+    sessionId
   ]);
 
   // Handle mode toggle
@@ -817,7 +831,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             simplifiedLength: currentSimplifiedResponses[0]?.length || 0,
             withThinkingDialogue: useThinkingDialogue
           }
-        });
+        }, sessionId);
       } catch (error) {
         console.error('Error logging mode change:', error);
       }
@@ -831,7 +845,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     thinkingSimplifiedResponses, 
     onResponsesUpdate, 
     useThemedDisplay, 
-    useThinkingDialogue
+    useThinkingDialogue,
+    sessionId
   ]);
 
   /**
@@ -904,7 +919,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           newMode: !useThemedDisplay,
           withThinkingDialogue: useThinkingDialogue
         }
-      });
+      }, sessionId);
       
       return newDisplayMode;
     });
@@ -918,7 +933,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     isSimplifiedMode, 
     selectedTone, 
     onResponsesUpdate, 
-    useThinkingDialogue
+    useThinkingDialogue,
+    sessionId
   ]);
 
   /**
@@ -1006,7 +1022,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           tone: newTone,
           consensusPoints: consensusPoints,
           hasThinkingDialogue: useThinkingDialogue
-        });
+        }, sessionId);
         
         // Log the tone change
         logUserActivity({
@@ -1017,7 +1033,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             analysisLength: (isSimplifiedMode ? currentSimplifiedResponses[0] : currentResponses[0])?.length || 0,
             withThinkingDialogue: useThinkingDialogue
           }
-        });
+        }, sessionId);
       } catch (error) {
         console.error('Error saving tone change to Firebase:', error);
       }
@@ -1041,7 +1057,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     designChallenge, 
     stickyNotes, 
     consensusPoints,
-    useThinkingDialogue
+    useThinkingDialogue,
+    sessionId
   ]);
 
   // Store responses in local storage
@@ -1332,7 +1349,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           sentPrinciples: variationsToSend.principles,
           sentPrompt: variationsToSend.prompt,
         }
-      });
+      }, sessionId);
       
       // Always reset the variation loading state when done
       setIsVariationLoading(false);
@@ -1354,7 +1371,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     designChallenge,
     synthesizedPoints,
     consensusPoints,
-    stickyNotes
+    stickyNotes,
+    sessionId
   ]);
 
   /**

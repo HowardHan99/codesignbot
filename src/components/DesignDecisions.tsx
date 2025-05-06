@@ -18,6 +18,7 @@ import { StickyNoteService } from '../services/miro/stickyNoteService';
 import { logUserActivity, saveDesignProposals, saveThinkingDialogues, saveDesignThemes } from '../utils/firebase';
 import { frameConfig } from '../utils/config';
 import { Logger } from '../utils/logger';
+import { getFirebaseDB, ref, push, serverTimestamp, get, query, orderByChild, equalTo, limitToLast, set } from '../utils/firebase';
 
 // Log context for this component
 const LOG_CONTEXT = 'DESIGN-DECISIONS';
@@ -239,6 +240,7 @@ export function MainBoard({
   const [roleplayLoading, setRoleplayLoading] = useState<boolean>(false);
   const [rolePlayError, setRolePlayError] = useState<string>("");
   const [stickyCharLimit, setStickyCharLimit] = useState<number>(StickyNoteService.getStickyCharLimit());
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
   // Memoize the decision tree to avoid unnecessary recalculations
   const decisionTree = useMemo(() => {
@@ -345,7 +347,7 @@ export function MainBoard({
       
       logUserActivity({
         action: 'refresh_design_decisions'
-      });
+      }, currentSessionId || undefined);
       
       // Save design proposals to Firebase
       try {
@@ -353,7 +355,7 @@ export function MainBoard({
         await saveDesignProposals({
           proposals: proposalTexts,
           boardId: await getCurrentBoardId()
-        });
+        }, currentSessionId || undefined);
         Logger.log(LOG_CONTEXT, `Saved ${proposalTexts.length} design proposals to Firebase`);
       } catch (error) {
         Logger.error(LOG_CONTEXT, 'Error saving design proposals to Firebase:', error);
@@ -367,9 +369,10 @@ export function MainBoard({
     }
   };
 
-  // Initial data load
+  // Initial data load and session initialization
   useEffect(() => {
-    const loadInitialData = async () => {
+    const loadInitialDataAndSession = async () => {
+      await initializeSession(); // Ensure session is initialized first
       try {
         const { notes, connections } = await getCurrentDesignData();
         setDesignNotes(notes);
@@ -380,8 +383,9 @@ export function MainBoard({
       }
     };
     
-    loadInitialData();
-  }, []);
+    loadInitialDataAndSession();
+    getDesignFrameId(); // Also fetch frame ID on mount
+  }, []); // Empty dependency array ensures this runs once on mount
 
   // Handle analysis button click
   const handleAnalysisClick = useCallback(async () => {
@@ -410,7 +414,7 @@ export function MainBoard({
         additionalData: {
           showAnalysis
         }
-      });
+      }, currentSessionId || undefined);
     } catch (error) {
       Logger.error(LOG_CONTEXT, 'Error during analysis:', error);
       miro.board.notifications.showError('Failed to refresh analysis. Please try again.');
@@ -569,7 +573,7 @@ export function MainBoard({
           hasThinking: designerThinking?.thinking?.length > 0,
           duration: Date.now() - startTime
         }
-      });
+      }, currentSessionId || undefined);
 
       // Save thinking dialogues to Firebase
       if (designerThinking && designerThinking.thinking && designerThinking.thinking.length > 0) {
@@ -578,7 +582,7 @@ export function MainBoard({
             dialogues: designerThinking.thinking,
             boardId: await getCurrentBoardId(),
             modelType: selectedDesignerModel
-          });
+          }, currentSessionId || undefined);
           Logger.log(LOG_CONTEXT, `Saved ${designerThinking.thinking.length} thinking dialogues to Firebase`);
         } catch (error) {
           Logger.error(LOG_CONTEXT, 'Error saving thinking dialogues to Firebase:', error);
@@ -669,7 +673,7 @@ export function MainBoard({
         additionalData: {
           duration: Date.now() - startTime
         }
-      });
+      }, currentSessionId || undefined);
 
       // Get the generated themes and save to Firebase
       try {
@@ -682,7 +686,7 @@ export function MainBoard({
               description: theme.description || ''
             })),
             boardId: await getCurrentBoardId()
-          });
+          }, currentSessionId || undefined);
           Logger.log(LOG_CONTEXT, `Saved ${generatedThemes.length} design themes to Firebase`);
         }
       } catch (error) {
@@ -699,11 +703,6 @@ export function MainBoard({
       Logger.log(LOG_CONTEXT, '[DESIGN THEMES UI] Reset theme generation state');
     }
   };
-
-  // Initial frame ID fetch
-  useEffect(() => {
-    getDesignFrameId();
-  }, []);
 
   // Keep this useEffect for sticky char limit initialization
   useEffect(() => {
@@ -854,6 +853,71 @@ export function MainBoard({
     }
   }, []);
 
+  // Handler for marking a new session in Firebase
+  const handleNewSession = async () => {
+    try {
+      const database = await getFirebaseDB();
+      const boardId = await getCurrentBoardId();
+
+      // Generate a new Firebase push ID (key only, no data written yet by push itself)
+      const pushKey = push(ref(database, 'sessions')).key; 
+
+      if (!pushKey) {
+        throw new Error("Failed to generate new session push key");
+      }
+
+      // Construct the new session ID with the "session" prefix
+      const newSessionIdWithPrefix = `session${pushKey}`;
+      
+      // Path for the new session marker using the prefixed ID
+      const sessionMarkerRef = ref(database, `sessions/${newSessionIdWithPrefix}`);
+
+      await set(sessionMarkerRef, { // Use set to write data at the new prefixed session ID path
+        timestamp: serverTimestamp(),
+        boardId,
+        originalPushKey: pushKey // Optional: store original key if needed
+      });
+      
+      setCurrentSessionId(newSessionIdWithPrefix); // Update state with the new prefixed session ID
+      miro.board.notifications.showInfo(`New session started: ${newSessionIdWithPrefix}`);
+      Logger.log(LOG_CONTEXT, `New session started: ${newSessionIdWithPrefix} for board ${boardId}`);
+
+    } catch (error) {
+      Logger.error(LOG_CONTEXT, 'Error starting new session:', error);
+      miro.board.notifications.showError('Failed to start new session.');
+    }
+  };
+
+  // Initialize session or load the latest one
+  const initializeSession = async () => {
+    try {
+      const database = await getFirebaseDB();
+      const boardId = await getCurrentBoardId();
+      const sessionsQuery = query(
+        ref(database, 'sessions'), // Path to the parent 'sessions' node
+        orderByChild('boardId'),    // Order by boardId within each session<ID> node
+        equalTo(boardId),
+        limitToLast(1)
+      );
+
+      const snapshot = await get(sessionsQuery);
+      if (snapshot.exists()) {
+        const sessionData = snapshot.val(); // This will be an object like { "session-XYZ": { boardId: "...", timestamp: "..." } }
+        const sessionId = Object.keys(sessionData)[0]; // This will be "session-XYZ"
+        setCurrentSessionId(sessionId);
+        Logger.log(LOG_CONTEXT, `Loaded existing session: ${sessionId} for board ${boardId}`);
+        miro.board.notifications.showInfo(`Continuing session: ${sessionId}`);
+      } else {
+        Logger.log(LOG_CONTEXT, `No existing session found for board ${boardId}, creating a new one.`);
+        await handleNewSession(); // Create a new session if none exists for this board
+      }
+    } catch (error) {
+      Logger.error(LOG_CONTEXT, 'Error initializing session:', error);
+      // Fallback to creating a new session if there's an error loading
+      await handleNewSession();
+    }
+  };
+
   return (
     <>
       {/* Title and Tools Row */}
@@ -897,13 +961,12 @@ export function MainBoard({
               fontSize: '14px',
               flex: 1,
               cursor: isRefreshing ? 'not-allowed' : 'pointer',
-              maxWidth: '120px'
+              maxWidth: 'calc(33.333% - 4px)' // Adjusted for 3 buttons per row
             }}
           >
             <span style={{ fontSize: '14px' }}>↻</span>
             {isRefreshing ? 'Refreshing' : 'Refresh'}
           </button>
-          
           <button
             onClick={() => setIsExpanded(!isExpanded)}
             className="button button-secondary"
@@ -920,12 +983,11 @@ export function MainBoard({
               fontSize: '14px',
               flex: 1,
               cursor: 'pointer',
-              maxWidth: '120px'
+              maxWidth: 'calc(33.333% - 4px)' // Adjusted for 3 buttons per row
             }}
           >
             {isExpanded ? 'Collapse' : 'Expand'}
           </button>
-          
           <button
             onClick={() => setToolsVisible(!toolsVisible)}
             className="button button-secondary"
@@ -942,10 +1004,40 @@ export function MainBoard({
               fontSize: '14px',
               flex: 1,
               cursor: 'pointer',
-              maxWidth: '120px'
+              maxWidth: 'calc(33.333% - 4px)' // Adjusted for 3 buttons per row
             }}
           >
             {toolsVisible ? 'Hide Tools' : 'Show Tools'}
+          </button>
+        </div>
+        {/* New Row for New Session Button */}
+        <div style={{ 
+          display: 'flex', 
+          gap: '6px',
+          marginBottom: '2px',
+          marginTop: '6px' // Add some margin top for separation
+        }}>
+          <button
+            onClick={handleNewSession}
+            className="button button-secondary"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              padding: '6px 10px',
+              borderRadius: '6px',
+              border: '1px solid #e0e0e0',
+              backgroundColor: '#f8f9fa',
+              color: '#333',
+              fontWeight: 500,
+              fontSize: '14px',
+              flex: 1, // Make it full width in its own row
+              cursor: 'pointer'
+            }}
+          >
+            <span style={{ fontSize: '14px' }}>➕</span>
+            New Session
           </button>
         </div>
       </div>
@@ -1401,6 +1493,7 @@ export function MainBoard({
             onResponsesUpdate={handleResponsesUpdate}
             imageContext={imageContext}
             shouldRefresh={shouldRefreshAnalysis}
+            sessionId={currentSessionId || undefined}
           />
           <button
             onClick={handleOpenConversation}
