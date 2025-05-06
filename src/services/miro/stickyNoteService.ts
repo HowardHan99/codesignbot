@@ -208,15 +208,22 @@ export class StickyNoteService {
       Logger.log('STICKY-POS', `Total stickies so far for score ${score}: ${totalSoFar}`);
       
       // For general frames that need multi-column layout, use the new positioning algorithm
-      if (frameName === frameConfig.names.designProposal || 
-          frameName === frameConfig.names.thinkingDialogue || 
-          frameName === 'ProposalDialogue' ||
-          frameName === frameConfig.names.analysisResponse ||
-          frameName === frameConfig.names.antagonisticResponse ||
-          frameName === 'Designer-Thinking') {
+      // MODIFIED CONDITION: 
+      // "Thinking-Dialogue" and "Analysis-Response" should now use the score-based layout.
+      if (
+        (frameName === frameConfig.names.designProposal ||
+          frameName === 'ProposalDialogue' || // Retained as it might be a legacy or distinct general layout
+          // frameName === frameConfig.names.thinkingDialogue || // Removed: To use score-based
+          // frameName === frameConfig.names.analysisResponse || // Removed: To use score-based
+          frameName === frameConfig.names.antagonisticResponse || // Retained if it needs general
+          frameName === 'Designer-Thinking') && // Retained if it needs general
+        frameName !== frameConfig.names.thinkingDialogue && // Ensure thinkingDialogue is excluded from general
+        frameName !== frameConfig.names.analysisResponse // Ensure analysisResponse is excluded from general
+      ) {
         Logger.log('STICKY-POS', `Using general multi-column layout for frame "${frameName}"`);
         position = this.calculateGeneralStickyPosition(frame, totalSoFar);
       } else {
+        // This block will now include thinkingDialogue and analysisResponse frames.
         Logger.log('STICKY-POS', `Using score-based layout for frame "${frameName}"`);
         position = this.calculateStickyPosition(frame, totalSoFar, score);
       }
@@ -603,41 +610,23 @@ export class StickyNoteService {
       // Ensure frame exists
       const frame = await this.ensureFrameExists(frameName);
       
-      // Get initial counters for positioning - Corrected call without frame argument
-      const initialCounters = await this.getInitialCounters(); 
+      // Get initial counters for positioning
+      const initialCounters = this.getInitialCounters(); 
       Logger.log('STICKY-POS', 'Initial counters for frame:', initialCounters);
-      
-      // Check if relevance scoring should be used based on frame name
-      // Optimized for frames like Design-Proposal and Thinking-Dialogue where relevance scores aren't used
-      const useRelevanceScoring = 
-        !(frameName === frameConfig.names.designProposal || 
-          frameName === frameConfig.names.thinkingDialogue);
-      
-      Logger.log('VR-STICKY', `Relevance scoring ${useRelevanceScoring ? 'enabled' : 'disabled'} for frame ${frameName}`);
       
       // Get relevance configuration
       const relevanceConfig = ConfigurationService.getRelevanceConfig();
       const threshold = relevanceThreshold || relevanceConfig.scale.defaultThreshold;
       
-      // Initialize counter array for tracking stickies by score
+      // Initialize counter array for tracking stickies by score - start with 0 for new session
+      // This is the key fix for overlapping notes - don't rely on existing stickies count
+      // which might be causing position calculation issues
       const countsByScore = this.getInitialCounters();
+      Logger.log('STICKY-POS', 'Starting with fresh counters to prevent overlapping:', countsByScore);
       
-      // NEW: Get existing stickies in the frame to use as starting count
-      try {
-        const existingStickies = await MiroApiClient.getStickiesInFrame(frame.id);
-        const existingCount = existingStickies.length;
-        
-        if (existingCount > 0) {
-          Logger.log('STICKY-POS', `Found ${existingCount} existing stickies in frame "${frameName}", using as starting count.`);
-          const maxScore = relevanceConfig.scale.max;
-          for (let i = 0; i < maxScore; i++) {
-            countsByScore[i] = existingCount;
-          }
-        }
-      } catch (error) {
-        // Note: Using console.error directly as Logger might not be initialized or error occurs before setup
-        Logger.error('STICKY-POS', 'Error getting existing stickies count, using default counters:', error);
-      }
+      // DEBUG: Verify frameName matches expected values
+      Logger.log('STICKY-POS', `Frame name: "${frameName}", thinkingDialogue: "${frameConfig.names.thinkingDialogue}"`);
+      Logger.log('STICKY-POS', `Using score-based layout: ${frameName === frameConfig.names.thinkingDialogue}`);
       
       // Process for relevance if design decisions are provided
       let pointsWithRelevance: ProcessedPointWithRelevance[] = [];
@@ -679,6 +668,7 @@ export class StickyNoteService {
         
         try {
           // Use the StickyNoteService to create the sticky note in the frame
+          Logger.log('STICKY-POS', `Creating sticky #${i+1}, current counters:`, countsByScore);
           const { sticky, rowSpacesUsed } = await this.createStickyWithRelevance(
             frame,
             point.proposal,
@@ -696,6 +686,7 @@ export class StickyNoteService {
           // Increment the counter by the number of row spaces used
           // This ensures we track the actual vertical space used by connected notes
           countsByScore[point.relevanceScore - 1] += rowSpacesUsed;
+          Logger.log('STICKY-POS', `Updated counter for score ${point.relevanceScore}: previous=${countsByScore[point.relevanceScore - 1] - rowSpacesUsed}, new=${countsByScore[point.relevanceScore - 1]}, added ${rowSpacesUsed} row(s)`);
           
           // Add a delay between creations to avoid rate limiting
           const delayTime = ConfigurationService.getRelevanceConfig().delayBetweenCreations;
@@ -781,5 +772,63 @@ export class StickyNoteService {
     }
     
     return { x: columnCenter, y: y };
+  }
+
+  /**
+   * Create a Miro text widget (large text block).
+   * @param frame The frame to associate the text widget with (optional, for positioning relative to frame)
+   * @param textContent The full text content for the widget.
+   * @param options Positioning and styling options.
+   */
+  public static async createMiroTextWidget(
+    frame: Frame | null, // Frame can be null if not attaching to a specific frame initially
+    textContent: string,
+    options: {
+      x: number;
+      y: number;
+      width: number;
+      title?: string; // Optional title for the text block (could be a separate small sticky or text item)
+      style?: { 
+        backgroundColor?: string; 
+        textAlign?: 'left' | 'center' | 'right'; 
+        fontSize?: number; 
+        borderColor?: string;
+        borderWidth?: number;
+        padding?: number;
+      };
+    }
+  ): Promise<any | null> { // Return type depends on actual Miro SDK response
+    try {
+      Logger.log('MIRO-TEXT', `Creating Miro text widget with ${textContent.length} chars. Preview: "${textContent.substring(0, 100)}..."`, options);
+
+      if (!textContent) {
+        Logger.warn('MIRO-TEXT', 'Text content is empty, skipping text widget creation.');
+        return null;
+      }
+
+      // Use a large sticky note as the primary method for showing the text
+      // This is the most reliable way since we know createStickyNote is available
+      try {
+        Logger.log('MIRO-TEXT', 'Creating large sticky note for full transcript content');
+        const stickyNote = await miro.board.createText({
+          content: textContent,
+          x: options.x,
+          y: options.y,
+          width: options.width || 600, // Use a larger width for transcript
+          style: {
+            fillColor: options.style?.backgroundColor || '#f5f5f5' // Light gray default
+          }
+        });
+
+        Logger.log('MIRO-TEXT', `Successfully created transcript sticky note. ID: ${stickyNote?.id || 'unknown'}`);
+        return stickyNote;
+      } catch (sdkError) {
+        Logger.error('MIRO-TEXT', 'Error creating Miro text content:', sdkError);
+        return null;
+      }
+    } catch (error) {
+      Logger.error('MIRO-TEXT', 'Failed to create Miro text widget:', error);
+      return null;
+    }
   }
 } 

@@ -15,8 +15,6 @@ const SUPPORTED_FORMATS = [
 // Minimum file size to avoid "too short" errors (1KB)
 const MIN_FILE_SIZE = 1000;
 
-// Domain-specific prompt to improve transcription quality
-const TRANSCRIPTION_PROMPT = "This is a design meeting discussing user interface concepts, inclusive design principles, and technical implementation details. The conversation might include technical terms like APIs, UI components, frameworks, and design patterns.";
 
 export async function POST(request: NextRequest) {
   try {
@@ -57,7 +55,6 @@ export async function POST(request: NextRequest) {
         file: receivedAudioFile,
         model: 'gpt-4o-mini-transcribe', // Using the newer, faster model
         response_format: 'text', // Explicitly request text format
-        prompt: TRANSCRIPTION_PROMPT, // Providing context to improve accuracy
         language: 'en', // Still specifying English
       });
       

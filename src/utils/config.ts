@@ -99,8 +99,6 @@ export const inclusiveDesignConfig = {
     'Consider diverse user needs and abilities',
     'Avoid over-investment in privileged user groups',
     'Consider broader community impact',
-    'Address power imbalances',
-    'Use inclusive language',
     'Avoid assumptions about user capabilities',
     'Prioritize user well-being over business goals'
   ]

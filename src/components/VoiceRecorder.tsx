@@ -82,30 +82,61 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
     setCurrentStatus(prev => ({ ...prev, error: undefined })); // Clear previous errors
     
     try {
-      // Forward the raw transcription text (or process further if needed)
-      onNewPoints([transcription]); 
+      // Process chunk into structured points for sticky notes using the updated service
+      Logger.log(LOG_CONTEXT, 'Processing chunk transcript for sticky notes...');
       
-      // Process chunk into structured points for sticky notes
-      Logger.log(LOG_CONTEXT, 'Processing chunk transcript...');
-      const processedPoints = await TranscriptProcessingService.processTranscript(transcription);
-      Logger.log(LOG_CONTEXT, `Processed chunk into ${processedPoints.length} points`);
+      // Clean up the transcription without splitting
+      const cleanedChunk = await TranscriptProcessingService.fixTyposAndPunctuationOnly(transcription);
+      Logger.log(LOG_CONTEXT, `Cleaned chunk (${cleanedChunk.length} chars): "${cleanedChunk.substring(0, 50)}..."`);
       
+      // Process the cleaned chunk into sticky note segments
+      const processedPoints = await TranscriptProcessingService.processTranscript(cleanedChunk);
+      Logger.log(LOG_CONTEXT, `Processed chunk into ${processedPoints.length} points for stickies`);
+      
+      // Pass processed points to the parent component via onNewPoints
       if (processedPoints.length > 0) {
+        onNewPoints(processedPoints.map(p => p.proposal));
+        
+        // Get any data needed for creating sticky notes
         const designDecisions = await InclusiveDesignCritiqueService.getDesignDecisions();
-        Logger.log(LOG_CONTEXT, `Creating ${processedPoints.length} sticky notes (chunk)...`);
-        await StickyNoteService.createStickyNotesFromPoints(
-          "Thinking-Dialogue",
-          processedPoints,
-          mode, // Use the mode prop passed to the component
-          designDecisions
-        );
+        const frameName = StickyNoteService.getFrameNameForMode(mode);
+        
+        // Create sticky notes using a simpler approach - max one sticky per chunk
+        // This helps prevent overlap issues and excessive notes
+        if (processedPoints.length === 1) {
+          // If only one point, use it directly
+          Logger.log(LOG_CONTEXT, `Creating 1 sticky note for chunk in frame: ${frameName}...`);
+          await StickyNoteService.createStickyNotesFromPoints(
+            frameName,
+            processedPoints,
+            mode,
+            designDecisions
+          );
+        } else {
+          // If multiple points, combine them into a single point to avoid excessive notes during live chunks
+          const combinedText = processedPoints.map(p => p.proposal).join('\n\n');
+          const singlePoint = [{
+            proposal: combinedText,
+            category: 'General'
+          }];
+          
+          Logger.log(LOG_CONTEXT, `Creating 1 combined sticky note for ${processedPoints.length} points in frame: ${frameName}...`);
+          await StickyNoteService.createStickyNotesFromPoints(
+            frameName,
+            singlePoint,
+            mode,
+            designDecisions
+          );
+        }
         
         // Run critique if enabled
         if (critiqueModeEnabled && mode === 'decision') {
           Logger.log(LOG_CONTEXT, 'Running critique on chunk...');
-          InclusiveDesignCritiqueService.analyzeAndCritique(transcription)
+          InclusiveDesignCritiqueService.analyzeAndCritique(cleanedChunk)
             .catch(err => Logger.error(LOG_CONTEXT, 'Chunk critique error:', err));
         }
+      } else {
+        Logger.warn(LOG_CONTEXT, 'No points generated from transcription chunk');
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error processing chunk';
@@ -176,29 +207,66 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
         handleRecordingError('No speech detected in the final recording');
         Logger.warn(LOG_CONTEXT, 'Empty final transcription received');
       } else {
-        // Process the FULL final transcription
-        Logger.log(LOG_CONTEXT, `Processing final transcription (${result.text.length} chars)...`);
-        const processedPoints = await TranscriptProcessingService.processTranscript(result.text);
+        // 1. Process the FULL final transcription for onNewPoints (parent component might expect segments)
+        Logger.log(LOG_CONTEXT, `Processing final transcription for parent component (${result.text.length} chars)...`);
+        const processedPointsForParent = await TranscriptProcessingService.processTranscript(result.text);
         
-        if (processedPoints.length === 0) {
-          handleRecordingError('No meaningful content detected in your speech');
-          Logger.warn(LOG_CONTEXT, 'Final transcript processing yielded no points');
+        if (processedPointsForParent.length === 0 && result.text.length > 0) {
+           // If processing yields no points but there was text, use a single point with raw (but cleaned) text for parent
+           Logger.warn(LOG_CONTEXT, 'Final transcript processing yielded no points for parent, using cleaned full text as one point.');
+           const cleanedFullTextForParent = await TranscriptProcessingService.fixTyposAndPunctuationOnly(result.text);
+           onNewPoints([cleanedFullTextForParent]);
+        } else if (processedPointsForParent.length > 0) {
+          onNewPoints(processedPointsForParent.map(p => p.proposal));
+        }
+
+        // 2. Get a cleaned version of the full transcript for the Miro Text Widget
+        Logger.log(LOG_CONTEXT, `Cleaning final full transcript for Miro Text Widget...`);
+        const cleanedFinalTranscript = await TranscriptProcessingService.fixTyposAndPunctuationOnly(result.text);
+        
+        // Log the actual transcript text for verification
+        Logger.log(LOG_CONTEXT, `Cleaned transcript (${cleanedFinalTranscript.length} chars): "${cleanedFinalTranscript.substring(0, 100)}..."`);
+
+        if (cleanedFinalTranscript.trim().length === 0) {
+          handleRecordingError('No meaningful content detected in your speech after cleanup');
+          Logger.warn(LOG_CONTEXT, 'Final cleaned transcript is empty');
         } else {
-          // SUCCESS - Forward points and create stickies
-          onNewPoints(processedPoints.map(p => p.proposal));
-          const designDecisions = await InclusiveDesignCritiqueService.getDesignDecisions();
-          Logger.log(LOG_CONTEXT, `Creating ${processedPoints.length} sticky notes (final)...`);
-          await StickyNoteService.createStickyNotesFromPoints(
-            "Thinking-Dialogue",
-            processedPoints,
-            mode, // Use the mode prop
-            designDecisions
+          // 3. Send the cleaned, full transcript as a single text widget to Miro
+          const designDecisions = await InclusiveDesignCritiqueService.getDesignDecisions(); // May not be needed for text widget
+          const frameName = StickyNoteService.getFrameNameForMode(mode);
+          const miroFrame = await StickyNoteService.ensureFrameExists(frameName);
+          
+          Logger.log(LOG_CONTEXT, `Creating Miro text widget with final transcript in frame: ${frameName}...`);
+          const textWidget = await StickyNoteService.createMiroTextWidget(
+            miroFrame, // Pass the frame object
+            cleanedFinalTranscript,
+            {
+              x: miroFrame.x, // Position within the frame
+              y: miroFrame.y - miroFrame.height / 3, // Position in the upper portion
+              width: Math.min(miroFrame.width * 0.9, 800), // 90% of frame width, max 800px
+              title: "Voice Recording Transcript",
+              style: { 
+                textAlign: 'left', 
+                fontSize: 14, 
+                backgroundColor: '#f8f9fa',
+                borderColor: '#dee2e6',
+                borderWidth: 1,
+                padding: 12
+              }
+            }
           );
           
-          // Run final critique if needed
+          // Log success or failure of text widget creation
+          if (textWidget) {
+            Logger.log(LOG_CONTEXT, `Successfully created text widget with ID: ${textWidget.id}`);
+          } else {
+            Logger.warn(LOG_CONTEXT, 'Failed to create text widget, but continuing with critique');
+          }
+          
+          // Run final critique if needed (on the original non-split, non-processed text)
           if (critiqueModeEnabled && mode === 'decision') {
-            Logger.log(LOG_CONTEXT, 'Running final critique...');
-            InclusiveDesignCritiqueService.analyzeAndCritique(result.text)
+            Logger.log(LOG_CONTEXT, 'Running final critique on original full text...');
+            InclusiveDesignCritiqueService.analyzeAndCritique(result.text) // Critique the original for full context
               .catch(err => Logger.error(LOG_CONTEXT, 'Final critique error:', err));
           }
           
