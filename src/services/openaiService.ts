@@ -18,11 +18,11 @@ export class OpenAIService {
    */
   private static async makeRequest(endpoint: string, data: any): Promise<OpenAIResponse> {
     try {
-      console.log(`Making request to ${endpoint} with data:`, { 
-        systemPromptLength: data.systemPrompt?.length || 0,
-        userPromptLength: data.userPrompt?.length || 0,
-        useGpt4: data.useGpt4 || false
-      });
+      // console.log(`Making request to ${endpoint} with data:`, { 
+      //   systemPromptLength: data.systemPrompt?.length || 0,
+      //   systemPrompt: data.systemPrompt,
+      //   userPromptLength: data.userPrompt?.length || 0,
+      //   userPrompt: data.userPrompt});
       
       // Create an AbortController for timeout handling
       const controller = new AbortController();
@@ -171,22 +171,19 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
     existingPoints: string[] = [],
     consensusPoints: string[] = [],
     designPrinciples?: string,
-    customSystemPrompt?: string
+    customSystemPrompt?: string,
   ): Promise<string> {
-    
-    const consensusPointsText = consensusPoints.length > 0
-      ? `\n\nConsensus points that you should defintely follow:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
-      : '';
+
 
     // Base system prompt template
-    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative questions that identify potential problems or conflicts in these decisions. The provacative questions should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design decisions.`;
+    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge with the following conditions and objectives: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative questions that identify potential problems or conflicts in these decisions. The provacative questions should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design decisions.`;
 
     // Use custom prompt if provided, otherwise use base prompt
     let systemPrompt = customSystemPrompt || BASE_SYSTEM_PROMPT;
 
     // Construct the main message parts
     const messageParts = [
-      `Analyze the following design decisions for a ${designChallenge || "design challenge"}:\n\n${userPrompt}`
+      `Analyze the following design decisions:\n\n${userPrompt}`
     ];
 
     // Add design principles if provided
@@ -204,8 +201,19 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
     // Add consensus points if any
     if (consensusPoints.length > 0) {
       messageParts.push(
-        `\n\nConsensus points from the design team (please reflect/incorporate these in your response):\n${consensusPoints.join('\n')}`
+        `\n\nConsensus points from the design team (please do not question or criticize these points):\n${consensusPoints.join('\n')}`
       );
+    }
+    
+    // Check for the "Previous User Feedback & Suggestions" in the userPrompt and extract it if found
+    const incorporateSuggestionsLabel = "Previous User Feedback & Suggestions:";
+    const hasFeedback = userPrompt.includes(incorporateSuggestionsLabel);
+    
+    if (hasFeedback) {
+      // Add instructions to consider previous feedback in the system prompt
+      systemPrompt += `\n\nIMPORTANT: The user has provided feedback on previous iterations of design criticism. Please carefully review their feedback and incorporate it into your analysis. Evolve your criticism based on what they've found useful or what they've addressed already. Don't repeat criticisms that have been addressed, but you may build upon partially addressed issues with more nuanced perspectives.`;
+      
+      console.log('Found user feedback in the prompt. Adding special instructions to system prompt.');
     }
 
     try {
@@ -216,8 +224,8 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
         systemPrompt,
         useGpt4: true // Use GPT-4 for generating analysis
       });
-      
-      console.log('Successfully received response from OpenAI API');
+
+      console.log('request to openai: userPrompt', messageParts.join('\n') + '\n\n' + 'systemPrompt', systemPrompt); 
 
       // Try to process with basic delimiter parsing
       let points = this.processOpenAIResponse(result, 10, 'This design decision requires further analysis');
@@ -267,7 +275,6 @@ Return exactly 5 final points separated by ** **.`;
       useGpt4: true // Use GPT-4 for filtering points
     });
 
-    console.log('Starting filterNonConflictingPoints call to OpenAI API in the non thinking process mode');
 
     return this.processOpenAIResponse(result, 10, 'This point needs revision');
   }
@@ -426,12 +433,9 @@ Respond to the user's message in a helpful and constructive way.`;
     designPrinciples?: string,
     customSystemPrompt?: string
   ): Promise<string[]> {
-    const consensusPointsText = consensusPoints.length > 0
-      ? `\n\nConsensus points that should NOT be questioned or criticized:\n${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
-      : '';
 
     // Base system prompt template
-    const BASE_THEME_SYSTEM_PROMPT = `You are analyzing design decisions for the design challenge: "${designChallenge || 'No challenge specified'}" with a specific focus on the theme "${themeName}".
+    const BASE_THEME_SYSTEM_PROMPT = `You are analyzing design decisions for the design challenge with the following conditions and objectives: "${designChallenge || 'No challenge specified'}" with a specific focus on the theme "${themeName}".
 
 Provide exactly 5 critical points that identify potential problems or conflicts related specifically to the "${themeName}" theme of these design decisions.
 
@@ -444,6 +448,17 @@ Rules:
 
     // Use custom prompt if provided, otherwise use base prompt
     let systemPrompt = customSystemPrompt || BASE_THEME_SYSTEM_PROMPT;
+    
+    // Check for the "Previous User Feedback & Suggestions" in the userPrompt and extract it if found
+    const incorporateSuggestionsLabel = "Previous User Feedback & Suggestions:";
+    const hasFeedback = userPrompt.includes(incorporateSuggestionsLabel);
+    
+    if (hasFeedback) {
+      // Add instructions to consider previous feedback in the system prompt
+      systemPrompt += `\n\nIMPORTANT: The user has provided feedback on previous iterations of design criticism related to the "${themeName}" theme. Please carefully review their feedback and incorporate it into your analysis. Evolve your criticism based on what they've found useful or what they've addressed already. Don't repeat criticisms that have been addressed, but you may build upon partially addressed issues with more nuanced perspectives.`;
+      
+      console.log(`Found user feedback in the prompt for theme "${themeName}". Adding special instructions to system prompt.`);
+    }
 
     const result = await this.makeRequest('/api/openaiwrap', {
       userPrompt,

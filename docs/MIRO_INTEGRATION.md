@@ -233,7 +233,6 @@ const frameName = frameConfig.names.thinkingDialogue;
 Key frame names:
 - `designDecision`: 'Design-Proposal'
 - `thinkingDialogue`: 'Thinking-Dialogue'
-- `analysisResponse`: 'Analysis-Response'
 - `realTimeResponse`: 'Real-time-response'
 
 ### Frame Creation and Finding

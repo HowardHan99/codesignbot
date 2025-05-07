@@ -51,16 +51,32 @@ export async function POST(request: NextRequest) {
       Logger.log('TRANSCRIBE-API', 'Sending audio to OpenAI GPT-4o transcription API...');
 
       // Using the latest gpt-4o-mini-transcribe model with improved options
-      const transcription = await openai.audio.transcriptions.create({
+      const transcriptionResponse = await openai.audio.transcriptions.create({
         file: receivedAudioFile,
-        model: 'gpt-4o-mini-transcribe', // Using the newer, faster model
+        model: 'gpt-4o-transcribe', // Using the newer, faster model
         response_format: 'text', // Explicitly request text format
         language: 'en', // Still specifying English
+        prompt: 'You are a helpful assistant that transcribes audio. You are given a chunk of audio and you need to transcribe it into text. You should not return anything if the audio is too short or does not contain any meaningful content.'
       });
       
-      Logger.log('TRANSCRIBE-API', `Transcription successful: ${transcription.length} chars`);
+      // Detailed logging of the raw response from OpenAI
+      Logger.log('TRANSCRIBE-API', 'Raw response from OpenAI:', transcriptionResponse);
+
+      let transcriptionText: string;
+      if (typeof transcriptionResponse === 'string') {
+        transcriptionText = transcriptionResponse;
+      } else if (typeof (transcriptionResponse as any)?.text === 'string') {
+        // Handling potential object response though 'text' format was requested
+        transcriptionText = (transcriptionResponse as any).text;
+        Logger.warn('TRANSCRIBE-API', 'OpenAI response was an object, extracted text. Expected string.');
+      } else {
+        Logger.error('TRANSCRIBE-API', 'Unexpected transcription response format from OpenAI.', transcriptionResponse);
+        transcriptionText = ''; // Default to empty string if format is totally unexpected
+      }
+      
+      Logger.log('TRANSCRIBE-API', `Transcription successful. Length: ${transcriptionText.length}. Preview: "${transcriptionText.substring(0, 100)}..."`);
       return NextResponse.json({
-        transcription: transcription,
+        transcription: transcriptionText,
         duration: 0, // Duration still not provided by OpenAI
       });
 

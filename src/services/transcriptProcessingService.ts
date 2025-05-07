@@ -18,13 +18,13 @@ export class TranscriptProcessingService {
     
     Rules:
     1. Preserve the original wording and meaning verbatim. Only correct obvious typographical errors. Do not summarize, rephrase, or remove any words, including filler words.
-    2. Use as few segments as possible - only split when absolutely necessary for clarity.
     3. Each segment must represent a complete, coherent thought or a natural continuation of a thought if split.
-    4. Length guidelines: Each segment should contain about 75-150 words (roughly 300-650 characters). Prioritize preserving the full thought over strict adherence to length if a thought is naturally longer but still reasonable for a sticky note.
+    4. Length guidelines: Each segment should contain about 150 words (roughly 300-650 characters). Prioritize preserving the full thought over strict adherence to length if a thought is naturally longer but still reasonable for a sticky note.
     5. Only split at natural break points (topic shifts, completed thoughts, natural pauses).
     6. Fix punctuation for clarity and correct obvious typographical errors only.
     7. Avoid creating multiple segments if the content is best understood as a single unit.
     8. If the original text is already a single coherent point of appropriate length, keep it as one segment.
+    9. If the content is or something like  :"You are a helpful assistant that transcribes audio. You are given a chunk of audio and you need to transcribe it into text. You should not return anything if the audio is too short or does not contain any meaningful content." that's halluciation from the AI, just return an empty array.
     
     Format each segment as:
     content: [The formatted segment]
@@ -33,7 +33,7 @@ export class TranscriptProcessingService {
     try {
       console.log('Processing transcript:', {
         length: transcript.length,
-        preview: transcript.substring(0, 50) + '...'
+        content: transcript
       });
 
       // CONFIGURABLE: Filler words to remove from transcript

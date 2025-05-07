@@ -2,10 +2,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { MiroService } from '../services/miroService';
-import { ConversationBox } from './ConversationBox';
 import { OpenAIService } from '../services/openaiService';
-import { MiroConversationModal } from './MiroConversationModal';
-import { ConversationPanel } from './ConversationPanel';
 import { MiroDesignService } from '../services/miro/designService';
 import { VoiceRecorder } from './VoiceRecorder';
 import { FileUploadTest } from './FileUploadTest';
@@ -240,6 +237,8 @@ export function MainBoard({
   const [rolePlayError, setRolePlayError] = useState<string>("");
   const [stickyCharLimit, setStickyCharLimit] = useState<number>(StickyNoteService.getStickyCharLimit());
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [consensusPoints, setConsensusPoints] = useState<string[]>([]);
+  const [incorporateSuggestions, setIncorporateSuggestions] = useState<string[]>([]);
 
   // Memoize the decision tree to avoid unnecessary recalculations
   const decisionTree = useMemo(() => {
@@ -344,6 +343,24 @@ export function MainBoard({
       // Also trigger a refresh of the design themes
       setThemeRefreshTrigger(prev => prev + 1);
       Logger.log(LOG_CONTEXT, 'Triggered design theme refresh');
+      
+      // Fetch fresh consensus points
+      try {
+        const freshConsensusPoints = await MiroService.getConsensusPoints(currentSessionId || undefined);
+        setConsensusPoints(freshConsensusPoints);
+        Logger.log(LOG_CONTEXT, `Refreshed ${freshConsensusPoints.length} consensus points`);
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error refreshing consensus points:', error);
+      }
+      
+      // Fetch fresh incorporate suggestions
+      try {
+        const freshSuggestions = await MiroFrameService.getContentFromFrame(frameConfig.names.incorporateSuggestions);
+        setIncorporateSuggestions(freshSuggestions);
+        Logger.log(LOG_CONTEXT, `Refreshed ${freshSuggestions.length} incorporate suggestions`);
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error refreshing incorporate suggestions:', error);
+      }
       
       // Log user activity
       logUserActivity({
@@ -494,6 +511,24 @@ export function MainBoard({
         setDesignNotes(notes);
         setDesignConnections(connections);
         Logger.log(LOG_CONTEXT, `Initial data loaded: ${notes.length} notes, ${connections.length} connections`);
+        
+        // Fetch initial consensus points
+        try {
+          const initialConsensusPoints = await MiroService.getConsensusPoints(currentSessionId || undefined);
+          setConsensusPoints(initialConsensusPoints);
+          Logger.log(LOG_CONTEXT, `Initial consensus points loaded: ${initialConsensusPoints.length} points`);
+        } catch (error) {
+          Logger.error(LOG_CONTEXT, 'Error loading initial consensus points:', error);
+        }
+        
+        // Fetch initial incorporate suggestions
+        try {
+          const initialSuggestions = await MiroFrameService.getContentFromFrame(frameConfig.names.incorporateSuggestions);
+          setIncorporateSuggestions(initialSuggestions);
+          Logger.log(LOG_CONTEXT, `Initial incorporate suggestions loaded: ${initialSuggestions.length} suggestions`);
+        } catch (error) {
+          Logger.error(LOG_CONTEXT, 'Error loading initial incorporate suggestions:', error);
+        }
       } catch (error) {
         Logger.error(LOG_CONTEXT, 'Error loading initial design data:', error);
       }
@@ -518,6 +553,24 @@ export function MainBoard({
       // Get fresh design challenge
       const challenge = await MiroDesignService.getDesignChallenge();
       setDesignChallenge(challenge);
+      
+      // Refresh consensus points
+      try {
+        const freshConsensusPoints = await MiroService.getConsensusPoints(currentSessionId || undefined);
+        setConsensusPoints(freshConsensusPoints);
+        Logger.log(LOG_CONTEXT, `Refreshed ${freshConsensusPoints.length} consensus points for analysis`);
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error refreshing consensus points for analysis:', error);
+      }
+      
+      // Refresh incorporate suggestions
+      try {
+        const freshSuggestions = await MiroFrameService.getContentFromFrame(frameConfig.names.incorporateSuggestions);
+        setIncorporateSuggestions(freshSuggestions);
+        Logger.log(LOG_CONTEXT, `Refreshed ${freshSuggestions.length} incorporate suggestions for analysis`);
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error refreshing incorporate suggestions for analysis:', error);
+      }
 
       // Clear previous responses and force analysis refresh
       if (showAnalysis) {
@@ -536,7 +589,7 @@ export function MainBoard({
       miro.board.notifications.showError('Failed to refresh analysis. Please try again.');
       onAnalysisComplete();
     }
-  }, [isAnalyzing, showAnalysis, onAnalysisClick, onAnalysisComplete]);
+  }, [isAnalyzing, showAnalysis, onAnalysisClick, onAnalysisComplete, currentSessionId]);
 
   // Handle save robot image
   const handleSaveRobotImage = useCallback(async () => {
@@ -1666,6 +1719,8 @@ export function MainBoard({
             imageContext={imageContext}
             shouldRefresh={shouldRefreshAnalysis}
             sessionId={currentSessionId || undefined}
+            consensusPoints={consensusPoints}
+            incorporateSuggestions={incorporateSuggestions}
           />
           <button
             onClick={handleOpenConversation}

@@ -56,7 +56,7 @@ export class SimplifiedVoiceService {
       };
       
       // Configure chunk interval (default 20 seconds)
-      const chunkInterval = options.chunkInterval || 20000;
+      const chunkInterval = options.chunkInterval || 10000;
       Logger.log(LOG_CONTEXT, `Starting recording with ${chunkInterval/1000}s chunks`);
       
       // Start recording with our Audio Recorder

@@ -172,7 +172,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       const success = await SimplifiedVoiceService.startRecording({
         onTranscription: handleTranscriptionChunk,
         onError: handleRecordingError,
-        chunkInterval: 20000 // e.g., 20 second chunks
+        chunkInterval: 10000 // e.g., 10 second chunks
       });
       
       if (success) {

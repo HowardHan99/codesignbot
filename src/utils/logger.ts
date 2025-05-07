@@ -1,71 +1,82 @@
 /**
  * Simple logging utility for consistent logging throughout the application
+ * By default, all logging is disabled. Use `enableContext` to allow specific contexts.
  */
 export class Logger {
-  // Array of contexts to exclude from logging
-  private static excludedContexts: string[] = ['STICKY-POS','VR-STICKY','VR-STICKY-POS'];
-  
+  // Array of contexts to explicitly enable for logging
+  private static enabledContexts: string[] = ['TRANSCRIBE-API'];
+ 
   /**
-   * Check if the context should be excluded from logging
+   * Check if the context should be logged
    * @param context The context to check
-   * @returns True if the context should be excluded
+   * @returns True if the context is explicitly enabled
    */
-  private static shouldExclude(context: string): boolean {
-    return this.excludedContexts.some(excluded => 
-      context.toUpperCase() === excluded.toUpperCase()
+  private static shouldLog(context: string): boolean {
+    // Check if the specific context is in the enabled list (case-insensitive)
+    return this.enabledContexts.some(enabled => 
+      context.toUpperCase() === enabled.toUpperCase()
     );
   }
   
   /**
-   * Add a context to the exclusion list
-   * @param context Context to exclude from logging
+   * Enable logging for a specific context
+   * @param context Context to enable logging for
    */
-  static excludeContext(context: string): void {
-    if (!this.excludedContexts.includes(context.toUpperCase())) {
-      this.excludedContexts.push(context.toUpperCase());
+  static enableContext(context: string): void {
+    const upperContext = context.toUpperCase();
+    if (!this.enabledContexts.includes(upperContext)) {
+      this.enabledContexts.push(upperContext);
     }
   }
   
   /**
-   * Remove a context from the exclusion list
-   * @param context Context to include in logging again
+   * Disable logging for a specific context
+   * @param context Context to disable logging for
    */
-  static includeContext(context: string): void {
-    this.excludedContexts = this.excludedContexts.filter(
-      excluded => excluded.toUpperCase() !== context.toUpperCase()
+  static disableContext(context: string): void {
+    const upperContext = context.toUpperCase();
+    this.enabledContexts = this.enabledContexts.filter(
+      enabled => enabled !== upperContext
     );
   }
 
   /**
-   * Log informational message
+   * Disable logging for all contexts by clearing the enabled list.
+   */
+  static disableAllContexts(): void {
+    this.enabledContexts = [];
+  }
+
+  /**
+   * Log informational message if the context is enabled
    * @param context The context/area of the application
    * @param message The message to log
    * @param data Optional data to include
    */
   static log(context: string, message: string, data?: any): void {
-    if (this.shouldExclude(context)) return;
-    console.log(`[${context}] ${message}`, data ? data : '');
+    if (!this.shouldLog(context)) return;
+    console.log(`[${context}] ${message}`, data !== undefined ? data : '');
   }
 
   /**
-   * Log warning message
+   * Log warning message if the context is enabled
    * @param context The context/area of the application
    * @param message The message to log
    * @param data Optional data to include
    */
   static warn(context: string, message: string, data?: any): void {
-    if (this.shouldExclude(context)) return;
-    console.warn(`[${context}] ${message}`, data ? data : '');
+    if (!this.shouldLog(context)) return;
+    console.warn(`[${context}] ${message}`, data !== undefined ? data : '');
   }
 
   /**
-   * Log error message
+   * Log error message if the context is enabled
    * @param context The context/area of the application
    * @param message The message to log
    * @param error Optional error object or data to include
    */
   static error(context: string, message: string, error?: any): void {
-    if (this.shouldExclude(context)) return;
-    console.error(`[${context}] ${message}`, error ? error : '');
+    if (!this.shouldLog(context)) return;
+    console.error(`[${context}] ${message}`, error !== undefined ? error : '');
   }
 } 

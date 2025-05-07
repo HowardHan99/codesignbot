@@ -19,11 +19,10 @@ export const frameConfig = {
     consensus: 'Consensus',
     incorporateSuggestions: 'Incorporate-Suggestions',
     thinkingDialogue: 'Thinking-Dialogue',
-    analysisResponse: 'Analysis-Response',
     ragContent: 'Enhanced-Context',
-    realTimeResponse: 'Real-time-response',
     agentPrompt: "Current-Agent-Prompt",
     variedResponses: 'Varied-Response',
+    realTimeResponse: 'Real-time-response',
   },
   defaults: {
     width: 1200,

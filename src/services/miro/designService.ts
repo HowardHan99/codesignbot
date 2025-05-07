@@ -4,6 +4,7 @@ import BoardTokenManager from '../../utils/boardTokenManager';
 import { MiroApiClient } from './miroApiClient';
 import { frameConfig } from '../../utils/config';
 import { Logger } from '../../utils/logger';
+import { saveConsensusPoints, saveFrameData, saveDesignProposals } from '../../utils/firebase';
 
 // Log context for this service
 const LOG_CONTEXT = 'MIRO-DESIGN';
@@ -34,6 +35,7 @@ export class MiroDesignService {
    * Retrieves the design challenge from the Design-Challenge frame
    */
   public static async getDesignChallenge(): Promise<string> {
+    let challengeText = ''; // Define challengeText outside try block
     try {
       const challengeFrame = await MiroFrameService.findFrameByTitle(frameConfig.names.designChallenge);
       
@@ -45,38 +47,54 @@ export class MiroDesignService {
       // First, try to find sticky notes in the frame
       const challengeStickies = await MiroFrameService.getStickiesInFrame(challengeFrame);
       
-      // If we found sticky notes, use their content
       if (challengeStickies.length > 0) {
         const challengeFromStickies = challengeStickies.map(sticky => sticky.content).join('\n');
         Logger.log(CHALLENGE_CONTEXT, `Found design challenge from sticky notes: ${challengeFromStickies.substring(0, 100)}${challengeFromStickies.length > 100 ? '...' : ''}`);
-        return challengeFromStickies;
+        challengeText = challengeFromStickies; // Assign to challengeText
+      } else {
+        // If no sticky notes found, check for shapes with text content
+        Logger.log(CHALLENGE_CONTEXT, `No sticky notes found in ${frameConfig.names.designChallenge} frame, checking shapes...`);
+        
+        // Get all shapes on the board
+        const allShapes = await miro.board.get({ type: 'shape' });
+        
+        // Filter shapes that belong to the challenge frame and have content
+        const challengeShapes = allShapes.filter(shape => 
+          shape.parentId === challengeFrame.id && 
+          shape.content && 
+          shape.content.trim() !== ''
+        );
+        
+        if (challengeShapes.length > 0) {
+          const challengeFromShapes = challengeShapes.map(shape => shape.content).join('\n');
+          Logger.log(CHALLENGE_CONTEXT, `Found design challenge from shapes: ${challengeFromShapes.substring(0, 100)}${challengeFromShapes.length > 100 ? '...' : ''}`);
+          challengeText = challengeFromShapes; // Assign to challengeText
+        } else {
+          Logger.log(CHALLENGE_CONTEXT, `No shapes with content found in ${frameConfig.names.designChallenge} frame`);
+          // challengeText remains ''
+        }
       }
-      
-      // If no sticky notes found, check for shapes with text content
-      Logger.log(CHALLENGE_CONTEXT, `No sticky notes found in ${frameConfig.names.designChallenge} frame, checking shapes...`);
-      
-      // Get all shapes on the board
-      const allShapes = await miro.board.get({ type: 'shape' });
-      
-      // Filter shapes that belong to the challenge frame and have content
-      const challengeShapes = allShapes.filter(shape => 
-        shape.parentId === challengeFrame.id && 
-        shape.content && 
-        shape.content.trim() !== ''
-      );
-      
-      if (challengeShapes.length > 0) {
-        const challengeFromShapes = challengeShapes.map(shape => shape.content).join('\n');
-        Logger.log(CHALLENGE_CONTEXT, `Found design challenge from shapes: ${challengeFromShapes.substring(0, 100)}${challengeFromShapes.length > 100 ? '...' : ''}`);
-        return challengeFromShapes;
+
+      // Save to Firebase if content was found
+      if (challengeText) {
+        try {
+          const boardId = await MiroFrameService.getCurrentBoardId();
+          // saveFrameData expects an array or structured object, ensure challengeText is wrapped if needed.
+          // For now, let's assume single string is okay, or it needs to be [challengeText].
+          // The `dataToSave` in `saveFrameData` is pushed as `content: dataToSave`
+          // So if we want it to be a list of strings like other frames, it should be [challengeText]
+          await saveFrameData(boardId, 'designChallenge', [challengeText]);
+          Logger.log(CHALLENGE_CONTEXT, `Saved design challenge to Firebase for board ${boardId}`);
+        } catch (fbError) {
+          Logger.error(CHALLENGE_CONTEXT, 'Error saving design challenge to Firebase:', fbError);
+          // Do not re-throw
+        }
       }
-      
-      Logger.log(CHALLENGE_CONTEXT, `No shapes with content found in ${frameConfig.names.designChallenge} frame`);
-      return '';
+      return challengeText;
 
     } catch (err) {
       Logger.error(CHALLENGE_CONTEXT, 'Error getting design challenge:', err);
-      return '';
+      return ''; // challengeText will be empty in this case too
     }
   }
 
@@ -121,6 +139,18 @@ export class MiroDesignService {
       // Return array of consensus points from stickies found by parentId
       const points = consensusStickies.map(sticky => sticky.content || ''); // Ensure content is a string
       Logger.log(LOG_CONTEXT, 'Extracted consensus points (parentId only):', points);
+
+      // Save to Firebase
+      if (points.length > 0) {
+        try {
+          const boardId = await MiroFrameService.getCurrentBoardId();
+          await saveConsensusPoints({ points, boardId }, boardId);
+          Logger.log(LOG_CONTEXT, `Saved ${points.length} consensus points to Firebase for board ${boardId}`);
+        } catch (fbError) {
+          Logger.error(LOG_CONTEXT, 'Error saving consensus points to Firebase:', fbError);
+          // Do not re-throw, getting points was successful
+        }
+      }
       return points;
 
     } catch (err) {
@@ -304,7 +334,7 @@ export class MiroDesignService {
    */
   public static async analyzeDesignDecisions(): Promise<Array<{section: string, connections: Array<{from: string, to: string}>}>> {
     const sections: Array<{section: string, connections: Array<{from: string, to: string}>}> = [];
-    const boardId = (await miro.board.getInfo()).id;
+    const boardIdForFirebase = await MiroFrameService.getCurrentBoardId(); // Get boardId for Firebase
     
     try {
       Logger.log(LOG_CONTEXT, 'Starting to analyze design decisions and connections...');
@@ -319,9 +349,25 @@ export class MiroDesignService {
       Logger.log(LOG_CONTEXT, `Found ${frameConfig.names.designProposal} frame:`, designFrame.id);
  
       // Get stickies in the Design-Proposal frame
-      const designStickies = await MiroFrameService.getStickiesInFrame(designFrame);
+      const designStickies = await MiroFrameService.getStickiesInFrame(designFrame) as StickyNote[]; // Cast for content access
       Logger.log(LOG_CONTEXT, `Found stickies in ${frameConfig.names.designProposal} frame:`, designStickies.length);
       
+      // --- Save fetched stickies to Firebase ---
+      if (designStickies.length > 0) {
+        const stickyContents = designStickies.map(sticky => (sticky.content || '').replace(/<[^>]+>/g, ' ').trim()).filter(c => c !== '');
+        if (stickyContents.length > 0) {
+          try {
+            // Using saveDesignProposals which internally calls saveFrameData with 'designProposal' key
+            await saveDesignProposals({ proposals: stickyContents, boardId: boardIdForFirebase }, boardIdForFirebase);
+            Logger.log(LOG_CONTEXT, `Saved ${stickyContents.length} Design-Proposal sticky contents to Firebase during analyzeDesignDecisions.`);
+          } catch (fbError) {
+            Logger.error(LOG_CONTEXT, 'Error saving Design-Proposal stickies to Firebase during analyzeDesignDecisions:', fbError);
+            // Do not re-throw
+          }
+        }
+      }
+      // --- End Firebase save ---
+
       // Create a map of stickies by ID for quick lookup
       const stickiesMap = new Map<string, StickyNote>();
       designStickies.forEach(sticky => stickiesMap.set(sticky.id, sticky));
@@ -338,7 +384,7 @@ export class MiroDesignService {
       };
 
       // Get all connectors on the board using direct API for better performance
-      const connectors = await this.getAllConnectors(boardId);
+      const connectors = await this.getAllConnectors(boardIdForFirebase);
       Logger.log(LOG_CONTEXT, 'Found connectors:', connectors.length);
 
       // Batch fetch items instead of individual API calls

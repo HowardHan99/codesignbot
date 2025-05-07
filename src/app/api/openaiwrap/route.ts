@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Log request basics (without exposing full content for privacy)
-    console.log(`OpenAI API request: model=${useGpt4 ? 'gpt-4o-mini' : 'gpt-3.5-turbo'}, isVisionRequest=${isVisionRequest}`);
+    console.log(`OpenAI API request: model=${useGpt4 ? 'gpt-4o-mini' : 'gpt-4o-mini'}, isVisionRequest=${isVisionRequest}`);
     console.log(`System prompt length: ${systemPrompt.length}, User prompt length: ${userPrompt.length}`);
 
     // Set timeout for OpenAI requests (120 seconds)

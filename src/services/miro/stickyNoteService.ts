@@ -218,7 +218,7 @@ export class StickyNoteService {
           frameName === frameConfig.names.antagonisticResponse || // Retained if it needs general
           frameName === 'Designer-Thinking') && // Retained if it needs general
         frameName !== frameConfig.names.thinkingDialogue && // Ensure thinkingDialogue is excluded from general
-        frameName !== frameConfig.names.analysisResponse // Ensure analysisResponse is excluded from general
+        frameName !== frameConfig.names.realTimeResponse // Ensure analysisResponse is excluded from general
       ) {
         Logger.log('STICKY-POS', `Using general multi-column layout for frame "${frameName}"`);
         position = this.calculateGeneralStickyPosition(frame, totalSoFar);
@@ -553,7 +553,7 @@ export class StickyNoteService {
     
     return mode === 'decision' 
       ? frameConfig.names.thinkingDialogue 
-      : frameConfig.names.analysisResponse;
+      : frameConfig.names.thinkingDialogue;
   }
   
   /**
