@@ -903,7 +903,6 @@ export function MainBoard({
     if (isCreatingDialogueStickies) return;
 
     Logger.log(LOG_CONTEXT, '[THINKING DIALOGUE UI] Create dialogue stickies button clicked');
-    const startTime = Date.now();
     setIsCreatingDialogueStickies(true);
 
     try {
@@ -930,23 +929,10 @@ export function MainBoard({
         'decision' // Using 'decision' mode, adjust if a more specific mode is available/appropriate
       );
 
-      const duration = Date.now() - startTime;
-      Logger.log(LOG_CONTEXT, `[THINKING DIALOGUE UI] Dialogue stickies created in ${duration}ms`);
       miro.board.notifications.showInfo(`${processedPoints.length} dialogue stickies created successfully!`);
       setDialogueText(''); // Clear the textarea
 
-      // Optionally, log this activity
-      logUserActivity({
-        action: 'create_dialogue_stickies',
-        additionalData: {
-          textChunksCount: processedPoints.length,
-          duration
-        }
-      }, currentSessionId || undefined);
-
     } catch (error) {
-      const duration = Date.now() - startTime;
-      Logger.error(LOG_CONTEXT, `[THINKING DIALOGUE UI] Error creating dialogue stickies after ${duration}ms:`, error);
       miro.board.notifications.showError('Failed to create dialogue stickies. Please try again.');
     } finally {
       setIsCreatingDialogueStickies(false);

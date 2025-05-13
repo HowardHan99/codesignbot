@@ -176,7 +176,7 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
 
 
     // Base system prompt template
-    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge with the following conditions background, and design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative points that identify potential problems or conflicts in these decisions. The provacative points should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design proposals.`;
+    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge with the following conditions background, and design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative points that identify potential problems or conflicts in these decisions. The  points should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design proposals. The points should be concise and suitable for a stickynote length. It should also be understood by a non-design audience - try to avoid design jargon and big words. `;
 
     // Use custom prompt if provided, otherwise use base prompt
     let systemPrompt = customSystemPrompt || BASE_SYSTEM_PROMPT;
@@ -593,5 +593,68 @@ IMPORTANT:
     }
 
     return adjusted;
+  }
+
+  /**
+   * Generates a detailed illustration for a specific critique point.
+   * @param originalPoint - The specific critique point to unpack.
+   * @param designProposal - The full text of the design proposal (concatenated sticky notes).
+   * @param designChallenge - The overall design challenge.
+   * @param allCurrentPoints - An array of all current critique points for context.
+   * @returns Promise resolving to the detailed illustration text.
+   */
+  public static async unpackPointDetail(
+    originalPoint: string,
+    designProposal: string,
+    designChallenge: string,
+    allCurrentPoints: string[]
+  ): Promise<string> {
+    const systemPrompt = \`
+You are an AI assistant specializing in design critique elaboration.
+Your task is to take a concise design critique point and expand on it, providing more detail, examples, or explaining its implications.
+
+You will be given:
+1. The original design proposal.
+2. The overall design challenge.
+3. A list of all critique points that were generated for this proposal (for context).
+4. The specific critique point that needs to be unpacked.
+
+Based on this information, provide a detailed illustration or explanation for the specific critique point.
+The output should be a single block of text, suitable for a sticky note. It should be detailed and explanatory.
+Focus on clarifying *why* this point is a concern, what aspects of the proposal it relates to, or potential consequences.
+Do not simply rephrase the original point. Add substantive detail. Maintain a professional and constructive tone.
+
+Context:
+Design Proposal:
+---
+\${designProposal}
+---
+Design Challenge:
+---
+\${designChallenge}
+---
+All Current Critique Points (for context, do not elaborate on these, only the one specified below):
+---
+- \${allCurrentPoints.join('\\n- ')}
+---
+\`;
+
+    const userPromptForUnpack = \`Please unpack the following critique point with detailed illustration:
+"\${originalPoint}"\`;
+
+    try {
+      const result = await this.makeRequest('/api/openaiwrap', {
+        userPrompt: userPromptForUnpack,
+        systemPrompt,
+        useGpt4: true, // Consider using GPT-4 for better elaboration
+      });
+      
+      // The response should be the detailed illustration directly.
+      // Add minimal cleaning if necessary, e.g., trim whitespace.
+      return result.response.trim();
+    } catch (error) {
+      console.error('Error in unpackPointDetail:', error);
+      throw error; // Re-throw to be caught by caller
+    }
   }
 } 
