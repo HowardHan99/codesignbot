@@ -18,7 +18,7 @@ type ColorCategory = 'highRelevance' | 'mediumRelevance' | 'lowRelevance';
  */
 export class StickyNoteService {
   // Configurable character limit for sticky notes
-  private static STICKY_CHAR_LIMIT = 300; // Increased from 80 to 25\
+  private static STICKY_CHAR_LIMIT = 300; // Increased from 80 to 200
   // Configurable reserved space for sticky notes
   public static RESERVED_SPACE = 400;
 
@@ -109,7 +109,7 @@ export class StickyNoteService {
     shape: 'square' | 'rectangle' = 'square'
   ): Promise<{stickies: any[], rowSpacesUsed: number}> {
     // CONFIGURABLE: Adjust this value to control spacing between connected sticky notes
-    const CONNECTED_STICKY_SPACING = 50;  // Space between connected stickies
+    const CONNECTED_STICKY_SPACING = 200;  // Space between connected stickies
     
     // Split the content into chunks that fit within the character limit
     const chunks = this.splitContentIntoChunks(content, this.STICKY_CHAR_LIMIT);
@@ -624,10 +624,6 @@ export class StickyNoteService {
       const countsByScore = this.getInitialCounters();
       Logger.log('STICKY-POS', 'Starting with fresh counters to prevent overlapping:', countsByScore);
       
-      // DEBUG: Verify frameName matches expected values
-      Logger.log('STICKY-POS', `Frame name: "${frameName}", thinkingDialogue: "${frameConfig.names.thinkingDialogue}"`);
-      Logger.log('STICKY-POS', `Using score-based layout: ${frameName === frameConfig.names.thinkingDialogue}`);
-      
       // Process for relevance if design decisions are provided
       let pointsWithRelevance: ProcessedPointWithRelevance[] = [];
       
@@ -686,7 +682,6 @@ export class StickyNoteService {
           // Increment the counter by the number of row spaces used
           // This ensures we track the actual vertical space used by connected notes
           countsByScore[point.relevanceScore - 1] += rowSpacesUsed;
-          Logger.log('STICKY-POS', `Updated counter for score ${point.relevanceScore}: previous=${countsByScore[point.relevanceScore - 1] - rowSpacesUsed}, new=${countsByScore[point.relevanceScore - 1]}, added ${rowSpacesUsed} row(s)`);
           
           // Add a delay between creations to avoid rate limiting
           const delayTime = ConfigurationService.getRelevanceConfig().delayBetweenCreations;

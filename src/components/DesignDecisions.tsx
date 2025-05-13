@@ -15,6 +15,7 @@ import { logUserActivity, saveDesignProposals, saveThinkingDialogues, saveDesign
 import { frameConfig } from '../utils/config';
 import { Logger } from '../utils/logger';
 import { getFirebaseDB, ref, push, serverTimestamp, get, query, orderByChild, equalTo, limitToLast, set } from '../utils/firebase';
+import { ProcessedDesignPoint } from '../types/common';
 
 // Log context for this component
 const LOG_CONTEXT = 'DESIGN-DECISIONS';
@@ -239,6 +240,8 @@ export function MainBoard({
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [consensusPoints, setConsensusPoints] = useState<string[]>([]);
   const [incorporateSuggestions, setIncorporateSuggestions] = useState<string[]>([]);
+  const [dialogueText, setDialogueText] = useState<string>('');
+  const [isCreatingDialogueStickies, setIsCreatingDialogueStickies] = useState<boolean>(false);
 
   // Memoize the decision tree to avoid unnecessary recalculations
   const decisionTree = useMemo(() => {
@@ -891,6 +894,65 @@ export function MainBoard({
     }
   };
 
+  // Handler for creating stickies from text in Thinking-Dialogue frame
+  const handleCreateDialogueStickies = async () => {
+    if (!dialogueText.trim()) {
+      miro.board.notifications.showError('Please enter some text for the dialogue stickies.');
+      return;
+    }
+    if (isCreatingDialogueStickies) return;
+
+    Logger.log(LOG_CONTEXT, '[THINKING DIALOGUE UI] Create dialogue stickies button clicked');
+    const startTime = Date.now();
+    setIsCreatingDialogueStickies(true);
+
+    try {
+      const textChunks = dialogueText.trim().split('\n').filter(chunk => chunk.trim() !== '');
+      if (textChunks.length === 0) {
+        miro.board.notifications.showInfo('No text chunks found to create stickies.');
+        setIsCreatingDialogueStickies(false);
+        return;
+      }
+
+      const processedPoints: ProcessedDesignPoint[] = textChunks.map(chunk => ({
+        proposal: chunk,
+        // Assign a default relevanceScore if needed by createStickyNotesFromPoints,
+        // otherwise, the service might assign a default.
+        // For 'Thinking-Dialogue', explicit relevance might not be critical for layout.
+        // We'll rely on StickyNoteService's default handling for now.
+      }));
+
+      Logger.log(LOG_CONTEXT, `[THINKING DIALOGUE UI] Creating ${processedPoints.length} stickies.`);
+
+      await StickyNoteService.createStickyNotesFromPoints(
+        frameConfig.names.thinkingDialogue,
+        processedPoints,
+        'decision' // Using 'decision' mode, adjust if a more specific mode is available/appropriate
+      );
+
+      const duration = Date.now() - startTime;
+      Logger.log(LOG_CONTEXT, `[THINKING DIALOGUE UI] Dialogue stickies created in ${duration}ms`);
+      miro.board.notifications.showInfo(`${processedPoints.length} dialogue stickies created successfully!`);
+      setDialogueText(''); // Clear the textarea
+
+      // Optionally, log this activity
+      logUserActivity({
+        action: 'create_dialogue_stickies',
+        additionalData: {
+          textChunksCount: processedPoints.length,
+          duration
+        }
+      }, currentSessionId || undefined);
+
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      Logger.error(LOG_CONTEXT, `[THINKING DIALOGUE UI] Error creating dialogue stickies after ${duration}ms:`, error);
+      miro.board.notifications.showError('Failed to create dialogue stickies. Please try again.');
+    } finally {
+      setIsCreatingDialogueStickies(false);
+    }
+  };
+
   // Keep this useEffect for sticky char limit initialization
   useEffect(() => {
     // Set the initial sticky character limit from the service
@@ -1537,6 +1599,61 @@ export function MainBoard({
                   </div>
                 </div>
                 
+                {/* New Tool: Create Stickies in Thinking-Dialogue Frame */}
+                <div style={{ marginBottom: '8px' }}>
+                  <h3 style={{
+                    margin: '0 0 6px 0',
+                    fontSize: '14px',
+                    color: '#555',
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>💬</span>
+                    Create Dialogue Stickies
+                  </h3>
+                  <textarea
+                    value={dialogueText}
+                    onChange={(e) => setDialogueText(e.target.value)}
+                    placeholder="Enter text to create as stickies in 'Thinking-Dialogue'. Each new line will be a new sticky."
+                    rows={4}
+                    disabled={isCreatingDialogueStickies}
+                    style={{
+                      width: '100%',
+                      padding: '8px',
+                      borderRadius: '4px',
+                      border: '1px solid #e0e0e0',
+                      fontSize: '13px',
+                      marginBottom: '8px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                  <button
+                    onClick={handleCreateDialogueStickies}
+                    className="button button-secondary"
+                    disabled={isCreatingDialogueStickies}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #e0e0e0',
+                      backgroundColor: '#ffffff',
+                      color: '#555',
+                      fontWeight: 500,
+                      fontSize: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: isCreatingDialogueStickies ? 'not-allowed' : 'pointer',
+                      width: '100%',
+                      justifyContent: 'flex-start'
+                    }}
+                  >
+                    <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>➕</span>
+                    {isCreatingDialogueStickies ? 'Creating...' : "Add to Thinking-Dialogue"}
+                  </button>
+                </div>
+
                 {/* Knowledge Base Management Section */}
                 <div style={{ marginBottom: '8px' }}>
                   <h3 style={{ 

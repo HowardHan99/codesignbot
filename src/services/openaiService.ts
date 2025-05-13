@@ -176,7 +176,7 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
 
 
     // Base system prompt template
-    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge with the following conditions and objectives: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative questions that identify potential problems or conflicts in these decisions. The provacative questions should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design decisions.`;
+    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge with the following conditions background, and design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative points that identify potential problems or conflicts in these decisions. The provacative points should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design proposals.`;
 
     // Use custom prompt if provided, otherwise use base prompt
     let systemPrompt = customSystemPrompt || BASE_SYSTEM_PROMPT;
@@ -435,9 +435,9 @@ Respond to the user's message in a helpful and constructive way.`;
   ): Promise<string[]> {
 
     // Base system prompt template
-    const BASE_THEME_SYSTEM_PROMPT = `You are analyzing design decisions for the design challenge with the following conditions and objectives: "${designChallenge || 'No challenge specified'}" with a specific focus on the theme "${themeName}".
+    const BASE_THEME_SYSTEM_PROMPT = `You are analyzing design decisions for the design challenge with the following background, conditions, and design challenge: "${designChallenge || 'No challenge specified'}" with a specific focus on the theme "${themeName}".
 
-Provide exactly 5 critical points that identify potential problems or conflicts related specifically to the "${themeName}" theme of these design decisions.
+Provide exactly 3 critical points that identify potential problems or conflicts related specifically to the "${themeName}" theme of these design proposals, your critical points should be constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design proposals.
 
 Rules:
 1. NEVER question or criticize the consensus points - these are established agreements that must be respected
