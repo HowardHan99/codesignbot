@@ -22,6 +22,9 @@ interface AnalysisResultsProps {
   themedResponses?: ThemedResponse[];  // Responses organized by themes
   useThemedDisplay?: boolean;    // Whether to use the themed display
   onThemeSelectToggle?: (themeIndex: number) => void; // Handler for toggling theme selection
+  // New props for "Unpack Points" feature
+  onSelectedPointsChange?: (selectedPoints: string[]) => void; // Callback for when point selection changes
+  currentSelectedPoints?: string[]; // Currently selected points
 }
 
 /**
@@ -38,6 +41,9 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   themedResponses = [],
   useThemedDisplay = false,
   onThemeSelectToggle,
+  // New props
+  onSelectedPointsChange,
+  currentSelectedPoints = [],
 }) => {
   // Don't render anything if there are no responses
   if (!responses.length && !themedResponses.length) return null;
@@ -54,6 +60,29 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
     };
     
     return colorMap[colorName] || '#E5E5E5';
+  };
+
+  // New: Handle selecting/deselecting a point
+  const handlePointSelection = (point: string) => {
+    if (!onSelectedPointsChange) return; // Skip if handler not provided
+    
+    const newSelectedPoints = [...currentSelectedPoints]; // Copy current selection
+    
+    if (newSelectedPoints.includes(point)) {
+      // Deselect if already selected
+      const index = newSelectedPoints.indexOf(point);
+      newSelectedPoints.splice(index, 1);
+    } else {
+      // Add to selection if not already selected
+      newSelectedPoints.push(point);
+    }
+    
+    onSelectedPointsChange(newSelectedPoints);
+  };
+
+  // New: Check if a point is currently selected
+  const isPointSelected = (point: string) => {
+    return currentSelectedPoints.includes(point);
   };
 
   return (
@@ -111,6 +140,23 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
               `Analysis Points ${isSimplifiedMode ? '(Simplified)' : ''} ${selectedTone ? `(${selectedTone} tone)` : ''}`
             }
           </strong>
+          
+          {/* Helper text for selection - New addition */}
+          {onSelectedPointsChange && (
+            <div style={{ 
+              marginBottom: '15px', 
+              fontSize: '13px', 
+              color: '#666',
+              backgroundColor: '#f5f5f5',
+              padding: '8px',
+              borderRadius: '4px',
+              display: 'flex',
+              alignItems: 'center'
+            }}>
+              <span style={{ marginRight: '6px' }}>👆</span>
+              <span>Click on any point to select it for unpacking. Selected points will be highlighted. Click again to deselect.</span>
+            </div>
+          )}
           
           {/* Helper text explaining themed mode limitations */}
           {useThemedDisplay && themedResponses.length > 0 && (
@@ -179,39 +225,44 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
                           </span>
                         )}
                       </span>
-                      <span style={{ 
-                        fontSize: '13px', 
-                        fontWeight: 'normal',
-                        color: '#666',
-                        backgroundColor: '#ffffff80',
-                        padding: '2px 6px',
-                        borderRadius: '10px',
-                        display: 'flex',
-                        alignItems: 'center'
-                      }}>
-                        {theme.points.length} points
-                        {onThemeSelectToggle && (
-                          <span style={{ 
-                            marginLeft: '5px', 
-                            fontSize: '10px',
-                            border: '1px solid #ccc',
-                            borderRadius: '3px',
-                            padding: '1px 3px',
-                            color: isSelected ? '#666' : '#888'
-                          }}>
-                            {isSelected ? '✓' : '○'}
-                          </span>
-                        )}
-                      </span>
+                      {onThemeSelectToggle && (
+                        <span style={{ 
+                          display: 'inline-block', 
+                          width: '18px', 
+                          height: '18px', 
+                          borderRadius: '50%', 
+                          border: '2px solid #ddd',
+                          position: 'relative'
+                        }}>
+                          {isSelected && (
+                            <span style={{ 
+                              position: 'absolute', 
+                              top: '3px', 
+                              left: '3px', 
+                              width: '12px', 
+                              height: '12px',
+                              backgroundColor: themeColor,
+                              borderRadius: '50%'
+                            }} />
+                          )}
+                        </span>
+                      )}
                     </h4>
                     <ul style={{ margin: 0, paddingLeft: '20px' }}>
                       {theme.points.map((point, pointIndex) => (
-                        <li key={pointIndex} style={{ 
-                          marginBottom: '8px',
-                          backgroundColor: `${themeColor}10`, // Even lighter background
-                          padding: '4px 8px',
-                          borderRadius: '4px'
-                        }}>
+                        <li 
+                          key={`${themeIndex}-${pointIndex}`} 
+                          style={{ 
+                            marginBottom: '8px',
+                            cursor: onSelectedPointsChange ? 'pointer' : 'default',
+                            backgroundColor: isPointSelected(point) ? 'rgba(0, 100, 255, 0.1)' : 'transparent',
+                            padding: '3px',
+                            borderRadius: '4px',
+                            transition: 'background-color 0.2s'
+                          }}
+                          onClick={() => handlePointSelection(point)}
+                          title={onSelectedPointsChange ? `Click to ${isPointSelected(point) ? 'deselect' : 'select'} for unpacking` : ''}
+                        >
                           {point}
                         </li>
                       ))}
@@ -224,7 +275,21 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
             /* Standard list of analysis points */
             <ul style={{ margin: 0, paddingLeft: '20px' }}>
               {responses.map((point, pointIndex) => (
-                <li key={pointIndex} style={{ marginBottom: '8px' }}>{point}</li>
+                <li 
+                  key={pointIndex} 
+                  style={{ 
+                    marginBottom: '8px',
+                    cursor: onSelectedPointsChange ? 'pointer' : 'default',
+                    backgroundColor: isPointSelected(point) ? 'rgba(0, 100, 255, 0.1)' : 'transparent',
+                    padding: '3px',
+                    borderRadius: '4px',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onClick={() => handlePointSelection(point)}
+                  title={onSelectedPointsChange ? `Click to ${isPointSelected(point) ? 'deselect' : 'select'} for unpacking` : ''}
+                >
+                  {point}
+                </li>
               ))}
             </ul>
           )}

@@ -609,9 +609,9 @@ IMPORTANT:
     designChallenge: string,
     allCurrentPoints: string[]
   ): Promise<string> {
-    const systemPrompt = \`
+    const systemPrompt = `
 You are an AI assistant specializing in design critique elaboration.
-Your task is to take a concise design critique point and expand on it, providing more detail, examples, or explaining its implications.
+Your task is to take a concise design critique point and expand on it, providing a detailed and contextually relevant explanation for the specific critique point given the nature of wicked problems.
 
 You will be given:
 1. The original design proposal.
@@ -620,27 +620,27 @@ You will be given:
 4. The specific critique point that needs to be unpacked.
 
 Based on this information, provide a detailed illustration or explanation for the specific critique point.
-The output should be a single block of text, suitable for a sticky note. It should be detailed and explanatory.
+The output should be a single block of text, suitable for a sticky note in 80 words or less.
 Focus on clarifying *why* this point is a concern, what aspects of the proposal it relates to, or potential consequences.
 Do not simply rephrase the original point. Add substantive detail. Maintain a professional and constructive tone.
 
 Context:
 Design Proposal:
 ---
-\${designProposal}
+${designProposal}
 ---
 Design Challenge:
 ---
-\${designChallenge}
+${designChallenge}
 ---
 All Current Critique Points (for context, do not elaborate on these, only the one specified below):
 ---
-- \${allCurrentPoints.join('\\n- ')}
+- ${allCurrentPoints.join('\n- ')}
 ---
-\`;
+`;
 
-    const userPromptForUnpack = \`Please unpack the following critique point with detailed illustration:
-"\${originalPoint}"\`;
+    const userPromptForUnpack = `Please unpack the following critique point with detailed illustration:
+"${originalPoint}"`;
 
     try {
       const result = await this.makeRequest('/api/openaiwrap', {

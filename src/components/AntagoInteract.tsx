@@ -61,6 +61,8 @@ interface StoredResponses {
   persuasive?: string;
   aggressive?: string;
   critical?: string;
+  // Add selectedForUnpack to track selection state if managed within this component directly,
+  // otherwise, this is handled by selectedPointsForUnpack state from point strings.
 }
 
 const AntagoInteract: React.FC<AntagoInteractProps> = ({ 
@@ -135,6 +137,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
   // Add a separate loading state for variations
   const [isVariationLoading, setIsVariationLoading] = useState<boolean>(false);
+
+  // State for "Unpack Points" feature
+  const [selectedPointsForUnpack, setSelectedPointsForUnpack] = useState<string[]>([]);
+  const [isLoadingUnpack, setIsLoadingUnpack] = useState<boolean>(false);
 
   // Save to localStorage whenever useThinkingDialogue changes
   useEffect(() => {
@@ -1165,6 +1171,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     if (shouldRefresh) {
       setStoredFullResponses({ normal: '' });
       setStoredSimplifiedResponses({ normal: '' });
+      // Also reset thinking dialogue stored responses if they exist
+      setStoredThinkingFullResponses({ normal: '' });
+      setStoredThinkingSimplifiedResponses({ normal: '' });
+      setSelectedPointsForUnpack([]); // Clear selection on refresh
     }
   }, [shouldRefresh]);
 
@@ -1408,6 +1418,139 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     }));
   }, []);
 
+  /**
+   * Handles the unpacking of selected critique points.
+   * For each selected point, it finds the original sticky note on the board,
+   * generates a detailed explanation, creates a new sticky for the detail,
+   * and connects it to the original sticky.
+   */
+  const handleUnpackPoints = useCallback(async () => {
+    if (selectedPointsForUnpack.length === 0) {
+      setError('No points selected to unpack.');
+      return;
+    }
+
+    setIsLoadingUnpack(true);
+    setError(null);
+
+    // Determine the current set of all displayed points for context for OpenAI
+    let allCurrentDisplayedPointsForContext: string[] = [];
+    const currentNormalResponses = splitResponse((isSimplifiedMode ? simplifiedResponses : responses)[0] || '');
+    const currentThinkingResponses = splitResponse((isSimplifiedMode ? thinkingSimplifiedResponses : thinkingResponses)[0] || '');
+    
+    if (useThemedDisplay) {
+      const currentThemed = useThinkingDialogue ? thinkingThemedResponses : themedResponses;
+      allCurrentDisplayedPointsForContext = currentThemed.flatMap(theme => theme.points);
+    } else {
+      allCurrentDisplayedPointsForContext = useThinkingDialogue ? currentThinkingResponses : currentNormalResponses;
+    }
+
+    try {
+      // Fetch all sticky notes from the board to find the original point stickies
+      const allStickyNotes = await miro.board.get({ type: 'sticky_note' });
+      
+      // Process each selected point
+      for (const pointToUnpack of selectedPointsForUnpack) {
+        // Find the original sticky note containing this point text
+        // We look for sticky notes whose content includes the point text (exact or close match)
+        const originalSticky = allStickyNotes.find(sticky => {
+          // First try exact match
+          if (sticky.content === pointToUnpack) return true;
+          
+          // Then try a more lenient match that ignores case, whitespace, and punctuation
+          const normalizedContent = sticky.content?.toLowerCase().replace(/\s+/g, ' ').trim() || '';
+          const normalizedPoint = pointToUnpack.toLowerCase().replace(/\s+/g, ' ').trim();
+          return normalizedContent.includes(normalizedPoint) || normalizedPoint.includes(normalizedContent);
+        });
+
+        if (!originalSticky) {
+          console.warn(`Could not find original sticky for point: "${pointToUnpack.substring(0, 30)}..."`);
+          continue; // Skip to next point
+        }
+
+        // Generate detailed illustration
+        const detailedIllustration = await OpenAIService.unpackPointDetail(
+          pointToUnpack,
+          stickyNotes.join('\n\n'), // Design proposal
+          designChallenge,
+          allCurrentDisplayedPointsForContext // All current points for context
+        );
+
+        // Calculate position for the detail sticky (to the right of the original)
+        const detailX = originalSticky.x + 800; // Position to the right of original
+        const detailY = originalSticky.y; // Same vertical position
+        
+        // Create a rectangle shape for the detailed explanation
+        const detailShape = await miro.board.createShape({
+          shape: 'rectangle', // Use 'rectangle' as shape, not type
+          content: detailedIllustration,
+          x: detailX,
+          y: detailY,
+          width: 700, // Wider for more text
+          height: 300, // Taller for more text
+          style: {
+            fillColor: '#d0e17a', // Light green hex color instead of named color
+            textAlign: 'left',
+            borderWidth: 0,
+            fontSize: 24
+          }
+        });
+
+        // Create connector between original sticky and detail shape
+        await miro.board.createConnector({
+          start: {
+            item: originalSticky.id,
+            snapTo: 'right'
+          },
+          end: {
+            item: detailShape.id,
+            snapTo: 'left'
+          },
+          style: {
+            strokeColor: '#4262ff',
+            strokeWidth: 2,
+            strokeStyle: 'normal'
+          },
+          shape: 'curved' // Use curved connector shape
+        });
+        
+        // Small delay between operations
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      
+      // Log the activity
+      logUserActivity({
+        action: 'unpack_points_completed',
+        additionalData: {
+          unpackedCount: selectedPointsForUnpack.length
+        }
+      }, sessionId);
+
+      // Clear selection after successful operation
+      setSelectedPointsForUnpack([]);
+    } catch (err) {
+      console.error('Error unpacking points:', err);
+      const errorMessage = (err instanceof Error) ? err.message : String(err);
+      setError(`Failed to unpack points: ${errorMessage}`);
+    } finally {
+      setIsLoadingUnpack(false);
+    }
+  }, [
+    selectedPointsForUnpack, 
+    stickyNotes, 
+    designChallenge, 
+    sessionId, 
+    isSimplifiedMode, 
+    responses, 
+    simplifiedResponses, 
+    themedResponses, 
+    thinkingResponses, 
+    thinkingSimplifiedResponses, 
+    useThemedDisplay, 
+    useThinkingDialogue,
+    setError
+  ]);
+
   if (error) {
     return <div className="error-message">{error}</div>;
   }
@@ -1454,6 +1597,19 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               onVariationSelectionChange={handleVariationSelectionChange}
               onSendVariations={handleSendVariations}
             />
+            {/* "Unpack Points" Button */}
+            <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+              <button
+                onClick={handleUnpackPoints}
+                disabled={isLoadingUnpack || selectedPointsForUnpack.length === 0}
+                className="w-full py-2 px-4 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:text-gray-600 font-medium transition-colors"
+              >
+                {isLoadingUnpack 
+                  ? 'Unpacking Points...' 
+                  : `Unpack Selected (${selectedPointsForUnpack.length}) Points`}
+              </button>
+            </div>
+
             {/* Analysis Results - Moved above controls */}
             <AnalysisResults
               responses={
@@ -1467,6 +1623,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               isChangingTone={isChangingTone}
               themedResponses={useThinkingDialogue ? thinkingThemedResponses : themedResponses}
               useThemedDisplay={useThemedDisplay}
+              // Props for point selection
+              onSelectedPointsChange={setSelectedPointsForUnpack} // Callback to update selected points
+              currentSelectedPoints={selectedPointsForUnpack}   // Pass current selections to AnalysisResults
             />
             
             <div className="mb-2">

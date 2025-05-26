@@ -77,7 +77,9 @@ export const stickyConfig = {
       accessibility: 'light_pink',
       inclusivity: 'violet',
       sustainability: 'light_green'
-    }
+    },
+    critiqueRegular: 'light_yellow',
+    critiqueDetail: 'light_green'
   }
 };
 

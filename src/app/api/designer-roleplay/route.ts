@@ -76,13 +76,17 @@ Based on the provided design proposals, which represent different approaches to 
 2.  **Synthesize:** Combine the best elements or choose the most promising direction.
 3.  **Define Solution:** Formulate a final, concrete design solution.
 
-Your output should ONLY be the final design decisions, presented as clear, actionable bullet points under the heading '## Final Design Decisions'. These decisions should describe specific features, user flows, or design choices for the final solution.
+Your output should ONLY be the final design decisions, presented as clear, actionable bullet points under the heading '## Final Design Decisions'. These decisions should describe specific features, user flows, or design choices for the final solution. Your final design proposal should follow the following format:
+Proposal: What We Are Expecting
+A Major Spatial Layout Strategy
+What are the major physical or spatial changes you propose? You may retain the existing layout or propose new arrangements.
+Proposed Use of the Space
+What new activities, scenarios, or modes of use will your design enable?out or propose new arrangements. You do not need to write detailed rationales, just list the intended use cases that most effect
+Key Features that Support the New Use
+What specific spatial elements, design features, or interaction patterns will support these goals? How do they promote relaxation, connection, and a collective atmosphere in a non-clinical, approachable way?
 
-## Final Design Decisions
-- [First concrete feature or decision]
-- [Second concrete feature or decision]
-- [Third concrete feature or decision]
-... and so on.`;
+Your initial proposal are evaluated by a combination of students representatives an design experts. So the proposal should be self-explanatoary without image references.
+`;
 
 // System prompt for all models (GPT-O3, Gemini) - Use STEP_1 prompt
 const GENERAL_SYSTEM_PROMPT = STEP_1_SYSTEM_PROMPT;
