@@ -147,8 +147,41 @@ export function processSuggestion(text: string): ProcessedPoint {
 export const splitResponse = (response: string): string[] => {
   if (!response) return [];
   
-  // First split by ** **
-  const points = response.split('**').map(point => point.trim()).filter(point => point.length > 0);
+  // Split by ## headings (for new format) or ** markers (for legacy format)
+  let points: string[] = [];
+  
+  // Check if response contains ## headings (new format)
+  if (response.includes('##')) {
+    // Split by --- separators first, then process each section
+    const sections = response.split(/---+/).map(section => section.trim()).filter(section => section.length > 0);
+    
+    for (const section of sections) {
+      // Further split each section by ## headings if it contains multiple
+      const subsections = section.split(/(?=##)/);
+      for (const subsection of subsections) {
+        const trimmed = subsection.trim();
+        if (trimmed.length > 0 && trimmed.startsWith('##')) {
+          // Split title from content
+          const lines = trimmed.split('\n');
+          const titleLine = lines[0].trim(); // The ## heading
+          const contentLines = lines.slice(1).join('\n').trim(); // Everything after the heading
+          
+          // Add the title as a separate sticky note
+          if (titleLine) {
+            points.push(titleLine);
+          }
+          
+          // Add the content as a separate sticky note if it exists
+          if (contentLines && contentLines.length > 0) {
+            points.push(contentLines);
+          }
+        }
+      }
+    }
+  } else {
+    // Legacy format: split by ** **
+    points = response.split('**').map(point => point.trim()).filter(point => point.length > 0);
+  }
   
   // Clean up any remaining numbers at the start of points
   return points.map(point => {

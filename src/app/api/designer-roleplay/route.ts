@@ -76,13 +76,26 @@ Based on the provided design proposals, which represent different approaches to 
 2.  **Synthesize:** Combine the best elements or choose the most promising direction.
 3.  **Define Solution:** Formulate a final, concrete design solution.
 
-Your output should ONLY be the final design decisions, presented as clear, actionable bullet points under the heading '## Final Design Decisions'. These decisions should describe specific features, user flows, or design choices for the final solution. Your final design proposal should follow the following format:
-Proposal: What We Are Expecting
-A Major Spatial Layout Strategy
+Your output should ONLY be the final design decisions, presented as clear, actionable bullet points under the heading '## Final Design Decisions'. These decisions should describe specific features, user flows, or design choices for the final solution. Your final design proposal should follow the following format with each section clearly separated:
+
+## Proposal: What We Are Expecting
+
+---
+
+## A Major Spatial Layout Strategy
+
 What are the major physical or spatial changes you propose? You may retain the existing layout or propose new arrangements.
-Proposed Use of the Space
-What new activities, scenarios, or modes of use will your design enable?out or propose new arrangements. You do not need to write detailed rationales, just list the intended use cases that most effect
-Key Features that Support the New Use
+
+---
+
+## Proposed Use of the Space
+
+What new activities, scenarios, or modes of use will your design enable? You do not need to write detailed rationales, just list the intended use cases that most effect.
+
+---
+
+## Key Features that Support the New Use
+
 What specific spatial elements, design features, or interaction patterns will support these goals? How do they promote relaxation, connection, and a collective atmosphere in a non-clinical, approachable way?
 
 Your initial proposal are evaluated by a combination of students representatives an design experts. So the proposal should be self-explanatoary without image references.
@@ -432,6 +445,45 @@ function parseFinalDecisions(responseText: string, source: string): string[] {
     console.warn(`[Parsing Helper] Could not find dedicated final decisions section via regex for ${source}. Using full text.`);
   }
 
+  // Check if the response contains our new format with ## headings and --- separators
+  if (decisionsText.includes('##') && decisionsText.includes('---')) {
+    console.log(`[Parsing Helper] Detected new format with ## headings and --- separators for ${source}`);
+    
+    // Split by --- separators first, then process each section
+    const sections = decisionsText.split(/---+/).map(section => section.trim()).filter(section => section.length > 0);
+    const points: string[] = [];
+    
+    for (const section of sections) {
+      // Further split each section by ## headings if it contains multiple
+      const subsections = section.split(/(?=##)/);
+      for (const subsection of subsections) {
+        const trimmed = subsection.trim();
+        if (trimmed.length > 0 && trimmed.startsWith('##')) {
+          // Split title from content
+          const lines = trimmed.split('\n');
+          const titleLine = lines[0].trim(); // The ## heading
+          const contentLines = lines.slice(1).join('\n').trim(); // Everything after the heading
+          
+          // Add the title as a separate point
+          if (titleLine) {
+            points.push(titleLine);
+          }
+          
+          // Add the content as a separate point if it exists
+          if (contentLines && contentLines.length > 0) {
+            points.push(contentLines);
+          }
+        }
+      }
+    }
+    
+    if (points.length > 0) {
+      console.log(`[Parsing Helper] Extracted ${points.length} points using new format for ${source}`);
+      return points;
+    }
+  }
+
+  // Fallback to old parsing logic for legacy formats
   // Split into points (usually bulleted or numbered)
   const points = decisionsText
     .split(/\n(?:\d+\. |\* |- |\u2022 )/g) // Split by numbered/bullet points on new lines
@@ -439,13 +491,13 @@ function parseFinalDecisions(responseText: string, source: string): string[] {
     .filter(p => p.length > 5); // Filter out very short/empty lines
 
   if (points.length > 0) {
-    console.log(`[Parsing Helper] Extracted ${points.length} final decision points from ${source}`);
+    console.log(`[Parsing Helper] Extracted ${points.length} final decision points using legacy format for ${source}`);
     return points;
   } else {
      // Fallback: Split by double newline if list parsing fails
      const paragraphs = decisionsText.split(/\n\s*\n+/).filter(p => p.trim().length > 5);
      if (paragraphs.length > 0) {
-       console.log(`[Parsing Helper] Extracted ${paragraphs.length} final decision paragraphs as fallback from ${source}`);
+       console.log(`[Parsing Helper] Extracted ${paragraphs.length} final decision paragraphs as fallback for ${source}`);
        return paragraphs;
      } else {
        console.warn(`[Parsing Helper] No structured final decisions found for ${source}. Returning single block.`);
