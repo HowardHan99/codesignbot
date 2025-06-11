@@ -230,11 +230,6 @@ const frameConfig = ConfigurationService.getFrameConfig();
 const frameName = frameConfig.names.thinkingDialogue;
 ```
 
-Key frame names:
-- `designDecision`: 'Design-Proposal'
-- `thinkingDialogue`: 'Thinking-Dialogue'
-- `realTimeResponse`: 'Real-time-response'
-
 ### Frame Creation and Finding
 
 Always use `StickyNoteService.ensureFrameExists(frameName)` to find or create frames:

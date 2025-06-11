@@ -69,9 +69,20 @@ Add the following environment variables to your project:
 ```
 AZURE_OPENAI_API_KEY=your-azure-api-key
 AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com
-AZURE_OPENAI_API_VERSION=2023-05-15
-AZURE_OPENAI_O3_DEPLOYMENT=your-o3-deployment-name
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
+AZURE_OPENAI_O3_DEPLOYMENT=o3
 ```
+
+**Important Notes:**
+- **API Version**: O3 model requires API version `2024-12-01-preview` or later
+- **Model Name**: Use `o3` as the deployment name, not `gpt-o3` or `GPT_O3`
+- **Deployment**: Create a deployment in Azure with the model name `o3` (2025-04-16 version)
+
+**Environment Variables You Need:**
+- `AZURE_OPENAI_API_KEY` ✅ (you have this)
+- `AZURE_OPENAI_ENDPOINT` ✅ (you have this, make sure no spaces around =)
+- `AZURE_OPENAI_API_VERSION` (defaults to `2024-12-01-preview` if not provided)
+- `AZURE_OPENAI_O3_DEPLOYMENT` (defaults to `o3` if not provided)
 
 - `AZURE_OPENAI_API_KEY`: The Key 1 or Key 2 from Step 3
 - `AZURE_OPENAI_ENDPOINT`: The Endpoint URL from Step 3

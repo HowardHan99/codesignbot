@@ -9,6 +9,22 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Initialize Azure OpenAI client if environment variables are available
+let azureOpenai: OpenAI | null = null;
+const hasAzureConfig = process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT;
+
+if (hasAzureConfig) {
+  azureOpenai = new OpenAI({
+    apiKey: process.env.AZURE_OPENAI_API_KEY,
+    baseURL: `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments`,
+    defaultQuery: { 'api-version': process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview' },
+    defaultHeaders: { 'api-key': process.env.AZURE_OPENAI_API_KEY }
+  });
+  console.log('[AZURE OPENAI] Azure OpenAI client initialized successfully');
+} else {
+  console.log('[AZURE OPENAI] Azure OpenAI not configured, will use direct OpenAI API for O3 requests');
+}
+
 // Initialize Anthropic API with environment variables
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -21,6 +37,7 @@ const anthropic = new Anthropic({
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '');
 
 const gptmodel = 'o4-mini'
+const azureO3Deployment = process.env.AZURE_OPENAI_O3_DEPLOYMENT || 'o4-mini';
 
 // System prompt for the first step (Thinking + Brainstorming)
 const STEP_1_SYSTEM_PROMPT = `You are a professional designer. You approach design challenges with a structured thinking process and creative brainstorming.
@@ -38,6 +55,23 @@ Your task is to first think through the given design challenge step-by-step, and
     *   3-5 key characteristics or features that define this approach and how it helps to solve the challenge.
 
 Format your response clearly, separating the Thinking Process and Brainstorming Proposals sections. Use headings like '## Thinking Process' and '## Brainstorming Proposals'.`;
+
+// Gemini-specific prompt for Step 1 - More concise version
+const GEMINI_STEP_1_SYSTEM_PROMPT = `You are a professional designer. Approach design challenges with structured thinking and focused brainstorming.
+
+Your task: Think through the design challenge, then generate design proposals.
+
+1. **Thinking Process:** Show your thought process concisely:
+   * Challenge understanding and key objectives
+   * Core user needs and main pain points  
+   * Initial solution ideas considering constraints
+
+2. **Brainstorming Proposals:** Generate 3 distinct proposals. For each:
+   * Concept name/theme
+   * Primary goal and how it solves the challenge
+   * 3-4 key defining characteristics
+
+Keep responses focused and actionable. Use clear headings: '## Thinking Process' and '## Brainstorming Proposals'. Don't include any other text in your response.`;
 
 // Claude-specific prompt for Step 1 (Thinking + Brainstorming)
 // Claude needs explicit instructions for the 'thinking' block and the final output format.
@@ -65,7 +99,8 @@ YOUR RESPONSE should ONLY include the Brainstorming Proposals, presented under t
 - ...
 
 **Concept Name/Theme:** ...
-... and so on.`;
+... and so on.
+Don't include any other text in your response.`;
 
 // System prompt for the second step (Final Decisions from Proposals)
 const STEP_2_FINAL_DECISION_SYSTEM_PROMPT = `You are a professional designer tasked with synthesizing multiple design proposals into a single, concrete design solution.
@@ -76,9 +111,35 @@ Based on the provided design proposals, which represent different approaches to 
 2.  **Synthesize:** Combine the best elements or choose the most promising direction.
 3.  **Define Solution:** Formulate a final, concrete design solution.
 
-Your output should ONLY be the final design decisions, presented as clear, actionable bullet points under the heading '## Final Design Decisions'. These decisions should describe specific features, user flows, or design choices for the final solution. Your final design proposal should follow the following format with each section clearly separated:
+Your output should ONLY be the final design decisions, presented as clear, actionable content under the heading '## Final Design Decisions'. These decisions should describe specific features, user flows, or design choices for the final solution. Your final design proposal should follow the following format with each section clearly separated:
 
-## Proposal: What We Are Expecting
+---
+
+## A Major Spatial Layout Strategy
+
+What are the major physical or spatial changes you propose? You may retain the existing layout or propose new arrangements.
+
+---
+
+## Proposed Use of the Space
+
+What new activities, scenarios, or modes of use will your design enable? You do not need to write detailed rationales, just list the intended use cases that most effect. The activities and the scenarios should be concise, solid and self-explanatory.
+
+---
+
+## Key Features that Support the New Use
+
+What specific spatial elements, design features, or interaction patterns will support these goals? How do they promote relaxation, connection, and a collective atmosphere in a non-clinical, approachable way?
+
+Your initial proposal are evaluated by a combination of students representatives an design experts. So the proposal should be self-explanatoary without image references.
+`;
+
+// Gemini-specific prompt for Step 2 - More concise version
+const GEMINI_STEP_2_FINAL_DECISION_SYSTEM_PROMPT = `You are a professional designer synthesizing design proposals into a concrete solution.
+
+Task: Evaluate proposals, synthesize the best elements, and define a final solution.
+
+Output ONLY the final design decisions under '## Final Design Decisions'. Follow this format:
 
 ---
 
@@ -99,6 +160,7 @@ What new activities, scenarios, or modes of use will your design enable? You do 
 What specific spatial elements, design features, or interaction patterns will support these goals? How do they promote relaxation, connection, and a collective atmosphere in a non-clinical, approachable way?
 
 Your initial proposal are evaluated by a combination of students representatives an design experts. So the proposal should be self-explanatoary without image references.
+Don't include too much contents in your response just focus on the key features and the new use of the space. Don't include any other text in your response.
 `;
 
 // System prompt for all models (GPT-O3, Gemini) - Use STEP_1 prompt
@@ -167,8 +229,9 @@ Please first show your thinking process, then generate brainstorming proposals b
 
       } else {
         // For OpenAI and Gemini
-        console.log(`[DESIGNER ROLE PLAY API] Calling ${gptmodel} API for Step 1`);
         if (modelType === DesignerModelType.GPT_O3) {
+          // Always use direct OpenAI API for O4-mini since Azure deployment has issues
+          console.log('[DESIGNER ROLE PLAY API] Using direct OpenAI for O4-mini Step 1');
           const completion = await openai.chat.completions.create({
             model: gptmodel,
             messages: [
@@ -179,7 +242,7 @@ Please first show your thinking process, then generate brainstorming proposals b
           step1ResponseText = completion.choices[0]?.message?.content || '';
         } else if (modelType === DesignerModelType.GEMINI) {
           const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro-preview-03-25' });
-          const prompt = `${GENERAL_SYSTEM_PROMPT}\n\n${step1UserPrompt}`;
+          const prompt = `${GEMINI_STEP_1_SYSTEM_PROMPT}\n\n${step1UserPrompt}`;
           const result = await model.generateContent(prompt);
           step1ResponseText = (await result.response).text();
         } else { // Default to GPT-4
@@ -242,8 +305,9 @@ Please evaluate these proposals and synthesize them into a single, concrete desi
             ?.map(block => (block as any).text)
             ?.join('\n') || '';
         } else {
-          console.log(`[DESIGNER ROLE PLAY API] Calling ${gptmodel} API for Step 2`);
           if (modelType === DesignerModelType.GPT_O3) {
+            // Always use direct OpenAI API for O4-mini since Azure deployment has issues
+            console.log('[DESIGNER ROLE PLAY API] Using direct OpenAI for O4-mini Step 2');
             const completion = await openai.chat.completions.create({
               model: gptmodel,
               messages: [
@@ -254,7 +318,7 @@ Please evaluate these proposals and synthesize them into a single, concrete desi
             step2ResponseText = completion.choices[0]?.message?.content || '';
           } else if (modelType === DesignerModelType.GEMINI) {
             const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro-preview-03-25' });
-            const prompt = `${STEP_2_FINAL_DECISION_SYSTEM_PROMPT}\n\n${step2UserPrompt}`;
+            const prompt = `${GEMINI_STEP_2_FINAL_DECISION_SYSTEM_PROMPT}\n\n${step2UserPrompt}`;
             const result = await model.generateContent(prompt);
             step2ResponseText = (await result.response).text();
           } else { // Default to GPT-4
@@ -296,9 +360,17 @@ Please evaluate these proposals and synthesize them into a single, concrete desi
       decisionsCount: decisions.length
     });
 
+    // Add design decisions to thinking dialogue frame as well
+    const enhancedThinking = [...thinking];
+    if (decisions.length > 0) {
+      enhancedThinking.push('## Final Design Decisions');
+      enhancedThinking.push(...decisions);
+    }
+
     const totalDuration = Date.now() - startTime;
     console.log(`[DESIGNER ROLE PLAY API] Request completed in ${totalDuration}ms`, {
       thinkingCount: thinking.length,
+      enhancedThinkingCount: enhancedThinking.length,
       brainstormingCount: brainstormingProposals.length,
       decisionsCount: decisions.length,
       thinkingSample: thinking.length > 0 ? thinking[0].substring(0, 100) + '...' : 'none',
@@ -307,7 +379,7 @@ Please evaluate these proposals and synthesize them into a single, concrete desi
     });
     
     return NextResponse.json({
-      thinking,
+      thinking: enhancedThinking,
       brainstormingProposals,
       decisions
     });
@@ -323,6 +395,12 @@ Please evaluate these proposals and synthesize them into a single, concrete desi
 }
 
 // --- Helper Parsing Functions ---
+
+// Helper function to convert markdown bold to HTML bold
+function convertMarkdownBoldToHtml(text: string): string {
+  // Replace **text** with <b>text</b>
+  return text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+}
 
 function parseThinkingContent(responseText: string, source: string): string[] {
   console.log(`[Parsing Helper] Attempting to parse thinking content from ${source}`);
@@ -375,12 +453,12 @@ function parseThinkingContent(responseText: string, source: string): string[] {
 
   if (processedThinking.length > 0) {
     console.log(`[Parsing Helper] Extracted ${processedThinking.length} thinking elements from ${source}`);
-    return processedThinking;
+    return processedThinking.map(convertMarkdownBoldToHtml);
   } else {
     // Fallback if the processing failed
     console.warn(`[Parsing Helper] Structured processing failed for ${source}. Falling back to paragraph splitting.`);
     const paragraphs = thinkingText.split(/\n\s*\n+/).filter(p => p.trim().length > 5);
-    return paragraphs.length > 0 ? paragraphs : [thinkingText];
+    return paragraphs.length > 0 ? paragraphs.map(convertMarkdownBoldToHtml) : [convertMarkdownBoldToHtml(thinkingText)];
   }
 }
 
@@ -428,7 +506,7 @@ function parseBrainstormingProposals(responseText: string, source: string): stri
   }
 
   console.log(`[Parsing Helper] Extracted ${proposals.length} brainstorming proposals from ${source}`);
-  return proposals;
+  return proposals.map(convertMarkdownBoldToHtml);
 }
 
 function parseFinalDecisions(responseText: string, source: string): string[] {
@@ -479,29 +557,29 @@ function parseFinalDecisions(responseText: string, source: string): string[] {
     
     if (points.length > 0) {
       console.log(`[Parsing Helper] Extracted ${points.length} points using new format for ${source}`);
-      return points;
+      return points.map(convertMarkdownBoldToHtml);
     }
   }
 
   // Fallback to old parsing logic for legacy formats
-  // Split into points (usually bulleted or numbered)
+  // Split into paragraphs instead of bullet points
   const points = decisionsText
-    .split(/\n(?:\d+\. |\* |- |\u2022 )/g) // Split by numbered/bullet points on new lines
+    .split(/\n\s*\n+/) // Split by double newlines (paragraphs)
     .map(p => p.trim().replace(/^(## Final Design Decisions|Final Design Decisions:)/i, '').trim()) // Clean up point text
     .filter(p => p.length > 5); // Filter out very short/empty lines
 
   if (points.length > 0) {
     console.log(`[Parsing Helper] Extracted ${points.length} final decision points using legacy format for ${source}`);
-    return points;
+    return points.map(convertMarkdownBoldToHtml);
   } else {
      // Fallback: Split by double newline if list parsing fails
      const paragraphs = decisionsText.split(/\n\s*\n+/).filter(p => p.trim().length > 5);
      if (paragraphs.length > 0) {
        console.log(`[Parsing Helper] Extracted ${paragraphs.length} final decision paragraphs as fallback for ${source}`);
-       return paragraphs;
+       return paragraphs.map(convertMarkdownBoldToHtml);
      } else {
        console.warn(`[Parsing Helper] No structured final decisions found for ${source}. Returning single block.`);
-       return [decisionsText]; // Return the whole block if no structure found
+       return [convertMarkdownBoldToHtml(decisionsText)]; // Return the whole block if no structure found
      }
   }
 } 
