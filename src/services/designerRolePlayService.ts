@@ -21,7 +21,7 @@ interface DesignerThinkingProcess {
 export enum DesignerModelType {
   GPT4 = 'gpt4',
   CLAUDE = 'claude',
-  GPT_O3 = 'gpt_o3',
+  GPT_O3 = 'o4-mini',
   GEMINI = 'gemini'
 }
 
@@ -107,40 +107,83 @@ export class DesignerRolePlayService {
   }
 
   /**
-   * Creates a document-style text box in the Thinking-Dialogue frame for the 
-   * designer's thinking process AND brainstorming proposals.
+   * Creates three separate document-style text boxes in the Thinking-Dialogue frame for the 
+   * designer's thinking process, brainstorming proposals, and design decisions.
    */
-  private static async addThinkingAndProposalsToDialogueFrame(thoughts: string[], proposals: string[]): Promise<void> {
+  private static async addThinkingProposalsAndDecisionsToDialogueFrame(thoughts: string[], proposals: string[], decisions: string[]): Promise<void> {
     try {
-      console.log(`Creating designer thinking/proposals document with ${thoughts.length} steps and ${proposals.length} proposals`);
+      console.log(`Creating three separate documents: ${thoughts.length} thinking steps, ${proposals.length} proposals, ${decisions.length} decisions`);
+      
+      // Find or create the frame first to get positioning info
+      let frame = await MiroFrameService.findFrameByTitle(frameConfig.names.thinkingDialogue);
+      if (!frame) {
+        frame = await MiroFrameService.createFrame(
+          frameConfig.names.thinkingDialogue,
+          -1000,
+          0,
+          1500,
+          1200  // Increased height to accommodate three text elements
+        );
+      }
       
       // Extract high-level themes from the detailed thoughts
       const themeHeadings = this.extractHighLevelThemes(thoughts);
       
-      // Combine themes and proposals into a simplified structure for the document service
-      const combinedContent = [
-        // Add a clear separator or header for thoughts
+      // Prepare content for each of the three text elements
+      const thinkingContent = [
         '## 🧠 Designer Thinking Process Key Themes',
-        ...themeHeadings,
-        '\n---\n', // Separator
-        // Add a clear separator or header for proposals
+        ...themeHeadings
+      ];
+      
+      const proposalsContent = [
         '## 💡 Brainstorming Proposals',
         ...proposals
       ];
       
-      // Use the native document method
+      const decisionsContent = [
+        '## ✨ Final Design Decisions',
+        ...decisions
+      ];
+      
+      // Create three separate text elements with different vertical positions
+      const yOffset = 350; // Vertical spacing between text elements
+      
+      // 1. Create thinking process text (top position)
       await DocumentService.createMiroNativeDocument(
         frameConfig.names.thinkingDialogue,
-        'Designer Process & Concepts', // Updated title
-        combinedContent,
+        'Designer Thinking Process', 
+        thinkingContent,
         {
+          position: { x: frame.x, y: frame.y - 200 },
           width: 650
         }
       );
       
-      console.log('Designer thinking & proposals document created successfully!');
+      // 2. Create brainstorming proposals text (middle position)
+      await DocumentService.createMiroNativeDocument(
+        frameConfig.names.thinkingDialogue,
+        'Brainstorming Concepts', 
+        proposalsContent,
+        {
+          position: { x: frame.x, y: frame.y + yOffset },
+          width: 650
+        }
+      );
+      
+      // 3. Create design decisions text (bottom position)
+      await DocumentService.createMiroNativeDocument(
+        frameConfig.names.thinkingDialogue,
+        'Design Decisions', 
+        decisionsContent,
+        {
+          position: { x: frame.x, y: frame.y + (yOffset * 2) },
+          width: 650
+        }
+      );
+      
+      console.log('Three separate designer documents created successfully!');
     } catch (error) {
-      console.error('Error creating designer thinking & proposals document:', error);
+      console.error('Error creating three separate designer documents:', error);
       
       // Fallback: Try creating separate documents if combined fails (less ideal)
       console.log('Falling back to separate document creation attempts');
@@ -312,7 +355,7 @@ export class DesignerRolePlayService {
   public static async addThinkingToBoard(designerThinking: DesignerThinkingProcess): Promise<void> {
     try {
       // Add thinking process AND brainstorming proposals to the dialogue frame
-      await this.addThinkingAndProposalsToDialogueFrame(designerThinking.thinking, designerThinking.brainstormingProposals);
+      await this.addThinkingProposalsAndDecisionsToDialogueFrame(designerThinking.thinking, designerThinking.brainstormingProposals, designerThinking.decisions);
       
       // Add design decisions to the proposal frame
       await this.addDecisionsToDesignFrame(designerThinking.decisions);
