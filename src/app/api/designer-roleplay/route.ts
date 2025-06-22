@@ -115,21 +115,17 @@ Your output should ONLY be the final design decisions, presented as clear, actio
 
 ---
 
-## A Major Spatial Layout Strategy
-
-What are the major physical or spatial changes you propose? You may retain the existing layout or propose new arrangements.
-
+## Major UX/UI Strategy
+Outline key UX/UI changes to layout, navigation, and interaction design.
 ---
 
-## Proposed Use of the Space
-
-What new activities, scenarios, or modes of use will your design enable? You do not need to write detailed rationales, just list the intended use cases that most effect.
-
+## Proposed Use of the Website
+List new user scenarios, interactions, and purposes your redesign enables or enhances.
 ---
 
-## Key Features that Support the New Use
+## Key Features Supporting New Use
 
-What specific spatial elements, design features, or interaction patterns will support these goals? How do they promote relaxation, connection, and a collective atmosphere in a non-clinical, approachable way?
+Describe specific design features (e.g., interactive maps, status notifications, user profiles, community voting mechanisms) and how they support engagement, transparency, and inclusivity.
 
 Your initial proposal are evaluated by a combination of students representatives an design experts. So the proposal should be self-explanatoary without image references.
 `;
@@ -143,21 +139,17 @@ Output ONLY the final design decisions under '## Final Design Decisions'. Follow
 
 ---
 
-## A Major Spatial Layout Strategy
-
-What are the major physical or spatial changes you propose? You may retain the existing layout or propose new arrangements.
-
+## Major UX/UI Strategy
+Outline key UX/UI changes to layout, navigation, and interaction design.
 ---
 
-## Proposed Use of the Space
-
-What new activities, scenarios, or modes of use will your design enable? You do not need to write detailed rationales, just list the intended use cases that most effect. The activities and the scenarios should be concise, solid and self-explanatory.
-
+## Proposed Use of the Website
+List new user scenarios, interactions, and purposes your redesign enables or enhances.
 ---
 
-## Key Features that Support the New Use
+## Key Features Supporting New Use
 
-What specific spatial elements, design features, or interaction patterns will support these goals? How do they promote relaxation, connection, and a collective atmosphere in a non-clinical, approachable way?
+Describe specific design features (e.g., interactive maps, status notifications, user profiles, community voting mechanisms) and how they support engagement, transparency, and inclusivity.
 
 Your initial proposal are evaluated by a combination of students representatives an design experts. So the proposal should be self-explanatoary without image references.
 Don't include too much contents in your response just focus on the key features and the new use of the space.
