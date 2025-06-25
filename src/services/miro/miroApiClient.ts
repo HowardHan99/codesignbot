@@ -1,6 +1,7 @@
 import { Frame } from '@mirohq/websdk-types';
 import { safeApiCall, logError } from '../../utils/errorHandlingUtils';
 import { delay } from '../../utils/fileProcessingUtils';
+import { Logger } from '../../utils/logger';
 
 /**
  * Centralized client for Miro API operations with error handling and rate limiting
@@ -64,7 +65,7 @@ export class MiroApiClient {
         lastError = error;
         
         // Log the error but keep trying
-        console.warn(`Miro API call failed (attempt ${attempts}/${this.MAX_RETRIES}): ${operation}`, error);
+        Logger.warn('MIRO-API', `API call failed (attempt ${attempts}/${this.MAX_RETRIES}): ${operation}`, error);
         
         // Wait longer between retries
         await delay(this.API_DELAY * Math.pow(2, attempts));
@@ -137,7 +138,7 @@ export class MiroApiClient {
     shape?: 'square' | 'rectangle';
     style?: any;
   }): Promise<any | null> {
-    console.log(`[DEBUG] MiroApiClient.createStickyNote called with:
+    Logger.log('MIRO-API', `MiroApiClient.createStickyNote called with:
     content: ${stickyConfig.content.substring(0, 50)}...
     position: x=${stickyConfig.x}, y=${stickyConfig.y}
     width: ${stickyConfig.width}
@@ -147,13 +148,13 @@ export class MiroApiClient {
     return await this.call<any>(
       'Create sticky note',
       async () => {
-        console.log(`[DEBUG] Calling miro.board.createStickyNote API`);
+        Logger.log('MIRO-API', `Calling miro.board.createStickyNote API`);
         try {
           const sticky = await miro.board.createStickyNote(stickyConfig);
-          console.log(`[DEBUG] Miro API createStickyNote successful, id: ${sticky?.id}`);
+          Logger.log('MIRO-API', `Miro API createStickyNote successful, id: ${sticky?.id}`);
           return sticky;
         } catch (error) {
-          console.error(`[DEBUG] Miro API createStickyNote failed:`, error);
+          Logger.error('MIRO-API', `Miro API createStickyNote failed:`, error);
           throw error;
         }
       },
@@ -195,11 +196,11 @@ export class MiroApiClient {
           });
           
           if (itemsInFrame.length === 0) {
-            console.log(`No ${itemType} items found in frame ${frameId}`);
+            Logger.log('MIRO-API', `No ${itemType} items found in frame ${frameId}`);
             continue;
           }
           
-          console.log(`Deleting ${itemsInFrame.length} ${itemType} items from frame ${frameId}`);
+          Logger.log('MIRO-API', `Deleting ${itemsInFrame.length} ${itemType} items from frame ${frameId}`);
           
           // Delete items in batches to avoid rate limiting
           const BATCH_SIZE = 10;
@@ -218,7 +219,7 @@ export class MiroApiClient {
                 await delay(100);
               }
             } catch (error) {
-              console.error(`Error deleting batch of ${itemType} items:`, error);
+              Logger.error('MIRO-API', `Error deleting batch of ${itemType} items:`, error);
               throw error;
             }
           }

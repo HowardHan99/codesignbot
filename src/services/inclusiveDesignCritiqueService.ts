@@ -5,6 +5,7 @@ import { MiroApiClient } from './miro/miroApiClient';
 import { safeApiCall } from '../utils/errorHandlingUtils';
 import { inclusiveDesignConfig } from '../utils/config';
 import { frameConfig } from '../utils/config';
+import { Logger } from '../utils/logger';
 
 /**
  * Service that provides real-time critique of design decisions based on inclusive design principles
@@ -30,7 +31,7 @@ export class InclusiveDesignCritiqueService {
       return [];
     }
     
-    console.log('Analyzing transcript for inclusive design critique:', transcript.substring(0, 50) + '...');
+    Logger.log('INCLUSIVE-DESIGN', 'Analyzing transcript for inclusive design critique:', transcript.substring(0, 50) + '...');
     
     // Get current design decisions for context, but don't modify them
     const designDecisions = await this.getDesignDecisions();
@@ -55,11 +56,11 @@ export class InclusiveDesignCritiqueService {
       // Check if we have valid cached decisions
       const now = Date.now();
       if (now - this.lastFetchTime < this.CACHE_TTL && this.cachedDesignDecisions.length > 0) {
-        console.log(`[DEBUG] Using cached design decisions (${this.cachedDesignDecisions.length} items, cache age: ${(now - this.lastFetchTime)/1000}s)`);
+        Logger.log('INCLUSIVE-DESIGN', `Using cached design decisions (${this.cachedDesignDecisions.length} items, cache age: ${(now - this.lastFetchTime)/1000}s)`);
         return this.cachedDesignDecisions;
       }
       
-      console.log(`[DEBUG] Cache expired or empty, fetching fresh design decisions`);
+      Logger.log('INCLUSIVE-DESIGN', `Cache expired or empty, fetching fresh design decisions`);
       
       // Get design decisions from the Design-Proposal frame
       const frameStickyNotes = await MiroApiClient.findFrameByTitle(frameConfig.names.designProposal)
@@ -70,7 +71,7 @@ export class InclusiveDesignCritiqueService {
         .map(note => note.content || '')
         .filter(content => content.trim().length > 0);
       
-      console.log(`[DEBUG] Fetched ${decisions.length} design decisions`);
+      Logger.log('INCLUSIVE-DESIGN', `Fetched ${decisions.length} design decisions`);
       
       // Cache the results
       this.cachedDesignDecisions = decisions;
@@ -78,7 +79,7 @@ export class InclusiveDesignCritiqueService {
       
       return decisions;
     } catch (error) {
-      console.error('Error getting design decisions:', error);
+      Logger.error('INCLUSIVE-DESIGN', 'Error getting design decisions:', error);
       return this.cachedDesignDecisions;
     }
   }
@@ -152,7 +153,7 @@ export class InclusiveDesignCritiqueService {
       const frame = await StickyNoteService.ensureFrameExists(this.REAL_TIME_FRAME);
       
       if (!frame) {
-        console.error('Failed to find or create Real-time-response frame');
+        Logger.error('INCLUSIVE-DESIGN', 'Failed to find or create Real-time-response frame');
         return;
       }
       
@@ -170,9 +171,9 @@ export class InclusiveDesignCritiqueService {
         'response' // Use response mode for consistent styling
       );
       
-      console.log(`Created ${critiques.length} critique sticky notes in Real-time response frame`);
+      Logger.log('INCLUSIVE-DESIGN', `Created ${critiques.length} critique sticky notes in Real-time response frame`);
     } catch (error) {
-      console.error('Error sending critiques to board:', error);
+      Logger.error('INCLUSIVE-DESIGN', 'Error sending critiques to board:', error);
     }
   }
   
