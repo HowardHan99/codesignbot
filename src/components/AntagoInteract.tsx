@@ -372,154 +372,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       const existingThemes = await DesignThemeService.getCurrentThemesFromBoard();
       console.log(`Found ${existingThemes.length} existing themes on the board`);
       
-      // If no themes exist on the board, we can't do themed analysis
-      if (existingThemes.length === 0) {
-        console.log('No themes found on board. Using standard analysis without themes.');
-        // Generate standard analysis
-        try {
-          console.log('Generating standard analysis...',ragContextString, thinkingContextString);
-          const generateAnalysis = async (
-            messageContext: string,
-            setResultsFunc: React.Dispatch<React.SetStateAction<string[]>>,
-            setStoredResponsesFunc: React.Dispatch<React.SetStateAction<StoredResponses>>
-          ) => {
-            
-            // === SIMPLE LOG FOR WHAT'S BEING SENT TO OPENAI ===
-            console.log('🔍 === MESSAGE COMPONENTS BEING SENT TO OPENAI ===');
-            console.log('1. TAG PAIRS:', pointTagMappings.length > 0 ? pointTagMappings : 'No tags found');
-            console.log('2. THINKING DIALOGUE:', thinkingContextString || 'None');
-            console.log('3. RAG CONTENT:', ragContextString || 'None');
-            console.log('4. INCORPORATE SUGGESTIONS:', incorporateSuggestionsString || 'None');
-            console.log('5. DESIGN CHALLENGE:', designChallenge || 'None');
-            console.log('6. CONSENSUS POINTS:', initialConsensusPoints && initialConsensusPoints.length > 0 ? initialConsensusPoints : 'None');
-            console.log('7. SYNTHESIZED POINTS:', synthesizedPoints && synthesizedPoints.length > 0 ? synthesizedPoints : 'None');
-            console.log('🔍 === FULL MESSAGE CONTENT ===');
-            console.log('USER MESSAGE (complete):', messageContext);
-            console.log('🔍 === END MESSAGE COMPONENTS ===');
-            
-            // Pass design principles, custom prompt, and tag preferences to the analysis service
-            const response = await OpenAIService.generateAnalysis(
-              messageContext, 
-              designChallenge,
-              synthesizedPoints,
-              initialConsensusPoints || [],
-              undefined, // Design principles only for variations
-              undefined, // Custom prompt only for variations  
-              pointTagMappings // NEW: Pass tag mappings for learning
-            );
-            
-            setResultsFunc([response]);
-            setStoredResponsesFunc({ normal: response });
-            return response;
-          };
-          
-          // Run standard analysis first to show results quickly
-          Logger.log('AntagoInteract', 'Generating standard analysis first');
-          const standardResponse = await generateAnalysis(
-            baseMessage, 
-            setResponses, 
-            setStoredFullResponses
-          );
-          
-          // Update parent immediately with standard response
-          onResponsesUpdate?.(splitResponse(standardResponse));
-          
-          // Mark as no longer loading once we have the initial response 
-          setLoading(false);
-          
-          // Now generate the enhanced response in the background if needed
-          if (thinkingContextString || ragContextString) {
-            // Use IIFE to create background process
-            (async () => {
-              try {
-                const enhancedResponse = await generateAnalysis(
-                  enhancedMessageWithContext,
-                  setThinkingResponses,
-                  setStoredThinkingFullResponses
-                );
-                
-                Logger.log('AntagoInteract', 'Thinking dialogue enhanced analysis complete', {
-                  standardLength: standardResponse?.length || 0,
-                  enhancedLength: enhancedResponse?.length || 0,
-                  hasEnhancedResults: !!enhancedResponse
-                });
-              } catch (error) {
-                console.error('Error generating enhanced analysis in background:', error);
-              }
-            })();
-          }
-          
-          // If simplified mode is active, generate the simplified version in the background
-          if (isSimplifiedMode) {
-            (async () => {
-              try {
-                setIsChangingTone(true);
-                const simplified = await OpenAIService.simplifyAnalysis(standardResponse);
-                setSimplifiedResponses([simplified]);
-                setStoredSimplifiedResponses({ normal: simplified });
-                
-                // Update UI with simplified response if in simplified mode
-                if (isSimplifiedMode && !useThemedDisplay) {
-                  onResponsesUpdate?.(splitResponse(simplified));
-                }
-                
-                setIsChangingTone(false);
-              } catch (error) {
-                console.error('Error generating simplified response:', error);
-                setIsChangingTone(false);
-              }
-            })();
-          }
-          
-          // Save to Firebase in the background (NON-THEMED ANALYSIS)
-          (async () => {
-            try {
-              if (!sessionId) {
-                Logger.warn('AntagoInteract', 'Skipping Firebase save for non-themed analysis due to missing sessionId');
-                return;
-              }
-
-              const antagonisticResponseData = {
-                critiques: standardResponse ? splitResponse(standardResponse) : [],
-                usedThinkingDialogueInput: useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== ''),
-                tagMappings: pointTagMappings // NEW: Store tag mappings with analysis
-              };
-              await saveFrameData(sessionId, 'antagonisticResponse', antagonisticResponseData);
-              
-              logUserActivity({
-                action: 'generate_analysis_completed',
-                additionalData: {
-                  hasThemes: false,
-                  themedDisplay: false,
-                  challengeLength: designChallenge?.length || 0,
-                  responseCount: standardResponse ? splitResponse(standardResponse).length : 0,
-                  simplifiedResponseCount: simplifiedResponses.length,
-                  useThinkingDialogueInput: antagonisticResponseData.usedThinkingDialogueInput,
-                  hasTagPreferences: !!pointTagMappings, // NEW: Log tag mappings usage
-                  duration: Date.now() - startTime 
-                }
-              }, sessionId);
-            } catch (error) {
-              Logger.error('AntagoInteract', 'Error saving non-themed analysis data to Firebase:', error);
-            }
-          })();
-          
-          // Complete the loading state
-          setLoading(false);
-          processingRef.current = false;
-          onComplete?.();
-        } catch (error) {
-          Logger.error('AntagoInteract', 'Error generating standard analysis:', error);
-          setError('Failed to generate analysis. Please try again.');
-          setLoading(false);
-          processingRef.current = false;
-          onComplete?.();
-        }
-        
-        // Skip the rest of the themed processing
-        return;
-      }
-      
       // Read theme selection state from localStorage
       let selectedThemes = [...existingThemes]; // Default to using all themes
       
@@ -562,169 +414,251 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         }
       }
       
-      // No need to regenerate themes or recalculate positions - the existing themes already have positions
- 
-      // Function to generate themed analysis
-      const generateThemedAnalysis = async (
-        messageContext: string,
-        setResponseFunc: React.Dispatch<React.SetStateAction<string[]>>,
-        setThemedResponsesFunc: React.Dispatch<React.SetStateAction<ThemedResponse[]>>,
-        setStoredResponsesFunc: React.Dispatch<React.SetStateAction<StoredResponses>>
-      ) => {
-        // Generate all theme analyses in parallel with standard response
-        const [themedResponsesData, response] = await Promise.all([
-          // Generate all theme analyses in parallel, passing design principles, custom prompt, and tag mappings
-          OpenAIService.generateAllThemeAnalyses(
-            messageContext,
-            selectedThemes,
-            designChallenge,
-            initialConsensusPoints || [],
-            undefined, // Design principles only for variations
-            undefined, // Custom prompt only for variations
-            pointTagMappings // NEW: Pass tag mappings for themed analysis too
-          ),
+      // === SIMPLE LOG FOR WHAT'S BEING SENT TO OPENAI ===
+      console.log('🔍 === MESSAGE COMPONENTS BEING SENT TO OPENAI ===');
+      console.log('1. TAG PAIRS:', pointTagMappings.length > 0 ? pointTagMappings : 'No tags found');
+      console.log('2. THINKING DIALOGUE:', thinkingContextString || 'None');
+      console.log('3. RAG CONTENT:', ragContextString || 'None');
+      console.log('4. INCORPORATE SUGGESTIONS:', incorporateSuggestionsString || 'None');
+      console.log('5. DESIGN CHALLENGE:', designChallenge || 'None');
+      console.log('6. CONSENSUS POINTS:', initialConsensusPoints && initialConsensusPoints.length > 0 ? initialConsensusPoints : 'None');
+      console.log('7. SYNTHESIZED POINTS:', synthesizedPoints && synthesizedPoints.length > 0 ? synthesizedPoints : 'None');
+      console.log('🔍 === FULL MESSAGE CONTENT ===');
+      console.log('USER MESSAGE (complete):', enhancedMessageWithContext);
+      console.log('🔍 === END MESSAGE COMPONENTS ===');
+
+      // Conditional themed analysis - only if themes exist
+      if (existingThemes.length > 0) {
+        console.log('Generating themed analysis...');
+        
+        // Function to generate themed analysis
+        const generateThemedAnalysis = async (
+          messageContext: string,
+          setResponseFunc: React.Dispatch<React.SetStateAction<string[]>>,
+          setThemedResponsesFunc: React.Dispatch<React.SetStateAction<ThemedResponse[]>>,
+          setStoredResponsesFunc: React.Dispatch<React.SetStateAction<StoredResponses>>
+        ) => {
+          // Generate all theme analyses in parallel with standard response
+          const [themedResponsesData, response] = await Promise.all([
+            // Generate all theme analyses in parallel, passing design principles, custom prompt, and tag mappings
+            OpenAIService.generateAllThemeAnalyses(
+              messageContext,
+              selectedThemes,
+              designChallenge,
+              initialConsensusPoints || [],
+              undefined, // Design principles only for variations
+              undefined, // Custom prompt only for variations
+              pointTagMappings // NEW: Pass tag mappings for themed analysis too
+            ),
+            
+            // Also generate original response for compatibility and fallback
+            OpenAIService.generateAnalysis(
+              messageContext, 
+              designChallenge,
+              synthesizedPoints,
+              initialConsensusPoints || [],
+              undefined, // Design principles only for variations
+              undefined, // Custom prompt only for variations
+              pointTagMappings // NEW: Pass tag mappings for standard analysis too
+            )
+          ]);
           
-          // Also generate original response for compatibility and fallback
-          OpenAIService.generateAnalysis(
-            messageContext, 
+          // Store results
+          setResponseFunc([response]);
+          setThemedResponsesFunc(themedResponsesData);
+          setStoredResponsesFunc({ normal: response });
+          
+          return { themedResponsesData, response };
+        };
+
+        // Generate themed analysis using enhanced message
+        Logger.log('AntagoInteract', 'Generating themed analysis with enhanced context');
+        const results = await generateThemedAnalysis(
+          enhancedMessageWithContext, 
+          setResponses, 
+          setThemedResponses, 
+          setStoredFullResponses
+        );
+
+        // Create a combined list of all points for backward compatibility
+        const allPoints = results.themedResponsesData.flatMap(theme => theme.points);
+
+        // Update parent with appropriate responses immediately 
+        if (useThemedDisplay) {
+          // If using themed display, pass all themed points
+          onResponsesUpdate?.(allPoints);
+        } else {
+          // Otherwise, use the standard response format
+          onResponsesUpdate?.(splitResponse(results.response));
+        }
+
+        // If simplified mode is active, generate the simplified version in the background
+        if (isSimplifiedMode) {
+          (async () => {
+            try {
+              setIsChangingTone(true);
+              
+              // Simplify standard response
+              const simplified = await OpenAIService.simplifyAnalysis(results.response);
+              setSimplifiedResponses([simplified]);
+              setStoredSimplifiedResponses({ normal: simplified });
+              
+              // Update UI with simplified response if in simplified mode and not themed display
+              if (isSimplifiedMode && !useThemedDisplay) {
+                onResponsesUpdate?.(splitResponse(simplified));
+              }
+              
+              setIsChangingTone(false);
+            } catch (error) {
+              console.error('Error generating simplified response:', error);
+              setIsChangingTone(false);
+            }
+          })();
+        }
+
+        // Save to Firebase in the background (THEMED ANALYSIS)
+        (async () => {
+          try {
+            if (!sessionId) {
+              Logger.warn('AntagoInteract', 'Skipping Firebase save for themed analysis due to missing sessionId');
+              return;
+            }
+
+            let critiquesToSave: string[];
+            let usedThinkingForThisOutput = useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== '');
+
+            if (useThemedDisplay && results.themedResponsesData.length > 0) {
+              critiquesToSave = results.themedResponsesData.flatMap(theme => theme.points);
+            } else if (results.response) {
+              critiquesToSave = splitResponse(results.response);
+            } else {
+              critiquesToSave = [];
+            }
+            
+            const antagonisticResponseDataThemed = {
+              critiques: critiquesToSave,
+              usedThinkingDialogueInput: usedThinkingForThisOutput,
+              tagMappings: pointTagMappings // Store tag mappings with analysis
+            };
+            await saveFrameData(sessionId, 'antagonisticResponse', antagonisticResponseDataThemed);
+
+            if (results.themedResponsesData.length > 0) {
+              await saveDesignThemes({
+                themes: results.themedResponsesData.map(theme => ({
+                  name: theme.name,
+                  color: theme.color,
+                  description: theme.points.join(' | ')
+                }))
+              }, sessionId);
+            }
+              
+            logUserActivity({
+              action: 'generate_analysis_completed',
+              additionalData: {
+                hasThemes: results.themedResponsesData.length > 0, 
+                themedDisplay: useThemedDisplay,
+                challengeLength: designChallenge?.length || 0,
+                responseCount: critiquesToSave.length,
+                simplifiedResponseCount: simplifiedResponses.length,
+                useThinkingDialogueInput: usedThinkingForThisOutput,
+                hasTagPreferences: pointTagMappings.length > 0,
+                duration: Date.now() - startTime 
+              }
+            }, sessionId);
+          } catch (error) {
+            Logger.error('AntagoInteract', 'Error saving themed analysis data to Firebase:', error);
+          }
+        })();
+      } else {
+        // No themes exist on the board - use standard analysis
+        console.log('No themes found on board. Using standard analysis without themes.');
+        
+        try {
+          console.log('Generating standard analysis with enhanced context...');
+          
+          // Generate standard analysis using enhanced message
+          const response = await OpenAIService.generateAnalysis(
+            enhancedMessageWithContext, 
             designChallenge,
             synthesizedPoints,
             initialConsensusPoints || [],
             undefined, // Design principles only for variations
-            undefined, // Custom prompt only for variations
-            pointTagMappings // NEW: Pass tag mappings for standard analysis too
-          )
-        ]);
-        
-        // Store results
-        setResponseFunc([response]);
-        setThemedResponsesFunc(themedResponsesData);
-        setStoredResponsesFunc({ normal: response });
-        
-        return { themedResponsesData, response };
-      };
-
-      // Generate standard themed analysis first to show results quickly
-      Logger.log('AntagoInteract', 'Generating standard themed analysis first');
-      const standardResults = await generateThemedAnalysis(
-        baseMessage, 
-        setResponses, 
-        setThemedResponses, 
-        setStoredFullResponses
-      );
-
-      // Create a combined list of all points for backward compatibility
-      const allPoints = standardResults.themedResponsesData.flatMap(theme => theme.points);
-
-      // Update parent with appropriate responses immediately 
-      if (useThemedDisplay) {
-        // If using themed display, pass all themed points
-        onResponsesUpdate?.(allPoints);
-      } else {
-        // Otherwise, use the standard response format
-        onResponsesUpdate?.(splitResponse(standardResults.response));
-      }
-
-      // Mark as no longer loading once we have the initial results
-      setLoading(false);
-
-      // Now generate the enhanced response in the background if needed
-      if (thinkingContextString || ragContextString) {
-        // Use IIFE to create background process
-        (async () => {
-          try {
-            const enhancedResults = await generateThemedAnalysis(
-              enhancedMessageWithContext,
-              setThinkingResponses,
-              setThinkingThemedResponses,
-              setStoredThinkingFullResponses
-            );
-            
-            Logger.log('AntagoInteract', 'Thinking dialogue enhanced themed analysis complete', {
-              standardThemes: standardResults.themedResponsesData.length || 0,
-              enhancedThemes: enhancedResults.themedResponsesData.length || 0
-            });
-          } catch (error) {
-            console.error('Error generating enhanced themed analysis in background:', error);
-          }
-        })();
-      }
-
-      // If simplified mode is active, generate the simplified version in the background
-      if (isSimplifiedMode) {
-        (async () => {
-          try {
-            setIsChangingTone(true);
-            
-            // Simplify standard response
-            const simplified = await OpenAIService.simplifyAnalysis(standardResults.response);
-            setSimplifiedResponses([simplified]);
-            setStoredSimplifiedResponses({ normal: simplified });
-            
-            // Update UI with simplified response if in simplified mode and not themed display
-            if (isSimplifiedMode && !useThemedDisplay) {
-              onResponsesUpdate?.(splitResponse(simplified));
-            }
-            
-            setIsChangingTone(false);
-          } catch (error) {
-            console.error('Error generating simplified response:', error);
-            setIsChangingTone(false);
-          }
-        })();
-      }
-
-      // Save to Firebase in the background (THEMED ANALYSIS)
-      (async () => {
-        try {
-          if (!sessionId) {
-            Logger.warn('AntagoInteract', 'Skipping Firebase save for themed analysis due to missing sessionId');
-            return;
-          }
-
-          let critiquesToSave: string[];
-          let usedThinkingForThisOutput = useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== '');
-
-          if (useThemedDisplay && standardResults.themedResponsesData.length > 0) {
-            critiquesToSave = standardResults.themedResponsesData.flatMap(theme => theme.points);
-          } else if (standardResults.response) {
-            critiquesToSave = splitResponse(standardResults.response);
-          } else {
-            critiquesToSave = [];
+            undefined, // Custom prompt only for variations  
+            pointTagMappings // Pass tag mappings for learning
+          );
+          
+          setResponses([response]);
+          setStoredFullResponses({ normal: response });
+          
+          // Update parent immediately with standard response
+          onResponsesUpdate?.(splitResponse(response));
+          
+          // If simplified mode is active, generate the simplified version in the background
+          if (isSimplifiedMode) {
+            (async () => {
+              try {
+                setIsChangingTone(true);
+                const simplified = await OpenAIService.simplifyAnalysis(response);
+                setSimplifiedResponses([simplified]);
+                setStoredSimplifiedResponses({ normal: simplified });
+                
+                // Update UI with simplified response if in simplified mode
+                if (isSimplifiedMode && !useThemedDisplay) {
+                  onResponsesUpdate?.(splitResponse(simplified));
+                }
+                
+                setIsChangingTone(false);
+              } catch (error) {
+                console.error('Error generating simplified response:', error);
+                setIsChangingTone(false);
+              }
+            })();
           }
           
-          const antagonisticResponseDataThemed = {
-            critiques: critiquesToSave,
-            usedThinkingDialogueInput: usedThinkingForThisOutput 
-          };
-          await saveFrameData(sessionId, 'antagonisticResponse', antagonisticResponseDataThemed);
+          // Save to Firebase in the background (NON-THEMED ANALYSIS)
+          (async () => {
+            try {
+              if (!sessionId) {
+                Logger.warn('AntagoInteract', 'Skipping Firebase save for non-themed analysis due to missing sessionId');
+                return;
+              }
 
-          if (standardResults.themedResponsesData.length > 0) {
-            await saveDesignThemes({
-              themes: standardResults.themedResponsesData.map(theme => ({
-                name: theme.name,
-                color: theme.color,
-                description: theme.points.join(' | ')
-              }))
-            }, sessionId);
-          }
-            
-          logUserActivity({
-            action: 'generate_analysis_completed',
-            additionalData: {
-              hasThemes: standardResults.themedResponsesData.length > 0, 
-              themedDisplay: useThemedDisplay,
-              challengeLength: designChallenge?.length || 0,
-              responseCount: critiquesToSave.length,
-              simplifiedResponseCount: simplifiedResponses.length,
-              useThinkingDialogueInput: usedThinkingForThisOutput,
-              duration: Date.now() - startTime 
+              const antagonisticResponseData = {
+                critiques: response ? splitResponse(response) : [],
+                usedThinkingDialogueInput: useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== ''),
+                tagMappings: pointTagMappings // Store tag mappings with analysis
+              };
+              await saveFrameData(sessionId, 'antagonisticResponse', antagonisticResponseData);
+              
+              logUserActivity({
+                action: 'generate_analysis_completed',
+                additionalData: {
+                  hasThemes: false,
+                  themedDisplay: false,
+                  challengeLength: designChallenge?.length || 0,
+                  responseCount: response ? splitResponse(response).length : 0,
+                  simplifiedResponseCount: simplifiedResponses.length,
+                  useThinkingDialogueInput: antagonisticResponseData.usedThinkingDialogueInput,
+                  hasTagPreferences: pointTagMappings.length > 0,
+                  duration: Date.now() - startTime 
+                }
+              }, sessionId);
+            } catch (error) {
+              Logger.error('AntagoInteract', 'Error saving non-themed analysis data to Firebase:', error);
             }
-          }, sessionId);
+          })();
         } catch (error) {
-          Logger.error('AntagoInteract', 'Error saving themed analysis data to Firebase:', error);
+          Logger.error('AntagoInteract', 'Error generating standard analysis:', error);
+          setError('Failed to generate analysis. Please try again.');
+          setLoading(false);
+          processingRef.current = false;
+          onComplete?.();
+          return;
         }
-      })();
+      }
+      
+      // Mark as no longer loading once we have the initial results
+      setLoading(false);
       
       // Add a small delay to ensure all background processes have started
       await new Promise(resolve => setTimeout(resolve, 200));
