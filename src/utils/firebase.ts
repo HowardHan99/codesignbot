@@ -7,6 +7,7 @@ import { firebaseConfig, frameConfig } from './config';
 import { mergeSimilarPoints } from './textProcessing'
 import { Logger } from './logger';
 import { MiroFrameService } from '../services/miro/frameService';
+import { PointTagMapping } from '../services/miroService';
 
 // Initialize Firebase only on the client side
 let app: FirebaseApp | undefined;
@@ -43,6 +44,10 @@ export interface AnalysisData {
     full: string[];
     simplified: string[];
   };
+  pointMappings?: {
+    [pointText: string]: string; // sticky note ID mapping
+  };
+  tagMappings?: PointTagMapping[]; // Simplified tag mappings
 }
 
 export interface UserActivityData {
@@ -662,3 +667,116 @@ export async function uploadHtmlToFirebase(
 } 
 
 export { ref, push, serverTimestamp, get, query, orderByChild, equalTo, limitToLast, set }; 
+
+/**
+ * Saves tagged points data to Firebase for historical analysis
+ * @param taggedPoints Array of tagged points to save
+ * @param sessionId Session ID for organization
+ */
+export async function saveTaggedPoints(taggedPoints: TaggedPoint[], sessionId?: string): Promise<void> {
+  if (!taggedPoints.length) {
+    return; // Don't save empty arrays
+  }
+
+  try {
+    const database = getFirebaseDB();
+    const path = sessionId ? `sessions/${sessionId}/taggedPoints` : 'taggedPoints';
+    const taggedPointsRef = ref(database, path);
+    
+    // Save with timestamp
+    await push(taggedPointsRef, {
+      points: taggedPoints,
+      timestamp: serverTimestamp(),
+      boardId: await getCurrentBoardId()
+    });
+    
+    Logger.log('FirebaseUtils', `Saved ${taggedPoints.length} tagged points to Firebase`);
+  } catch (error) {
+    Logger.error('FirebaseUtils', 'Error saving tagged points:', error);
+    // Don't throw - this is supplementary data
+  }
+}
+
+/**
+ * Gets historical tagged points for learning purposes
+ * @param sessionId Optional session ID to limit scope
+ * @returns Array of historical tagged points
+ */
+export async function getHistoricalTaggedPoints(sessionId?: string): Promise<TaggedPoint[]> {
+  try {
+    const database = getFirebaseDB();
+    
+    // Try session-specific data first, then fall back to global
+    const paths = sessionId ? 
+      [`sessions/${sessionId}/taggedPoints`, 'taggedPoints'] : 
+      ['taggedPoints'];
+    
+    const allTaggedPoints: TaggedPoint[] = [];
+    
+    for (const path of paths) {
+      try {
+        const taggedPointsRef = ref(database, path);
+        const snapshot = await get(taggedPointsRef);
+        
+        if (snapshot.exists()) {
+          snapshot.forEach((childSnapshot) => {
+            const data = childSnapshot.val();
+            if (data.points && Array.isArray(data.points)) {
+              allTaggedPoints.push(...data.points);
+            }
+          });
+        }
+      } catch (error) {
+        Logger.warn('FirebaseUtils', `Could not read from path: ${path}`, error);
+      }
+    }
+    
+    Logger.log('FirebaseUtils', `Retrieved ${allTaggedPoints.length} historical tagged points`);
+    return allTaggedPoints;
+  } catch (error) {
+    Logger.error('FirebaseUtils', 'Error getting historical tagged points:', error);
+    return [];
+  }
+}
+
+/**
+ * Saves tag preferences derived from analysis
+ * @param preferences Tag preferences to save
+ * @param sessionId Session ID for organization
+ */
+export async function saveTagPreferences(preferences: TagPreferences, sessionId?: string): Promise<void> {
+  try {
+    const database = getFirebaseDB();
+    const path = sessionId ? `sessions/${sessionId}/tagPreferences` : 'tagPreferences';
+    const preferencesRef = ref(database, path);
+    
+    await push(preferencesRef, {
+      preferences,
+      timestamp: serverTimestamp(),
+      boardId: await getCurrentBoardId()
+    });
+    
+    Logger.log('FirebaseUtils', 'Saved tag preferences to Firebase', {
+      usefulKeywords: preferences.usefulKeywords.length,
+      avoidKeywords: preferences.avoidKeywords.length,
+      customTags: Object.keys(preferences.customTagPreferences).length
+    });
+  } catch (error) {
+    Logger.error('FirebaseUtils', 'Error saving tag preferences:', error);
+    // Don't throw - this is supplementary data
+  }
+}
+
+/**
+ * Helper function to get current board ID (reusing existing pattern)
+ */
+async function getCurrentBoardId(): Promise<string | undefined> {
+  try {
+    // Try to get board ID using existing Miro service patterns
+    const info = await miro.board.getInfo();
+    return info.id;
+  } catch (error) {
+    Logger.warn('FirebaseUtils', 'Could not get current board ID for tag storage');
+    return undefined;
+  }
+} 

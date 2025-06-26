@@ -9,7 +9,7 @@ import { MiroService } from '../services/miroService';
 import { AnalysisControls } from './AnalysisControls';
 import { AnalysisResults } from './AnalysisResults';
 import ResponseStore from '../utils/responseStore';
-import { saveAnalysis, getSynthesizedPoints, logUserActivity, saveDesignThemes } from '../utils/firebase';
+import { saveAnalysis, getSynthesizedPoints, logUserActivity, saveDesignThemes, saveTaggedPoints, getHistoricalTaggedPoints, saveTagPreferences } from '../utils/firebase';
 import { splitResponse } from '../utils/textProcessing';
 import { VoiceRecorder } from './VoiceRecorder';
 import { FileUploadTest } from './FileUploadTest';
@@ -19,6 +19,7 @@ import { Logger } from '../utils/logger';
 import { frameConfig, stickyConfig } from '../utils/config';
 import { MiroApiClient } from '../services/miro/miroApiClient';
 import { saveFrameData } from '../utils/firebase';
+import { readPointTagMappings, PointTagMapping } from '../services/miroService';
 
 /**
  * Interface for themed response
@@ -114,7 +115,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [isChangingTone, setIsChangingTone] = useState(false);
   const [storedFullResponses, setStoredFullResponses] = useState<StoredResponses>({ normal: '' });
   const [storedSimplifiedResponses, setStoredSimplifiedResponses] = useState<StoredResponses>({ normal: '' });
-  const [useThemedDisplay, setUseThemedDisplay] = useState<boolean>(true);
+  const [useThemedDisplay, setUseThemedDisplay] = useState<boolean>(false);
   
   // Add new state variables for varied response generation
   const [designPrinciplesText, setDesignPrinciplesText] = useState<string | null>(null);
@@ -141,6 +142,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   // State for "Unpack Points" feature
   const [selectedPointsForUnpack, setSelectedPointsForUnpack] = useState<string[]>([]);
   const [isLoadingUnpack, setIsLoadingUnpack] = useState<boolean>(false);
+
+  // State for tag preferences (NEW) - simplified
+  const [currentPointTagMappings, setCurrentPointTagMappings] = useState<PointTagMapping[]>([]);
 
   // Save to localStorage whenever useThinkingDialogue changes
   useEffect(() => {
@@ -214,13 +218,29 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setLoading(true);
       setSelectedTone('');
       
+      // --- Tag Reading (SIMPLIFIED) ---
+      let pointTagMappings: PointTagMapping[] = [];
+      try {
+        // Read current board point-tag mappings (simple format)
+        pointTagMappings = await readPointTagMappings();
+        
+        if (pointTagMappings.length > 0) {
+          // Save mappings to state for UI display
+          setCurrentPointTagMappings(pointTagMappings);
+        } else {
+          setCurrentPointTagMappings([]);
+        }
+      } catch (tagError) {
+        Logger.warn('AntagoInteract', 'Error reading point-tag mappings, proceeding without:', tagError);
+        setCurrentPointTagMappings([]);
+      }
+      // --- End Tag Reading ---
+
       // Get thinking dialogue context if the toggle is enabled
       let dialogueContext = ''; // Combined raw content
       let thinkingContextString = ''; // Parsed thinking process
       let ragContextString = ''; // Parsed external knowledge/RAG
       let incorporateSuggestionsString = ''; // New: User responses to previous analysis points
-      
-      Logger.log('AntagoInteract', 'Checking for thinking dialogue/RAG content', { useThinkingDialogue });
       
       // Always check for the frame, even if toggle is off (for debugging)
       try {
@@ -230,14 +250,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         const variedResponsesFrame = allFrames.find(f => f.title === frameConfig.names.variedResponses);
         const agentPromptFrame = allFrames.find(f => f.title === frameConfig.names.agentPrompt);
         const incorporateSuggestionsFrame = allFrames.find(f => f.title === frameConfig.names.incorporateSuggestions);
-        
-        Logger.log('AntagoInteract', 'Searching for frames', { 
-          foundThinking: !!thinkingFrame,
-          foundEnhancedContext: !!enhancedContextFrame,
-          foundVariedResponses: !!variedResponsesFrame,
-          foundAgentPrompt: !!agentPromptFrame,
-          foundIncorporateSuggestions: !!incorporateSuggestionsFrame
-        });
         
         // Function to extract content from a frame
         const extractContentFromFrame = async (frame: any) => {
@@ -256,55 +268,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           // Combine content from both sources
           const stickyNotesContent = frameStickyNotes.map(note => note.content || '').join('\n');
           const textElementsContent = frameTextElements.map(text => text.content || '').join('\n');
-          return [stickyNotesContent, textElementsContent].filter(Boolean).join('\n\n').trim();
+          const combinedContent = [stickyNotesContent, textElementsContent].filter(Boolean).join('\n\n').trim();
+          
+          return combinedContent;
         };
         
         // Extract content from each frame separately
         thinkingContextString = await extractContentFromFrame(thinkingFrame);
         ragContextString = await extractContentFromFrame(enhancedContextFrame);
         incorporateSuggestionsString = await extractContentFromFrame(incorporateSuggestionsFrame);
-        
-        // Extract design principles and custom agent prompt from agent prompt frame (not varied responses)
-        if (agentPromptFrame) {
-          // Use IDs instead of tag names
-          const DESIGN_PRINCIPLES_TAG_ID = "3458764626530355983";
-          const AGENT_SYSTEM_PROMPT_TAG_ID = "3458764626534754570";
-          
-          // Get sticky notes from the agent prompt frame
-          const stickyNotesFromBoard = await miro.board.get({ type: 'sticky_note' });
-          const frameStickyNotes = stickyNotesFromBoard.filter(
-            note => note.parentId === agentPromptFrame.id
-          );
-          
-          Logger.log('AntagoInteract', 'Found agent prompt stickynotes ', {
-            frameStickyNotes: frameStickyNotes
-          });
-          
-          // Find sticky notes with specific tag IDs
-          const designPrinciplesSticky = frameStickyNotes.find(note => {
-            // @ts-ignore - Miro API types issue
-            return note.tagIds && note.tagIds.includes(DESIGN_PRINCIPLES_TAG_ID);
-          });
-          
-          const agentPromptSticky = frameStickyNotes.find(note => {
-            // @ts-ignore - Miro API types issue
-            return note.tagIds && note.tagIds.includes(AGENT_SYSTEM_PROMPT_TAG_ID);
-          });
-          
-          // Update state with found content
-          if (designPrinciplesSticky) {
-            setDesignPrinciplesText(designPrinciplesSticky.content || null);
-          }
-          
-          if (agentPromptSticky) {
-            setCustomPromptText(agentPromptSticky.content || null);
-          }
-          
-          Logger.log('AntagoInteract', 'Found agent prompt content', {
-            designPrinciples: !!designPrinciplesSticky,
-            agentPrompt: !!agentPromptSticky
-          });
-        }
         
         // Update the current RAG content state
         setCurrentRagContent(ragContextString);
@@ -322,6 +294,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       }
       
       // --- Message Construction --- 
+      Logger.log('AntagoInteract', '=== MESSAGE CONSTRUCTION SECTION ===');
+      Logger.log('AntagoInteract', 'Base sticky notes content:', {
+        stickyNotesCount: notes.length,
+        stickyNotesContent: notes.map((note, i) => `[${i+1}] ${note.substring(0, 100)}...`)
+      });
+      
       // Directly use the notes parameter passed from the parent component
       const baseMessage = imageContext 
         ? `${notes.map((noteContent, index) => 
@@ -330,6 +308,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         : notes.map((noteContent, index) => 
             `Design Decision ${index + 1}: ${noteContent || ''}`
           ).join('\n');
+        
+      Logger.log('AntagoInteract', 'Base message constructed:', {
+        baseMessageLength: baseMessage.length,
+        hasImageContext: !!imageContext,
+        baseMessage: baseMessage
+      });
         
       // Construct the enhanced message with clear labels for the LLM
       let enhancedContextParts: string[] = [];
@@ -347,9 +331,16 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       if (incorporateSuggestions && incorporateSuggestions.length > 0) {
         enhancedContextParts.push(`${incorporateSuggestionsLabel}\n${incorporateSuggestions.join('\n')}`);
         hasFeedback = true;
+        Logger.log('AntagoInteract', 'Added incorporate suggestions from props:', {
+          suggestionsCount: incorporateSuggestions.length,
+          suggestions: incorporateSuggestions
+        });
       } else if (incorporateSuggestionsString) {
         enhancedContextParts.push(`${incorporateSuggestionsLabel}\n${incorporateSuggestionsString}`);
         hasFeedback = true;
+        Logger.log('AntagoInteract', 'Added incorporate suggestions from frame:', {
+          suggestionsContent: incorporateSuggestionsString
+        });
       }
       
       const enhancedMessageWithContext = enhancedContextParts.length > 0
@@ -357,16 +348,24 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         : baseMessage;
 
       // Log final message lengths for debugging
-      Logger.log('AntagoInteract', 'Generated message contexts', {
+      Logger.log('AntagoInteract', 'Final message construction results:', {
         baseLength: baseMessage.length,
         enhancedLength: enhancedMessageWithContext.length,
-        hasDialogue: !!dialogueContext, // Use original combined content flag for simplicity here
+        enhancedContextPartsCount: enhancedContextParts.length,
+        enhancedContextParts: enhancedContextParts.map((part, i) => ({
+          index: i,
+          label: part.split('\n')[0],
+          length: part.length
+        })),
+        fullEnhancedMessage: enhancedMessageWithContext,
+        hasDialogue: !!dialogueContext,
         hasThinkingParsed: !!thinkingContextString,
         hasRAGParsed: !!ragContextString,
-        hasIncorporateSuggestions: hasFeedback
+        hasIncorporateSuggestions: hasFeedback,
+        hasTagPreferences: pointTagMappings.length > 0
       });
       
-      // --- End Message Construction ---
+      Logger.log('AntagoInteract', '=== END MESSAGE CONSTRUCTION SECTION ===');
       
       // Simply read existing themes from the board and their selection state
       console.log('Reading themes from the board...');
@@ -384,14 +383,29 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             setResultsFunc: React.Dispatch<React.SetStateAction<string[]>>,
             setStoredResponsesFunc: React.Dispatch<React.SetStateAction<StoredResponses>>
           ) => {
-            // Pass design principles and custom prompt to the analysis service
+            
+            // === SIMPLE LOG FOR WHAT'S BEING SENT TO OPENAI ===
+            console.log('🔍 === MESSAGE COMPONENTS BEING SENT TO OPENAI ===');
+            console.log('1. TAG PAIRS:', pointTagMappings.length > 0 ? pointTagMappings : 'No tags found');
+            console.log('2. THINKING DIALOGUE:', thinkingContextString || 'None');
+            console.log('3. RAG CONTENT:', ragContextString || 'None');
+            console.log('4. INCORPORATE SUGGESTIONS:', incorporateSuggestionsString || 'None');
+            console.log('5. DESIGN CHALLENGE:', designChallenge || 'None');
+            console.log('6. CONSENSUS POINTS:', initialConsensusPoints && initialConsensusPoints.length > 0 ? initialConsensusPoints : 'None');
+            console.log('7. SYNTHESIZED POINTS:', synthesizedPoints && synthesizedPoints.length > 0 ? synthesizedPoints : 'None');
+            console.log('🔍 === FULL MESSAGE CONTENT ===');
+            console.log('USER MESSAGE (complete):', messageContext);
+            console.log('🔍 === END MESSAGE COMPONENTS ===');
+            
+            // Pass design principles, custom prompt, and tag preferences to the analysis service
             const response = await OpenAIService.generateAnalysis(
               messageContext, 
               designChallenge,
               synthesizedPoints,
               initialConsensusPoints || [],
               undefined, // Design principles only for variations
-              undefined  // Custom prompt only for variations
+              undefined, // Custom prompt only for variations  
+              pointTagMappings // NEW: Pass tag mappings for learning
             );
             
             setResultsFunc([response]);
@@ -467,7 +481,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
               const antagonisticResponseData = {
                 critiques: standardResponse ? splitResponse(standardResponse) : [],
-                usedThinkingDialogueInput: useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== '')
+                usedThinkingDialogueInput: useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== ''),
+                tagMappings: pointTagMappings // NEW: Store tag mappings with analysis
               };
               await saveFrameData(sessionId, 'antagonisticResponse', antagonisticResponseData);
               
@@ -480,6 +495,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
                   responseCount: standardResponse ? splitResponse(standardResponse).length : 0,
                   simplifiedResponseCount: simplifiedResponses.length,
                   useThinkingDialogueInput: antagonisticResponseData.usedThinkingDialogueInput,
+                  hasTagPreferences: !!pointTagMappings, // NEW: Log tag mappings usage
                   duration: Date.now() - startTime 
                 }
               }, sessionId);
@@ -493,7 +509,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           processingRef.current = false;
           onComplete?.();
         } catch (error) {
-          console.error('Error generating standard analysis:', error);
+          Logger.error('AntagoInteract', 'Error generating standard analysis:', error);
           setError('Failed to generate analysis. Please try again.');
           setLoading(false);
           processingRef.current = false;
@@ -557,14 +573,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       ) => {
         // Generate all theme analyses in parallel with standard response
         const [themedResponsesData, response] = await Promise.all([
-          // Generate all theme analyses in parallel, passing design principles and custom prompt
+          // Generate all theme analyses in parallel, passing design principles, custom prompt, and tag mappings
           OpenAIService.generateAllThemeAnalyses(
             messageContext,
             selectedThemes,
             designChallenge,
             initialConsensusPoints || [],
             undefined, // Design principles only for variations
-            undefined  // Custom prompt only for variations
+            undefined, // Custom prompt only for variations
+            pointTagMappings // NEW: Pass tag mappings for themed analysis too
           ),
           
           // Also generate original response for compatibility and fallback
@@ -574,7 +591,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             synthesizedPoints,
             initialConsensusPoints || [],
             undefined, // Design principles only for variations
-            undefined  // Custom prompt only for variations
+            undefined, // Custom prompt only for variations
+            pointTagMappings // NEW: Pass tag mappings for standard analysis too
           )
         ]);
         
@@ -699,7 +717,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               challengeLength: designChallenge?.length || 0,
               responseCount: critiquesToSave.length,
               simplifiedResponseCount: simplifiedResponses.length,
-              useThinkingDialogueInput: antagonisticResponseDataThemed.usedThinkingDialogueInput,
+              useThinkingDialogueInput: usedThinkingForThisOutput,
               duration: Date.now() - startTime 
             }
           }, sessionId);
@@ -738,11 +756,12 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
   // Process notes when they change or when shouldRefresh is true
   useEffect(() => {
-    if (stickyNotes.length > 0) {
+    // Only process if we have sticky notes AND design challenge has been loaded
+    if (stickyNotes.length > 0 && designChallenge !== '') {
       processNotes(stickyNotes, shouldRefresh || false)
         .catch(console.error);
     }
-  }, [stickyNotes, shouldRefresh, processNotes, sessionId]);
+  }, [stickyNotes, shouldRefresh, processNotes, sessionId, designChallenge]);
 
   /**
    * Toggle between standard and thinking dialogue enhanced analysis
@@ -1610,22 +1629,38 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               </button>
             </div>
 
-            {/* Analysis Results - Moved above controls */}
+            {/* Analysis Results and Board Controls */}
             <AnalysisResults
               responses={
-                useThinkingDialogue
-                  ? splitResponse((isSimplifiedMode ? thinkingSimplifiedResponses : thinkingResponses)[0] || '')
-                  : splitResponse((isSimplifiedMode ? simplifiedResponses : responses)[0] || '')
+                // Select appropriate responses based on current state
+                useThemedDisplay ? [] : // Don't show standard responses in themed mode
+                isSimplifiedMode ? 
+                  (useThinkingDialogue ? 
+                    (thinkingSimplifiedResponses.length > 0 ? splitResponse(thinkingSimplifiedResponses[0]) : []) :
+                    (simplifiedResponses.length > 0 ? splitResponse(simplifiedResponses[0]) : [])
+                  ) :
+                  (useThinkingDialogue ? 
+                    (thinkingResponses.length > 0 ? splitResponse(thinkingResponses[0]) : []) :
+                    (responses.length > 0 ? splitResponse(responses[0]) : [])
+                  )
               }
               isSimplifiedMode={isSimplifiedMode}
               selectedTone={selectedTone}
               onCleanAnalysis={() => MiroService.cleanAnalysisBoard()}
               isChangingTone={isChangingTone}
-              themedResponses={useThinkingDialogue ? thinkingThemedResponses : themedResponses}
+              themedResponses={
+                useThinkingDialogue ? thinkingThemedResponses : themedResponses
+              }
               useThemedDisplay={useThemedDisplay}
-              // Props for point selection
-              onSelectedPointsChange={setSelectedPointsForUnpack} // Callback to update selected points
-              currentSelectedPoints={selectedPointsForUnpack}   // Pass current selections to AnalysisResults
+              onThemeSelectToggle={() => {}}
+              onSelectedPointsChange={setSelectedPointsForUnpack}
+              currentSelectedPoints={selectedPointsForUnpack}
+              tagInfluenceInfo={currentPointTagMappings.length > 0 ? {
+                hasTagPreferences: true,
+                usefulKeywords: currentPointTagMappings.filter(m => m.tags.some(tag => tag.toLowerCase().includes('useful'))).map(m => m.point).slice(0, 3),
+                avoidKeywords: currentPointTagMappings.filter(m => m.tags.some(tag => tag.toLowerCase().includes('not-useful'))).map(m => m.point).slice(0, 3),
+                customTags: [...new Set(currentPointTagMappings.flatMap(m => m.tags.filter(tag => !tag.toLowerCase().includes('useful'))))]
+              } : undefined}
             />
             
             <div className="mb-2">

@@ -25,6 +25,13 @@ interface AnalysisResultsProps {
   // New props for "Unpack Points" feature
   onSelectedPointsChange?: (selectedPoints: string[]) => void; // Callback for when point selection changes
   currentSelectedPoints?: string[]; // Currently selected points
+  // New props for tag influence display
+  tagInfluenceInfo?: {
+    hasTagPreferences: boolean;
+    usefulKeywords: string[];
+    avoidKeywords: string[];
+    customTags: string[];
+  };
 }
 
 /**
@@ -44,6 +51,8 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   // New props
   onSelectedPointsChange,
   currentSelectedPoints = [],
+  // New props for tag influence display
+  tagInfluenceInfo,
 }) => {
   // Don't render anything if there are no responses
   if (!responses.length && !themedResponses.length) return null;
@@ -155,6 +164,41 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
             }}>
               <span style={{ marginRight: '6px' }}>👆</span>
               <span>Click on any point to select it for unpacking. Selected points will be highlighted. Click again to deselect.</span>
+            </div>
+          )}
+
+          {/* Tag influence information display - New addition */}
+          {tagInfluenceInfo && tagInfluenceInfo.hasTagPreferences && (
+            <div style={{ 
+              marginBottom: '15px', 
+              fontSize: '13px', 
+              color: '#444',
+              backgroundColor: '#e8f4f8',
+              padding: '8px',
+              borderRadius: '4px',
+              border: '1px solid #b8d8e7'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                <span style={{ marginRight: '6px' }}>🎯</span>
+                <strong>Analysis influenced by your tagging preferences:</strong>
+              </div>
+              <div style={{ fontSize: '12px', marginLeft: '20px' }}>
+                {tagInfluenceInfo.usefulKeywords.length > 0 && (
+                  <div style={{ marginBottom: '2px' }}>
+                    <span style={{ color: '#0066cc' }}>Focused on:</span> {tagInfluenceInfo.usefulKeywords.slice(0, 5).join(', ')}
+                  </div>
+                )}
+                {tagInfluenceInfo.avoidKeywords.length > 0 && (
+                  <div style={{ marginBottom: '2px' }}>
+                    <span style={{ color: '#cc6600' }}>Avoided topics:</span> {tagInfluenceInfo.avoidKeywords.slice(0, 3).join(', ')}
+                  </div>
+                )}
+                {tagInfluenceInfo.customTags.length > 0 && (
+                  <div>
+                    <span style={{ color: '#6600cc' }}>Custom categories:</span> {tagInfluenceInfo.customTags.slice(0, 3).join(', ')}
+                  </div>
+                )}
+              </div>
             </div>
           )}
           

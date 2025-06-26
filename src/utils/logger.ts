@@ -4,7 +4,7 @@
  */
 export class Logger {
   // Array of contexts to explicitly enable for logging
-  private static enabledContexts: string[] = ['TRANSCRIBE-API'];
+  private static enabledContexts: string[] = ['TRANSCRIBE-API', 'AntagoInteract', 'MiroService'];
  
   /**
    * Check if the context should be logged

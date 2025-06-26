@@ -5,6 +5,9 @@ export interface OpenAIResponse {
   response: string;
 }
 
+import { PointTagMapping } from './miroService';
+import { Logger } from '../utils/logger';
+
 /**
  * Service class for handling OpenAI API interactions
  * Provides methods for generating, simplifying, and adjusting the tone of analysis
@@ -163,6 +166,7 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
    * @param consensusPoints - Array of consensus points that should not be questioned
    * @param designPrinciples - Array of design principles to prioritize
    * @param customSystemPrompt - Custom system prompt to add additional instructions
+   * @param pointTagMappings - Previous point-tag mappings for learning
    * @returns Promise resolving to the formatted analysis
    */
   public static async generateAnalysis(
@@ -172,8 +176,8 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
     consensusPoints: string[] = [],
     designPrinciples?: string,
     customSystemPrompt?: string,
+    pointTagMappings?: PointTagMapping[],
   ): Promise<string> {
-
 
     // Base system prompt template
     const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge with the following conditions background, and design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative points that identify potential problems or conflicts in these decisions. The  points should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design proposals. The points should be concise and suitable for a stickynote length. It should also be understood by a non-design audience - try to avoid design jargon and big words. `;
@@ -185,6 +189,16 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
     const messageParts = [
       `Analyze the following design decisions:\n\n${userPrompt}`
     ];
+
+    // Add point-tag mappings if provided (simple format)
+    if (pointTagMappings && pointTagMappings.length > 0) {
+      const { formatPointTagMappingsForPrompt } = await import('./miroService');
+      const tagMappingsText = formatPointTagMappingsForPrompt(pointTagMappings);
+      if (tagMappingsText) {
+        messageParts.push(tagMappingsText);
+        systemPrompt += `\n\nNote: You can see previous antagonistic points and how users tagged them. Use this to understand what types of points users found useful vs not useful. Generate points that align with the user's demonstrated preferences while still being critical and constructive.`;
+      }
+    }
 
     // Add design principles if provided
     if (designPrinciples) {
@@ -213,11 +227,17 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
       // Add instructions to consider previous feedback in the system prompt
       systemPrompt += `\n\nIMPORTANT: The user has provided feedback on previous iterations of design criticism. Please carefully review their feedback and incorporate it into your analysis. Evolve your criticism based on what they've found useful or what they've addressed already. Don't repeat criticisms that have been addressed, but you may build upon partially addressed issues with more nuanced perspectives.`;
       
-      console.log('Found user feedback in the prompt. Adding special instructions to system prompt.');
+      Logger.log('OPENAI-API', 'Found user feedback in the prompt. Adding special instructions to system prompt.');
     }
 
     try {
-      console.log('Starting generateAnalysis call to OpenAI API in the non thinking process mode');
+      Logger.log('OPENAI-API', 'Starting generateAnalysis call to OpenAI API in the non thinking process mode');
+      
+      // === LOG THE COMPLETE FINAL MESSAGE ===
+      console.log('🚀 === FINAL MESSAGE SENT TO OPENAI ===');
+      console.log('SYSTEM PROMPT (includes design challenge):', systemPrompt);
+      console.log('USER PROMPT (complete with all components):', messageParts.join('\n'));
+      console.log('🚀 === END FINAL MESSAGE ===');
       
       const result = await this.makeRequest('/api/openaiwrap', {
         userPrompt: messageParts.join('\n'),
@@ -225,14 +245,17 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
         useGpt4: true // Use GPT-4 for generating analysis
       });
 
-      console.log('request to openai: userPrompt', messageParts.join('\n') + '\n\n' + 'systemPrompt', systemPrompt); 
+      Logger.log('OPENAI-API', 'request to openai', {
+        userPrompt: messageParts.join('\n'),
+        systemPrompt: systemPrompt
+      });
 
       // Try to process with basic delimiter parsing
       let points = this.processOpenAIResponse(result, 10, 'This design decision requires further analysis');
       
       // If we didn't get enough points with basic parsing, use GPT to reformat
       if (points.length < 10) {
-        console.log('Response format not ideal, using GPT to reformat');
+        Logger.log('OPENAI-API', 'Response format not ideal, using GPT to reformat');
         points = await this.reformatWithGPT(result.response, 10);
       }
 
@@ -240,7 +263,7 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
       const filteredPoints = await this.filterNonConflictingPoints(points, consensusPoints);      
       return filteredPoints.join(' ** ');
     } catch (error) {
-      console.error('Error in generateAnalysis:', error);
+      Logger.error('OPENAI-API', 'Error in generateAnalysis:', error);
       throw error; // Re-throw to be caught by caller
     }
   }
@@ -274,7 +297,6 @@ Return exactly 5 final points separated by ** **.`;
       systemPrompt,
       useGpt4: true // Use GPT-4 for filtering points
     });
-
 
     return this.processOpenAIResponse(result, 10, 'This point needs revision');
   }
@@ -423,6 +445,7 @@ Respond to the user's message in a helpful and constructive way.`;
    * @param consensusPoints - Array of consensus points that should not be questioned
    * @param designPrinciples - Array of design principles to prioritize
    * @param customSystemPrompt - Custom system prompt to add additional instructions
+   * @param pointTagMappings - Previous point-tag mappings for learning
    * @returns Promise resolving to array of points specific to the theme
    */
   public static async generateThemeSpecificAnalysis(
@@ -431,7 +454,8 @@ Respond to the user's message in a helpful and constructive way.`;
     designChallenge: string,
     consensusPoints: string[] = [],
     designPrinciples?: string,
-    customSystemPrompt?: string
+    customSystemPrompt?: string,
+    pointTagMappings?: PointTagMapping[]
   ): Promise<string[]> {
 
     // Base system prompt template
@@ -448,6 +472,15 @@ Rules:
 
     // Use custom prompt if provided, otherwise use base prompt
     let systemPrompt = customSystemPrompt || BASE_THEME_SYSTEM_PROMPT;
+
+    // Add point-tag mappings if provided
+    if (pointTagMappings && pointTagMappings.length > 0) {
+      const { formatPointTagMappingsForPrompt } = await import('./miroService');
+      const tagMappingsText = formatPointTagMappingsForPrompt(pointTagMappings);
+      if (tagMappingsText) {
+        systemPrompt += `\n\nPrevious points and user tags (focus on the "${themeName}" theme while considering user preferences):\n${tagMappingsText}`;
+      }
+    }
     
     // Check for the "Previous User Feedback & Suggestions" in the userPrompt and extract it if found
     const incorporateSuggestionsLabel = "Previous User Feedback & Suggestions:";
@@ -457,7 +490,7 @@ Rules:
       // Add instructions to consider previous feedback in the system prompt
       systemPrompt += `\n\nIMPORTANT: The user has provided feedback on previous iterations of design criticism related to the "${themeName}" theme. Please carefully review their feedback and incorporate it into your analysis. Evolve your criticism based on what they've found useful or what they've addressed already. Don't repeat criticisms that have been addressed, but you may build upon partially addressed issues with more nuanced perspectives.`;
       
-      console.log(`Found user feedback in the prompt for theme "${themeName}". Adding special instructions to system prompt.`);
+      Logger.log('OPENAI-API', `Found user feedback in the prompt for theme "${themeName}". Adding special instructions to system prompt.`);
     }
 
     const result = await this.makeRequest('/api/openaiwrap', {
@@ -477,6 +510,7 @@ Rules:
    * @param consensusPoints - Array of consensus points that should not be questioned
    * @param designPrinciples - Array of design principles to prioritize
    * @param customSystemPrompt - Custom system prompt to add additional instructions
+   * @param pointTagMappings - Previous point-tag mappings for learning
    * @returns Promise resolving to array of themed responses
    */
   public static async generateAllThemeAnalyses(
@@ -485,7 +519,8 @@ Rules:
     designChallenge: string,
     consensusPoints: string[] = [],
     designPrinciples?: string,
-    customSystemPrompt?: string
+    customSystemPrompt?: string,
+    pointTagMappings?: PointTagMapping[]
   ): Promise<Array<{name: string, color: string, points: string[]}>> {
     // Run all theme analyses in parallel
     const themeAnalysesPromises = themes.map(theme => 
@@ -495,7 +530,8 @@ Rules:
         designChallenge,
         consensusPoints,
         designPrinciples,
-        customSystemPrompt
+        customSystemPrompt,
+        pointTagMappings
       ).then(points => ({
         name: theme.name,
         color: theme.color,
@@ -653,7 +689,7 @@ All Current Critique Points (for context, do not elaborate on these, only the on
       // Add minimal cleaning if necessary, e.g., trim whitespace.
       return result.response.trim();
     } catch (error) {
-      console.error('Error in unpackPointDetail:', error);
+      Logger.error('OPENAI-API', 'Error in unpackPointDetail:', error);
       throw error; // Re-throw to be caught by caller
     }
   }

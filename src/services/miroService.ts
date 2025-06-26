@@ -176,4 +176,158 @@ export class MiroService {
       throw error;
     }
   }
+}
+
+/**
+ * Interface for tagged point data 
+ */
+export interface TaggedPoint {
+  pointText: string;
+  stickyNoteId: string;
+  tags: string[];
+  frameLocation: string;
+}
+
+/**
+ * Simple interface for point-tag mappings to pass to AI
+ */
+export interface PointTagMapping {
+  point: string;
+  tags: string[];
+}
+
+/**
+ * Reads existing tags from antagonistic analysis frames and creates simple point-tag mappings
+ * @returns Array of point-tag mappings to pass directly to AI prompts
+ */
+export async function readPointTagMappings(): Promise<PointTagMapping[]> {
+  try {
+    Logger.log('MiroService', '=== READING POINT TAG MAPPINGS ===');
+    
+    // Get all frames to find antagonistic analysis frames
+    const allFrames = await miro.board.get({ type: 'frame' });
+    
+    Logger.log('MiroService', 'All frames on board:', {
+      totalFrames: allFrames.length,
+      frameNames: allFrames.map(f => ({ title: f.title, id: f.id }))
+    });
+    
+    const antagonisticFrames = allFrames.filter(frame => 
+      frame.title?.includes('Antagonistic') || frame.title?.includes('Analysis')
+    );
+    
+    Logger.log('MiroService', 'Filtered antagonistic frames:', {
+      antagonisticFramesCount: antagonisticFrames.length,
+      antagonisticFrames: antagonisticFrames.map(f => ({ title: f.title, id: f.id }))
+    });
+
+    if (antagonisticFrames.length === 0) {
+      Logger.log('MiroService', 'No antagonistic analysis frames found for tag reading');
+      return [];
+    }
+
+    // Get all sticky notes and tags from the board
+    const allStickyNotes = await miro.board.get({ type: 'sticky_note' });
+    const allTags = await miro.board.get({ type: 'tag' });
+    
+    Logger.log('MiroService', 'Board items retrieved:', {
+      totalStickyNotes: allStickyNotes.length,
+      totalTags: allTags.length,
+      tagDetails: allTags.map(tag => ({ id: tag.id, title: tag.title }))
+    });
+    
+    // Create a map of tag IDs to tag titles for quick lookup
+    const tagMap = new Map<string, string>();
+    allTags.forEach(tag => {
+      tagMap.set(tag.id, tag.title);
+    });
+
+    const pointTagMappings: PointTagMapping[] = [];
+
+    // Process sticky notes in antagonistic frames
+    for (const frame of antagonisticFrames) {
+      const frameStickyNotes = allStickyNotes.filter(note => note.parentId === frame.id);
+      
+      Logger.log('MiroService', `Processing frame "${frame.title}":`, {
+        frameId: frame.id,
+        stickyNotesInFrame: frameStickyNotes.length,
+        stickyNoteDetails: frameStickyNotes.map(note => ({
+          id: note.id,
+          content: note.content?.substring(0, 50) + '...',
+          tagIds: note.tagIds || [],
+          hasTagIds: !!(note.tagIds && note.tagIds.length > 0)
+        }))
+      });
+      
+      for (const stickyNote of frameStickyNotes) {
+        const pointText = stickyNote.content || '';
+        
+        if (stickyNote.tagIds && stickyNote.tagIds.length > 0) {
+          // Get tag titles from tag IDs
+          const tags = stickyNote.tagIds
+            .map(tagId => tagMap.get(tagId))
+            .filter(Boolean) as string[];
+          
+          Logger.log('MiroService', `Sticky note with tags:`, {
+            stickyId: stickyNote.id,
+            pointText: pointText.substring(0, 50) + '...',
+            tagIds: stickyNote.tagIds,
+            resolvedTags: tags
+          });
+          
+          pointTagMappings.push({
+            point: pointText,
+            tags: tags
+          });
+        } else {
+          // Include untagged points too (with empty tags array)
+          Logger.log('MiroService', `Sticky note without tags:`, {
+            stickyId: stickyNote.id,
+            pointText: pointText.substring(0, 50) + '...',
+            tagIds: stickyNote.tagIds || 'undefined'
+          });
+          
+          pointTagMappings.push({
+            point: pointText,
+            tags: []
+          });
+        }
+      }
+    }
+
+    Logger.log('MiroService', `Final point-tag mappings result:`, {
+      totalMappings: pointTagMappings.length,
+      taggedPoints: pointTagMappings.filter(m => m.tags.length > 0).length,
+      untaggedPoints: pointTagMappings.filter(m => m.tags.length === 0).length,
+      mappingSummary: pointTagMappings.map(m => ({
+        point: m.point.substring(0, 30) + '...',
+        tagCount: m.tags.length,
+        tags: m.tags
+      }))
+    });
+    
+    Logger.log('MiroService', '=== END READING POINT TAG MAPPINGS ===');
+    return pointTagMappings;
+  } catch (error) {
+    Logger.error('MiroService', 'Error reading point-tag mappings from board:', error);
+    return [];
+  }
+}
+
+/**
+ * Formats point-tag mappings for AI prompt inclusion
+ * @param mappings Array of point-tag mappings
+ * @returns Formatted string for AI prompt
+ */
+export function formatPointTagMappingsForPrompt(mappings: PointTagMapping[]): string {
+  if (mappings.length === 0) {
+    return '';
+  }
+
+  const formattedMappings = mappings.map(mapping => {
+    const tagsStr = mapping.tags.length > 0 ? mapping.tags.join(', ') : 'no tags';
+    return `"${mapping.point}" - [${tagsStr}]`;
+  }).join('\n');
+
+  return `\nPrevious Antagonistic Points with User Tags:\n${formattedMappings}`;
 } 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { OpenAI } from 'openai';
+import { Logger } from '../../../utils/logger';
 
 // Initialize OpenAI API client
 const openai = new OpenAI({
@@ -56,9 +57,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Determine the actual model that will be used
+    let actualModel: string;
+    if (isVisionRequest) {
+      actualModel = 'gpt-4-vision-preview';
+    } else {
+      actualModel = useGpt4 ? 'gpt-4.1' : 'gpt-4o-mini';
+    }
+
     // Log request basics (without exposing full content for privacy)
-    console.log(`OpenAI API request: model=${useGpt4 ? 'gpt-4o-mini' : 'gpt-4o-mini'}, isVisionRequest=${isVisionRequest}`);
-    console.log(`System prompt length: ${systemPrompt.length}, User prompt length: ${userPrompt.length}`);
+    Logger.log('OPENAI-WRAPPER', `OpenAI API request: model=${actualModel}, isVisionRequest=${isVisionRequest}`);
+    Logger.log('OPENAI-WRAPPER', `System prompt length: ${systemPrompt.length}, User prompt length: ${userPrompt.length}`);
 
     // Set timeout for OpenAI requests (120 seconds)
     const controller = new AbortController();
@@ -92,7 +101,7 @@ export async function POST(request: NextRequest) {
         const processedResponse = processAiResponse(assistantMessage, expectsJson);
         
         const duration = Date.now() - startTime;
-        console.log(`OpenAI API request completed in ${duration}ms`);
+        Logger.log('OPENAI-WRAPPER', `OpenAI API request completed in ${duration}ms`);
         
         return NextResponse.json({ 
           response: processedResponse,
@@ -124,7 +133,7 @@ export async function POST(request: NextRequest) {
       const processedResponse = processAiResponse(assistantMessage, expectsJson);
       
       const duration = Date.now() - startTime;
-      console.log(`OpenAI API request completed in ${duration}ms`);
+      Logger.log('OPENAI-WRAPPER', `OpenAI API request completed in ${duration}ms`);
       
       return NextResponse.json({ 
         response: processedResponse,
@@ -137,7 +146,7 @@ export async function POST(request: NextRequest) {
       });
     } catch (innerError: any) {
       clearTimeout(timeoutId);
-      console.error('Error during OpenAI request:', innerError);
+      Logger.error('OPENAI-WRAPPER', 'Error during OpenAI request:', innerError);
       
       if (innerError.name === 'AbortError') {
         return NextResponse.json(
@@ -158,7 +167,7 @@ export async function POST(request: NextRequest) {
     }
   } catch (error: any) {
     const duration = Date.now() - startTime;
-    console.error(`Error in OpenAI wrapper (${duration}ms):`, error);
+    Logger.error('OPENAI-WRAPPER', `Error in OpenAI wrapper (${duration}ms):`, error);
     
     return NextResponse.json(
       { error: error.message || 'Internal server error' },
