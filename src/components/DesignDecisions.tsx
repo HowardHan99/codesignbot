@@ -242,6 +242,7 @@ export function MainBoard({
   const [incorporateSuggestions, setIncorporateSuggestions] = useState<string[]>([]);
   const [dialogueText, setDialogueText] = useState<string>('');
   const [isCreatingDialogueStickies, setIsCreatingDialogueStickies] = useState<boolean>(false);
+  const [antagonisticResponses, setAntagonisticResponses] = useState<string[]>([]);
 
   // Memoize the decision tree to avoid unnecessary recalculations
   const decisionTree = useMemo(() => {
@@ -312,6 +313,18 @@ export function MainBoard({
     } 
   };
 
+  // Function to get current antagonistic responses
+  const getCurrentAntagonisticData = async () => {
+    try {
+      const critiques = await MiroFrameService.getContentFromFrame(frameConfig.names.antagonisticResponse);
+      Logger.log(LOG_CONTEXT, `Retrieved ${critiques.length} antagonistic responses from ${frameConfig.names.antagonisticResponse} frame`);
+      return critiques;
+    } catch (err) {
+      Logger.error(LOG_CONTEXT, 'Error getting antagonistic data:', err);
+      return [];
+    }
+  };
+
   // Handle refresh button click
   const handleRefreshDesignDecisions = async () => {
     if (isRefreshing) return; // Prevent multiple simultaneous refreshes
@@ -323,9 +336,11 @@ export function MainBoard({
       // Get current data for comparison
       const currentNotes = designNotes.map(note => note.content);
       const currentConnections = designConnections.map(conn => `${conn.from}-${conn.to}`);
+      const currentAntagonisticResponses = [...antagonisticResponses];
       
       // Fetch new data
       const { notes, connections } = await getCurrentDesignData();
+      const freshCritiques = await getCurrentAntagonisticData();
       
       // Compare new data with current data
       const newNotes = notes.map(note => note.content);
@@ -335,12 +350,19 @@ export function MainBoard({
         JSON.stringify(currentNotes) !== JSON.stringify(newNotes) ||
         JSON.stringify(currentConnections) !== JSON.stringify(newConnections);
       
+      const hasAntagonisticChanges = JSON.stringify(currentAntagonisticResponses) !== JSON.stringify(freshCritiques);
+      
       if (hasDesignChanges) {
         setDesignNotes(notes);
         setDesignConnections(connections);
         miro.board.notifications.showInfo('Design decisions refreshed successfully.');
       } else {
         miro.board.notifications.showInfo('No changes detected in design decisions.');
+      }
+      
+      if (hasAntagonisticChanges) {
+        setAntagonisticResponses(freshCritiques);
+        Logger.log(LOG_CONTEXT, `Refreshed ${freshCritiques.length} antagonistic responses`);
       }
       
       // Also trigger a refresh of the design themes
@@ -365,11 +387,21 @@ export function MainBoard({
         Logger.error(LOG_CONTEXT, 'Error refreshing incorporate suggestions:', error);
       }
       
+      // Fetch fresh antagonistic responses
+      try {
+        const freshCritiques = await getCurrentAntagonisticData();
+        setAntagonisticResponses(freshCritiques);
+        Logger.log(LOG_CONTEXT, `Refreshed ${freshCritiques.length} antagonistic responses`);
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error refreshing antagonistic responses:', error);
+      }
+      
       // Log user activity
       logUserActivity({
         action: 'refresh_design_decisions',
         additionalData: {
           hasDesignChanges,
+          hasAntagonisticChanges,
           refreshDuration: Date.now() - startTime
         }
       }, currentSessionId || undefined);
@@ -413,15 +445,12 @@ export function MainBoard({
       // 3. Check and save antagonistic responses (critiques)
       try {
         if (currentSessionId) {
-          const critiques = await MiroFrameService.getContentFromFrame(frameConfig.names.antagonisticResponse);
-          if (critiques.length > 0) {
-            const antagonisticResponseData = {
-              critiques: critiques,
-              usedThinkingDialogueInput: false // Default to false during refresh
-            };
-            await saveFrameData(currentSessionId, 'antagonisticResponse', antagonisticResponseData);
-            Logger.log(LOG_CONTEXT, `Saved ${critiques.length} critiques to Firebase during refresh`);
-          }
+          const antagonisticResponseData = {
+            critiques: freshCritiques,
+            usedThinkingDialogueInput: false // Default to false during refresh
+          };
+          await saveFrameData(currentSessionId, 'antagonisticResponse', antagonisticResponseData);
+          Logger.log(LOG_CONTEXT, `Saved ${freshCritiques.length} critiques to Firebase during refresh`);
         }
       } catch (error) {
         Logger.error(LOG_CONTEXT, 'Error saving antagonistic responses during refresh:', error);
@@ -532,6 +561,15 @@ export function MainBoard({
         } catch (error) {
           Logger.error(LOG_CONTEXT, 'Error loading initial incorporate suggestions:', error);
         }
+        
+        // Fetch initial antagonistic responses
+        try {
+          const initialCritiques = await getCurrentAntagonisticData();
+          setAntagonisticResponses(initialCritiques);
+          Logger.log(LOG_CONTEXT, `Initial antagonistic responses loaded: ${initialCritiques.length} responses`);
+        } catch (error) {
+          Logger.error(LOG_CONTEXT, 'Error loading initial antagonistic responses:', error);
+        }
       } catch (error) {
         Logger.error(LOG_CONTEXT, 'Error loading initial design data:', error);
       }
@@ -573,6 +611,15 @@ export function MainBoard({
         Logger.log(LOG_CONTEXT, `Refreshed ${freshSuggestions.length} incorporate suggestions for analysis`);
       } catch (error) {
         Logger.error(LOG_CONTEXT, 'Error refreshing incorporate suggestions for analysis:', error);
+      }
+
+      // Refresh antagonistic responses
+      try {
+        const freshCritiques = await getCurrentAntagonisticData();
+        setAntagonisticResponses(freshCritiques);
+        Logger.log(LOG_CONTEXT, `Refreshed ${freshCritiques.length} antagonistic responses for analysis`);
+      } catch (error) {
+        Logger.error(LOG_CONTEXT, 'Error refreshing antagonistic responses for analysis:', error);
       }
 
       // Clear previous responses and force analysis refresh
@@ -1779,6 +1826,63 @@ export function MainBoard({
             Design Themes
           </p>
           <DesignThemeDisplay refreshTrigger={themeRefreshTrigger} />
+        </div>
+      )}
+
+      {/* Antagonistic Responses Section */}
+      {isExpanded && (
+        <div style={{
+          marginTop: '16px',
+          backgroundColor: '#f8f9fa',
+          borderRadius: '6px',
+          padding: '8px',
+          border: '1px solid #e0e0e0'
+        }}>
+          <p style={{ 
+            margin: '0 0 8px 0',
+            fontWeight: 500,
+            color: '#555',
+            fontSize: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <span style={{ fontSize: '15px', minWidth: '16px', textAlign: 'center' }}>🤖</span>
+            Antagonistic Responses
+          </p>
+          {antagonisticResponses.length === 0 ? (
+            <div style={{
+              padding: '10px',
+              textAlign: 'center',
+              color: '#666',
+              fontSize: '14px'
+            }}>
+              No antagonistic responses found.
+            </div>
+          ) : (
+            <div style={{ 
+              maxHeight: '200px', 
+              overflowY: 'auto',
+              padding: '0 4px'
+            }}>
+              {antagonisticResponses.map((response, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: '8px 12px',
+                    backgroundColor: '#fff',
+                    borderRadius: '4px',
+                    border: '1px solid #e6e6e6',
+                    marginBottom: '6px',
+                    fontSize: '13px',
+                    lineHeight: '1.4'
+                  }}
+                >
+                  {response}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
