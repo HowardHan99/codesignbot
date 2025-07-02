@@ -826,4 +826,68 @@ export class StickyNoteService {
       return null;
     }
   }
+
+  /**
+   * Create sticky notes in a horizontal layout
+   * @param points Array of content strings for the sticky notes
+   * @param baseX Base X position to start from
+   * @param baseY Base Y position to start from
+   * @param maxWidth Maximum width available for the layout
+   * @param color Color for the sticky notes
+   * @returns Array of created sticky notes
+   */
+  public static async createHorizontalStickyNotes(
+    points: string[], 
+    baseX: number, 
+    baseY: number, 
+    maxWidth: number,
+    color: string
+  ): Promise<any[]> {
+    if (!points.length) return [];
+    
+    // Use normal sticky note dimensions
+    const stickyWidth = 500;     // Back to normal size
+    const stickyHeight = 200;    // Back to normal size  
+    const spacing = 30;          // Back to normal spacing
+    
+    // Calculate how many sticky notes can fit horizontally
+    const maxPerRow = Math.floor(maxWidth / (stickyWidth + spacing));
+    
+    const createdStickies = [];
+    
+    // Create sticky notes in a horizontal layout
+    for (let i = 0; i < points.length; i++) {
+      const col = i % maxPerRow;
+      const row = Math.floor(i / maxPerRow);
+      
+      const x = baseX + col * (stickyWidth + spacing);
+      const y = baseY + row * (stickyHeight + spacing);
+      
+      try {
+        const sticky = await MiroApiClient.createStickyNote({
+          content: points[i],
+          x: x,
+          y: y,
+          width: stickyWidth,
+          shape: 'rectangle',
+          style: {
+            fillColor: color
+          }
+        });
+        
+        if (sticky) {
+          createdStickies.push(sticky);
+          Logger.log('STICKY-HORIZONTAL', `Created sticky note ${i + 1}/${points.length} at (${x}, ${y})`);
+        }
+      } catch (error) {
+        Logger.error('STICKY-HORIZONTAL', `Error creating sticky note ${i + 1}:`, error);
+      }
+      
+      // Add a small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    Logger.log('STICKY-HORIZONTAL', `Successfully created ${createdStickies.length}/${points.length} sticky notes in horizontal layout`);
+    return createdStickies;
+  }
 } 

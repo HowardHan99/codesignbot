@@ -20,6 +20,7 @@ import { frameConfig, stickyConfig } from '../utils/config';
 import { MiroApiClient } from '../services/miro/miroApiClient';
 import { saveFrameData } from '../utils/firebase';
 import { readPointTagMappings, PointTagMapping } from '../services/miroService';
+import { StickyNoteService } from '../services/miro/stickyNoteService';
 
 /**
  * Interface for themed response
@@ -1191,50 +1192,6 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         }
       };
       
-      // Custom function to create horizontal layout of sticky notes
-      const createHorizontalStickyNotes = async (
-        points: string[], 
-        baseX: number, 
-        baseY: number, 
-        maxWidth: number,
-        color: string
-      ) => {
-        if (!points.length) return;
-        
-        //DON'T CHANGE THESE VALUES AS THEY ARE THE ONLY ONES THAT WORK
-        const stickyWidth = 500;     // Width of each sticky note - increased from 240
-        const stickyHeight = 200;    // Height for row spacing calculation - increased from 160
-        const spacing = 30;          // Spacing between sticky notes - increased from 25
-        
-        // Calculate how many sticky notes can fit horizontally
-        const maxPerRow = Math.floor(maxWidth / (stickyWidth + spacing));
-        
-        // Create sticky notes in a horizontal layout
-        for (let i = 0; i < points.length; i++) {
-          // Calculate position (horizontally first, then new row)
-          const col = i % maxPerRow;
-          const row = Math.floor(i / maxPerRow);
-          
-          const x = baseX + col * (stickyWidth + spacing);
-          const y = baseY + row * (stickyHeight + spacing); // Use sticky height for row spacing
-          
-          // Create the sticky note with rectangular shape
-          await MiroApiClient.createStickyNote({
-            content: points[i],
-            x: x,
-            y: y,
-            width: stickyWidth,
-            shape: 'rectangle', // Use shape parameter instead of height
-            style: {
-              fillColor: color
-            }
-          });
-          
-          // Add a small delay to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      };
-      
       // Process each selected variation
       if (variationsToSend.rag) {
         try {
@@ -1249,7 +1206,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             const points = splitResponse(currentResponse);
             
             // Create sticky notes with horizontal layout
-            await createHorizontalStickyNotes(
+            await StickyNoteService.createHorizontalStickyNotes(
               points,
               positions.rag.x,
               positions.rag.y,
@@ -1279,7 +1236,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           const points = splitResponse(principlesResponse);
           
           // Create sticky notes with horizontal layout
-          await createHorizontalStickyNotes(
+          await StickyNoteService.createHorizontalStickyNotes(
             points,
             positions.principles.x,
             positions.principles.y,
@@ -1308,7 +1265,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           const points = splitResponse(customPromptResponse);
           
           // Create sticky notes with horizontal layout
-          await createHorizontalStickyNotes(
+          await StickyNoteService.createHorizontalStickyNotes(
             points,
             positions.prompt.x,
             positions.prompt.y,
@@ -1408,12 +1365,16 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         // We look for sticky notes whose content includes the point text (exact or close match)
         const originalSticky = allStickyNotes.find(sticky => {
           // First try exact match
-          if (sticky.content === pointToUnpack) return true;
+          if (sticky.content === pointToUnpack) {
+            return true;
+          }
           
           // Then try a more lenient match that ignores case, whitespace, and punctuation
           const normalizedContent = sticky.content?.toLowerCase().replace(/\s+/g, ' ').trim() || '';
           const normalizedPoint = pointToUnpack.toLowerCase().replace(/\s+/g, ' ').trim();
-          return normalizedContent.includes(normalizedPoint) || normalizedPoint.includes(normalizedContent);
+          const isMatch = normalizedContent.includes(normalizedPoint) || normalizedPoint.includes(normalizedContent);
+          
+          return isMatch;
         });
 
         if (!originalSticky) {
@@ -1421,51 +1382,46 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           continue; // Skip to next point
         }
 
-        // Generate detailed illustration
-        const detailedIllustration = await OpenAIService.unpackPointDetail(
+        // Generate detailed illustration as separate points
+        const explanationPoints = await OpenAIService.unpackPointDetailAsPoints(
           pointToUnpack,
           stickyNotes.join('\n\n'), // Design proposal
           designChallenge,
           allCurrentDisplayedPointsForContext // All current points for context
         );
 
-        // Calculate position for the detail sticky (to the right of the original)
-        const detailX = originalSticky.x + 800; // Position to the right of original
-        const detailY = originalSticky.y; // Same vertical position
-        
-        // Create a rectangle shape for the detailed explanation
-        const detailShape = await miro.board.createShape({
-          shape: 'rectangle', // Use 'rectangle' as shape, not type
-          content: detailedIllustration,
-          x: detailX,
-          y: detailY,
-          width: 700, // Wider for more text
-          height: 300, // Taller for more text
-          style: {
-            fillColor: '#d0e17a', // Light green hex color instead of named color
-            textAlign: 'left',
-            borderWidth: 0,
-            fontSize: 24
-          }
-        });
+        // Calculate position for detail stickies - positioned in Antagonistic-Response area
+        const detailX = originalSticky.x + 4300; // DON'T CHANGE THIS
+        const detailY = originalSticky.y - 650; // DON'T CHANGE THIS
 
-        // Create connector between original sticky and detail shape
-        await miro.board.createConnector({
-          start: {
-            item: originalSticky.id,
-            snapTo: 'right'
-          },
-          end: {
-            item: detailShape.id,
-            snapTo: 'left'
-          },
-          style: {
-            strokeColor: '#4262ff',
-            strokeWidth: 2,
-            strokeStyle: 'normal'
-          },
-          shape: 'curved' // Use curved connector shape
-        });
+        // Create horizontal sticky notes instead of rectangle
+        const unpackedStickies = await StickyNoteService.createHorizontalStickyNotes(
+          explanationPoints,
+          detailX, // EXACT same position as original sticky
+          detailY,
+          2200, // maxWidth - enough space for 4 normal-sized sticky notes (500*4 + 30*3 = 2090px)
+          'light_pink' // pink color
+        );
+
+        // Create connector to first sticky note instead of rectangle
+        if (unpackedStickies.length > 0) {
+          await miro.board.createConnector({
+            start: {
+              item: originalSticky.id,
+              snapTo: 'right'
+            },
+            end: {
+              item: unpackedStickies[0].id, // Connect to first unpacked sticky
+              snapTo: 'left'
+            },
+            style: {
+              strokeColor: '#4262ff',
+              strokeWidth: 2,
+              strokeStyle: 'normal'
+            },
+            shape: 'curved' // Use curved connector shape
+          });
+        }
         
         // Small delay between operations
         await new Promise(resolve => setTimeout(resolve, 200));

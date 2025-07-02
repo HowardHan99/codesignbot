@@ -7,7 +7,7 @@ import { firebaseConfig, frameConfig } from './config';
 import { mergeSimilarPoints } from './textProcessing'
 import { Logger } from './logger';
 import { MiroFrameService } from '../services/miro/frameService';
-import { PointTagMapping } from '../services/miroService';
+import { PointTagMapping, TaggedPoint } from '../services/miroService';
 
 // Initialize Firebase only on the client side
 let app: FirebaseApp | undefined;
@@ -744,7 +744,7 @@ export async function getHistoricalTaggedPoints(sessionId?: string): Promise<Tag
  * @param preferences Tag preferences to save
  * @param sessionId Session ID for organization
  */
-export async function saveTagPreferences(preferences: TagPreferences, sessionId?: string): Promise<void> {
+export async function saveTagPreferences(preferences: PointTagMapping[], sessionId?: string): Promise<void> {
   try {
     const database = getFirebaseDB();
     const path = sessionId ? `sessions/${sessionId}/tagPreferences` : 'tagPreferences';
@@ -757,9 +757,9 @@ export async function saveTagPreferences(preferences: TagPreferences, sessionId?
     });
     
     Logger.log('FirebaseUtils', 'Saved tag preferences to Firebase', {
-      usefulKeywords: preferences.usefulKeywords.length,
-      avoidKeywords: preferences.avoidKeywords.length,
-      customTags: Object.keys(preferences.customTagPreferences).length
+      usefulKeywords: preferences.filter(p => p.tags.some(t => t.toLowerCase().includes('useful'))).length,
+      avoidKeywords: preferences.filter(p => p.tags.some(t => t.toLowerCase().includes('not-useful'))).length,
+      customTags: preferences.filter(p => !p.tags.some(t => t.toLowerCase().includes('useful') || t.toLowerCase().includes('not-useful'))).length
     });
   } catch (error) {
     Logger.error('FirebaseUtils', 'Error saving tag preferences:', error);

@@ -693,4 +693,74 @@ All Current Critique Points (for context, do not elaborate on these, only the on
       throw error; // Re-throw to be caught by caller
     }
   }
+
+  /**
+   * Generates 3-4 separate explanation points for a specific critique point.
+   * @param originalPoint - The specific critique point to unpack.
+   * @param designProposal - The full text of the design proposal (concatenated sticky notes).
+   * @param designChallenge - The overall design challenge.
+   * @param allCurrentPoints - An array of all current critique points for context.
+   * @returns Promise resolving to an array of explanation points.
+   */
+  public static async unpackPointDetailAsPoints(
+    originalPoint: string,
+    designProposal: string,
+    designChallenge: string,
+    allCurrentPoints: string[]
+  ): Promise<string[]> {
+    const systemPrompt = `
+You are an AI assistant specializing in design critique elaboration.
+Your task is to take a concise design critique point and provide a detailed explanation, then break that explanation into 3-4 logical parts.
+
+You will be given:
+1. The original design proposal.
+2. The overall design challenge.
+3. A list of all critique points that were generated for this proposal (for context).
+4. The specific critique point that needs to be unpacked.
+
+Based on this information:
+1. First, develop a comprehensive explanation of WHY this criticism is valid and important
+2. Then, break that explanation into 3-4 logical segments that flow together
+3. Each segment should be concise (15-20 words max) but part of the larger explanation
+4. The segments should read as a coherent explanation when combined
+
+Return only the 3-4 segments, one per line, without bullet symbols or numbering.
+
+Context:
+Design Proposal:
+---
+${designProposal}
+---
+Design Challenge:
+---
+${designChallenge}
+---
+All Current Critique Points (for context, do not elaborate on these, only the one specified below):
+---
+- ${allCurrentPoints.join('\n- ')}
+---
+`;
+
+    const userPromptForUnpack = `Please unpack the following critique point by creating one comprehensive explanation and breaking it into 3-4 flowing segments (max 10-15 words each):
+"${originalPoint}"`;
+
+    try {
+      const result = await this.makeRequest('/api/openaiwrap', {
+        userPrompt: userPromptForUnpack,
+        systemPrompt,
+        useGpt4: true, // Consider using GPT-4 for better elaboration
+      });
+      
+      // Split response into individual points (by line breaks)
+      const points = result.response.split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .slice(0, 4); // Ensure max 4 points
+      
+      return points;
+    } catch (error) {
+      Logger.error('OPENAI-API', 'Error in unpackPointDetailAsPoints:', error);
+      throw error; // Re-throw to be caught by caller
+    }
+  }
 } 
