@@ -17,6 +17,7 @@ export const frameConfig = {
     designProposal: 'Design-Proposal',
     antagonisticResponse: 'Agent-Response',
     consensus: 'Consensus',
+    discardedPoints: 'Discarded-Points',
     incorporateSuggestions: 'Incorporate-Suggestions',
     thinkingDialogue: 'Thinking-Dialogue',
     ragContent: 'Enhanced-Context',

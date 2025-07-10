@@ -21,6 +21,9 @@ import { MiroApiClient } from '../services/miro/miroApiClient';
 import { saveFrameData } from '../utils/firebase';
 import { readPointTagMappings, PointTagMapping } from '../services/miroService';
 import { StickyNoteService } from '../services/miro/stickyNoteService';
+import { getFirebaseDB } from '../utils/firebase';
+import { ref, push, get, query, orderByChild, limitToLast } from 'firebase/database';
+import { MiroFrameService } from '../services/miro/frameService';
 
 /**
  * Interface for themed response
@@ -242,6 +245,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       let thinkingContextString = ''; // Parsed thinking process
       let ragContextString = ''; // Parsed external knowledge/RAG
       let incorporateSuggestionsString = ''; // New: User responses to previous analysis points
+      let consensusPointsString = ''; // Consensus points from frame
+      let discardedPointsString = ''; // Discarded points the user found irrelevant or wrong
       let synthesizedRagInsights = ''; // NEW: Synthesized insights from RAG content
       
       // Always check for the frame, even if toggle is off (for debugging)
@@ -252,6 +257,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         const variedResponsesFrame = allFrames.find(f => f.title === frameConfig.names.variedResponses);
         const agentPromptFrame = allFrames.find(f => f.title === frameConfig.names.agentPrompt);
         const incorporateSuggestionsFrame = allFrames.find(f => f.title === frameConfig.names.incorporateSuggestions);
+        const discardedPointsFrame = allFrames.find(f => f.title === frameConfig.names.discardedPoints);
+        const consensusFrame = allFrames.find(f => f.title === frameConfig.names.consensus);
         
         // Function to extract content from a frame
         const extractContentFromFrame = async (frame: any) => {
@@ -279,6 +286,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         thinkingContextString = await extractContentFromFrame(thinkingFrame);
         ragContextString = await extractContentFromFrame(enhancedContextFrame);
         incorporateSuggestionsString = await extractContentFromFrame(incorporateSuggestionsFrame);
+        discardedPointsString = await extractContentFromFrame(discardedPointsFrame);
+        consensusPointsString = await extractContentFromFrame(consensusFrame);
         
         // Update the current RAG content state
         setCurrentRagContent(ragContextString);
@@ -404,57 +413,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         hasRAGParsed: !!ragContextString,
         hasSynthesizedRAG: !!synthesizedRagInsights,
         hasIncorporateSuggestions: hasFeedback,
-        hasTagPreferences: pointTagMappings.length > 0
+        hasTagPreferences: pointTagMappings.length > 0,
+        // NEW: Frame influence tracking
+        consensusPointsFromFrame: consensusPointsString ? consensusPointsString.split('\n').filter(p => p.trim()).length : 0,
+        discardedPointsFromFrame: discardedPointsString ? discardedPointsString.split('\n').filter(p => p.trim()).length : 0,
+        totalConsensusInfluence: (initialConsensusPoints?.length || 0) + (consensusPointsString ? consensusPointsString.split('\n').filter(p => p.trim()).length : 0),
+        strongInfluenceActive: !!(consensusPointsString || discardedPointsString)
       });
       
       Logger.log('AntagoInteract', '=== END MESSAGE CONSTRUCTION SECTION ===');
-      
-      // Simply read existing themes from the board and their selection state
-      console.log('Reading themes from the board...');
-      const existingThemes = await DesignThemeService.getCurrentThemesFromBoard();
-      console.log(`Found ${existingThemes.length} existing themes on the board`);
-      
-      // Read theme selection state from localStorage
-      let selectedThemes = [...existingThemes]; // Default to using all themes
-      
-      if (typeof window !== 'undefined') {
-        try {
-          const savedSelectionJson = localStorage.getItem('themeSelectionState');
-          if (savedSelectionJson) {
-            console.log('Reading theme selection state from localStorage');
-            const savedSelection = JSON.parse(savedSelectionJson);
-            
-            if (Array.isArray(savedSelection) && savedSelection.length > 0) {
-              // Create a map of theme names to selection state
-              const selectionMap = new Map<string, boolean>();
-              savedSelection.forEach(item => {
-                selectionMap.set(item.name.toLowerCase(), item.isSelected !== false);
-              });
-              
-              // Filter themes based on selection state
-              const filteredThemes = existingThemes.filter(theme => {
-                // Try to find this theme in the selection map
-                for (const [savedName, isSelected] of selectionMap.entries()) {
-                  if (theme.name.toLowerCase() === savedName || 
-                      theme.name.toLowerCase().includes(savedName) || 
-                      savedName.includes(theme.name.toLowerCase())) {
-                    return isSelected; // Keep only if selected
-                  }
-                }
-                return true; // If not found in selection map, include by default
-              });
-              
-              // Use filtered themes if we have any
-              if (filteredThemes.length > 0) {
-                selectedThemes = filteredThemes;
-                console.log(`Using ${selectedThemes.length} selected themes from localStorage`);
-              }
-            }
-          }
-        } catch (e) {
-          console.error('Error reading theme selection from localStorage:', e);
-        }
-      }
       
       // === SIMPLE LOG FOR WHAT'S BEING SENT TO OPENAI ===
       console.log('🔍 === MESSAGE COMPONENTS BEING SENT TO OPENAI ===');
@@ -463,241 +430,277 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       console.log('3. RAG CONTENT (Raw):', ragContextString ? `${ragContextString.length} chars (not sent to AI)` : 'None');
       console.log('3a. SYNTHESIZED RAG INSIGHTS:', synthesizedRagInsights || 'None');
       console.log('4. INCORPORATE SUGGESTIONS:', incorporateSuggestionsString || 'None');
-      console.log('5. DESIGN CHALLENGE:', designChallenge || 'None');
-      console.log('6. CONSENSUS POINTS:', initialConsensusPoints && initialConsensusPoints.length > 0 ? initialConsensusPoints : 'None');
-      console.log('7. SYNTHESIZED POINTS:', synthesizedPoints && synthesizedPoints.length > 0 ? synthesizedPoints : 'None');
+      console.log('5. CONSENSUS POINTS (Frame):', consensusPointsString ? `${consensusPointsString.length} chars - STRONG INFLUENCE` : 'None');
+      console.log('6. DISCARDED POINTS:', discardedPointsString ? `${discardedPointsString.length} chars - AVOID THESE PATTERNS` : 'None');
+      console.log('7. DESIGN CHALLENGE:', designChallenge || 'None');
+      console.log('8. CONSENSUS POINTS (Props):', initialConsensusPoints && initialConsensusPoints.length > 0 ? initialConsensusPoints : 'None');
+      console.log('9. SYNTHESIZED POINTS:', synthesizedPoints && synthesizedPoints.length > 0 ? synthesizedPoints : 'None');
       console.log('🔍 === FULL MESSAGE CONTENT ===');
       console.log('USER MESSAGE (complete):', enhancedMessageWithContext);
       console.log('🔍 === END MESSAGE COMPONENTS ===');
 
-      // Conditional themed analysis - only if themes exist
-      if (existingThemes.length > 0) {
-        console.log('Generating themed analysis...');
-        
-        // Function to generate themed analysis
-        const generateThemedAnalysis = async (
-          messageContext: string,
-          setResponseFunc: React.Dispatch<React.SetStateAction<string[]>>,
-          setThemedResponsesFunc: React.Dispatch<React.SetStateAction<ThemedResponse[]>>,
-          setStoredResponsesFunc: React.Dispatch<React.SetStateAction<StoredResponses>>
-        ) => {
-          // Generate all theme analyses in parallel with standard response
-          const [themedResponsesData, response] = await Promise.all([
-            // Generate all theme analyses in parallel, passing design principles, custom prompt, and tag mappings
-            OpenAIService.generateAllThemeAnalyses(
-              messageContext,
-              selectedThemes,
-              designChallenge,
-              initialConsensusPoints || [],
-              undefined, // Design principles only for variations
-              undefined, // Custom prompt only for variations
-              pointTagMappings // NEW: Pass tag mappings for themed analysis too
-            ),
-            
-            // Also generate original response for compatibility and fallback
-            OpenAIService.generateAnalysis(
-              messageContext, 
-              designChallenge,
-              synthesizedPoints,
-              initialConsensusPoints || [],
-              undefined, // Design principles only for variations
-              undefined, // Custom prompt only for variations
-              pointTagMappings // NEW: Pass tag mappings for standard analysis too
-            )
-          ]);
-          
-          // Store results
-          setResponseFunc([response]);
-          setThemedResponsesFunc(themedResponsesData);
-          setStoredResponsesFunc({ normal: response });
-          
-          return { themedResponsesData, response };
-        };
+      // Parse frame content into arrays for strong influence
+      const consensusPointsFromFrame = consensusPointsString ? consensusPointsString.split('\n').filter(p => p.trim()) : [];
+      const discardedPointsFromFrame = discardedPointsString ? discardedPointsString.split('\n').filter(p => p.trim()) : [];
+      
+      // Combine frame consensus with props consensus for maximum coverage
+      const allConsensusPoints = [
+        ...(initialConsensusPoints || []),
+        ...consensusPointsFromFrame
+      ].filter((point, index, array) => array.indexOf(point) === index); // Remove duplicates
 
-        // Generate themed analysis using enhanced message
-        Logger.log('AntagoInteract', 'Generating themed analysis with enhanced context');
-        const results = await generateThemedAnalysis(
-          enhancedMessageWithContext, 
-          setResponses, 
-          setThemedResponses, 
-          setStoredFullResponses
+      // === OPTIMIZED: Single comprehensive generation call ===
+      Logger.log('AntagoInteract', 'Starting comprehensive analysis generation');
+      
+      console.log('🎯 === SIMPLIFIED GENERATION FLOW ===');
+      console.log('PROCESSING MODE: Standard (non-themed) analysis only');
+      console.log('FRAME CONTENT INCLUDED:', {
+        thinkingDialogue: !!thinkingContextString,
+        ragContent: !!ragContextString,
+        synthesizedRAG: !!synthesizedRagInsights,
+        userSuggestions: !!incorporateSuggestionsString,
+        consensusPoints: allConsensusPoints.length,
+        discardedPoints: discardedPointsFromFrame.length,
+        tagMappings: pointTagMappings.length
+      });
+      console.log('TOTAL ENHANCED MESSAGE LENGTH:', enhancedMessageWithContext.length);
+      console.log('🎯 === END SIMPLIFIED GENERATION ===');
+      
+      try {
+        const comprehensiveResults = await OpenAIService.generateComprehensiveAnalysis(
+          enhancedMessageWithContext,
+          {
+            designChallenge,
+            themes: undefined, // No themed analysis by default
+            existingPoints: synthesizedPoints,
+            consensusPoints: allConsensusPoints,
+            designPrinciples: undefined, // Only for variations
+            customSystemPrompt: undefined, // Only for variations
+            pointTagMappings,
+            discardedPoints: discardedPointsFromFrame,
+            needsSimplified: false, // No simplified analysis by default
+            needsStandard: true, // Always generate standard analysis
+            variations: undefined // Variations handled separately in handleSendVariations
+          }
         );
 
-        // Create a combined list of all points for backward compatibility
-        const allPoints = results.themedResponsesData.flatMap(theme => theme.points);
+        // Process results - we should always have standardResponse now
+        if (comprehensiveResults.standardResponse) {
+          // Set standard response
+          setResponses([comprehensiveResults.standardResponse]);
+          setStoredFullResponses({ normal: comprehensiveResults.standardResponse });
 
-        // Update parent with appropriate responses immediately 
-        if (useThemedDisplay) {
-          // If using themed display, pass all themed points
-          onResponsesUpdate?.(allPoints);
-        } else {
-          // Otherwise, use the standard response format
-          onResponsesUpdate?.(splitResponse(results.response));
-        }
-
-        // If simplified mode is active, generate the simplified version in the background
-        if (isSimplifiedMode) {
-          (async () => {
-            try {
-              setIsChangingTone(true);
-              
-              // Simplify standard response
-              const simplified = await OpenAIService.simplifyAnalysis(results.response);
-              setSimplifiedResponses([simplified]);
-              setStoredSimplifiedResponses({ normal: simplified });
-              
-              // Update UI with simplified response if in simplified mode and not themed display
-              if (isSimplifiedMode && !useThemedDisplay) {
-                onResponsesUpdate?.(splitResponse(simplified));
-              }
-              
-              setIsChangingTone(false);
-            } catch (error) {
-              console.error('Error generating simplified response:', error);
-              setIsChangingTone(false);
-            }
-          })();
-        }
-
-        // Save to Firebase in the background (THEMED ANALYSIS)
-        (async () => {
-          try {
-            if (!sessionId) {
-              Logger.warn('AntagoInteract', 'Skipping Firebase save for themed analysis due to missing sessionId');
-              return;
-            }
-
-            let critiquesToSave: string[];
-            let usedThinkingForThisOutput = useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== '');
-
-            if (useThemedDisplay && results.themedResponsesData.length > 0) {
-              critiquesToSave = results.themedResponsesData.flatMap(theme => theme.points);
-            } else if (results.response) {
-              critiquesToSave = splitResponse(results.response);
-            } else {
-              critiquesToSave = [];
-            }
-            
-            const antagonisticResponseDataThemed = {
-              critiques: critiquesToSave,
-              usedThinkingDialogueInput: usedThinkingForThisOutput,
-              tagMappings: pointTagMappings // Store tag mappings with analysis
-            };
-            await saveFrameData(sessionId, 'antagonisticResponse', antagonisticResponseDataThemed);
-
-            if (results.themedResponsesData.length > 0) {
-              await saveDesignThemes({
-                themes: results.themedResponsesData.map(theme => ({
-                  name: theme.name,
-                  color: theme.color,
-                  description: theme.points.join(' | ')
-                }))
-              }, sessionId);
-            }
-              
-            logUserActivity({
-              action: 'generate_analysis_completed',
-              additionalData: {
-                hasThemes: results.themedResponsesData.length > 0, 
-                themedDisplay: useThemedDisplay,
-                challengeLength: designChallenge?.length || 0,
-                responseCount: critiquesToSave.length,
-                simplifiedResponseCount: simplifiedResponses.length,
-                useThinkingDialogueInput: usedThinkingForThisOutput,
-                hasTagPreferences: pointTagMappings.length > 0,
-                duration: Date.now() - startTime 
-              }
-            }, sessionId);
-          } catch (error) {
-            Logger.error('AntagoInteract', 'Error saving themed analysis data to Firebase:', error);
-          }
-        })();
-      } else {
-        // No themes exist on the board - use standard analysis
-        console.log('No themes found on board. Using standard analysis without themes.');
-        
-        try {
-          console.log('Generating standard analysis with enhanced context...');
-          
-          // Generate standard analysis using enhanced message
-          const response = await OpenAIService.generateAnalysis(
-            enhancedMessageWithContext, 
-            designChallenge,
-            synthesizedPoints,
-            initialConsensusPoints || [],
-            undefined, // Design principles only for variations
-            undefined, // Custom prompt only for variations  
-            pointTagMappings // Pass tag mappings for learning
-          );
-          
-          setResponses([response]);
-          setStoredFullResponses({ normal: response });
-          
           // Update parent immediately with standard response
-          onResponsesUpdate?.(splitResponse(response));
+          onResponsesUpdate?.(splitResponse(comprehensiveResults.standardResponse));
           
-          // If simplified mode is active, generate the simplified version in the background
-          if (isSimplifiedMode) {
-            (async () => {
-              try {
-                setIsChangingTone(true);
-                const simplified = await OpenAIService.simplifyAnalysis(response);
-                setSimplifiedResponses([simplified]);
-                setStoredSimplifiedResponses({ normal: simplified });
-                
-                // Update UI with simplified response if in simplified mode
-                if (isSimplifiedMode && !useThemedDisplay) {
-                  onResponsesUpdate?.(splitResponse(simplified));
-                }
-                
-                setIsChangingTone(false);
-              } catch (error) {
-                console.error('Error generating simplified response:', error);
-                setIsChangingTone(false);
-              }
-            })();
-          }
-          
-          // Save to Firebase in the background (NON-THEMED ANALYSIS)
-          (async () => {
-            try {
-              if (!sessionId) {
-                Logger.warn('AntagoInteract', 'Skipping Firebase save for non-themed analysis due to missing sessionId');
-                return;
-              }
-
-              const antagonisticResponseData = {
-                critiques: response ? splitResponse(response) : [],
-                usedThinkingDialogueInput: useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== ''),
-                tagMappings: pointTagMappings // Store tag mappings with analysis
-              };
-              await saveFrameData(sessionId, 'antagonisticResponse', antagonisticResponseData);
-              
-              logUserActivity({
-                action: 'generate_analysis_completed',
-                additionalData: {
-                  hasThemes: false,
-                  themedDisplay: false,
-                  challengeLength: designChallenge?.length || 0,
-                  responseCount: response ? splitResponse(response).length : 0,
-                  simplifiedResponseCount: simplifiedResponses.length,
-                  useThinkingDialogueInput: antagonisticResponseData.usedThinkingDialogueInput,
-                  hasTagPreferences: pointTagMappings.length > 0,
-                  duration: Date.now() - startTime 
-                }
-              }, sessionId);
-            } catch (error) {
-              Logger.error('AntagoInteract', 'Error saving non-themed analysis data to Firebase:', error);
-            }
-          })();
-        } catch (error) {
-          Logger.error('AntagoInteract', 'Error generating standard analysis:', error);
+          Logger.log('AntagoInteract', 'Standard analysis generated successfully', {
+            responseLength: comprehensiveResults.standardResponse.length,
+            pointCount: splitResponse(comprehensiveResults.standardResponse).length
+          });
+        } else {
+          Logger.error('AntagoInteract', 'No standard response generated');
           setError('Failed to generate analysis. Please try again.');
           setLoading(false);
           processingRef.current = false;
           onComplete?.();
           return;
         }
+
+        // Save to Firebase in the background
+        (async () => {
+          try {
+            if (!sessionId) {
+              Logger.warn('AntagoInteract', 'Skipping Firebase save due to missing sessionId');
+              return;
+            }
+
+            const critiquesToSave = splitResponse(comprehensiveResults.standardResponse!);
+            let usedThinkingForThisOutput = useThinkingDialogue && (thinkingContextString !== '' || ragContextString !== '');
+            
+            // === ENHANCED: Comprehensive context information for Firebase ===
+            const contextData = {
+              // AI Input Context
+              synthesizedRagInsights: synthesizedRagInsights || null,
+              rawRagContent: ragContextString || null,
+              thinkingDialogue: thinkingContextString || null,
+              userFeedbackSuggestions: incorporateSuggestionsString || null,
+              
+              // User Commands & Preferences from Board
+              userTagMappings: pointTagMappings.length > 0 ? pointTagMappings : null,
+              consensusPointsFromFrame: consensusPointsString ? consensusPointsString.split('\n').filter(p => p.trim()) : null,
+              discardedPointsFromFrame: discardedPointsString ? discardedPointsString.split('\n').filter(p => p.trim()) : null,
+              
+              // Design Context
+              designChallenge: designChallenge || null,
+              originalDesignDecisions: stickyNotes || null,
+              consensusPointsFromProps: initialConsensusPoints || null,
+              combinedConsensusPoints: allConsensusPoints.length > 0 ? allConsensusPoints : null,
+              existingSynthesizedPoints: synthesizedPoints.length > 0 ? synthesizedPoints : null,
+              
+              // Processing Metadata
+              enhancedMessageLength: enhancedMessageWithContext.length,
+              baseMessageLength: baseMessage.length,
+              hasImageContext: !!imageContext,
+              imageContext: imageContext || null,
+              
+              // Generation Settings
+              usedThinkingDialogueInput: usedThinkingForThisOutput,
+              isSimplifiedMode: isSimplifiedMode,
+              useThemedDisplay: useThemedDisplay,
+              
+              // Influence Tracking
+              influenceFactors: {
+                hasRAGSynthesis: !!synthesizedRagInsights,
+                hasRawRAGContent: !!ragContextString,
+                hasThinkingContext: !!thinkingContextString,
+                hasUserFeedback: !!incorporateSuggestionsString,
+                hasTagPreferences: pointTagMappings.length > 0,
+                hasConsensusGuidance: allConsensusPoints.length > 0,
+                hasDiscardedGuidance: discardedPointsFromFrame.length > 0,
+                hasExistingPoints: synthesizedPoints.length > 0,
+                strongInfluenceActive: !!(consensusPointsString || discardedPointsString)
+              },
+              
+              // AI Message Components (for debugging)
+              fullEnhancedMessage: enhancedMessageWithContext,
+              enhancedContextParts: enhancedContextParts.length > 0 ? enhancedContextParts.map((part, i) => ({
+                index: i,
+                label: part.split('\n')[0],
+                length: part.length,
+                preview: part.length > 200 ? part.substring(0, 200) + '...' : part
+              })) : null,
+              
+              // Timestamp for tracking
+              timestamp: Date.now(),
+              sessionId: sessionId
+            };
+            
+            const antagonisticResponseData = {
+              critiques: critiquesToSave,
+              usedThinkingDialogueInput: usedThinkingForThisOutput,
+              tagMappings: pointTagMappings,
+              // NEW: Comprehensive context information
+              context: contextData
+            };
+            
+            // Direct Firebase save to ensure data is persisted
+            try {
+              const database = getFirebaseDB();
+              const currentBoardId = await MiroFrameService.getCurrentBoardId();
+              const currentTimestamp = Date.now();
+              
+              // Save ALL frame data to Firebase
+              const allFrameData = {
+                // Antagonistic Response data
+                antagonisticResponse: {
+                  critiques: critiquesToSave,
+                  usedThinkingDialogueInput: usedThinkingForThisOutput,
+                  tagMappings: pointTagMappings,
+                  context: contextData
+                },
+                
+                // All other frame data
+                thinkingDialogue: thinkingContextString || null,
+                ragContent: ragContextString || null,
+                incorporateSuggestions: incorporateSuggestionsString || null,
+                discardedPoints: discardedPointsString || null,
+                consensusPoints: consensusPointsString || null,
+                designProposal: stickyNotes || null,
+                designChallenge: designChallenge || null,
+                
+                // Metadata
+                timestamp: currentTimestamp,
+                savedAt: new Date().toISOString(),
+                boardId: currentBoardId,
+                sessionId: sessionId
+              };
+              
+              // Save to main session path
+              const sessionPath = `sessions/${sessionId}/allFrameData`;
+              const sessionDataRef = ref(database, sessionPath);
+              
+              // Check for duplicates by comparing last entry
+              const lastSnapshot = await get(query(ref(database, sessionPath), orderByChild('timestamp'), limitToLast(1)));
+              let shouldSave = true;
+              
+              if (lastSnapshot.exists()) {
+                const lastEntryKey = Object.keys(lastSnapshot.val())[0];
+                const lastDataEntry = lastSnapshot.val()[lastEntryKey];
+                
+                // Simple duplicate check - compare critiques and main frame content
+                if (JSON.stringify(lastDataEntry.antagonisticResponse?.critiques) === JSON.stringify(critiquesToSave) &&
+                    JSON.stringify(lastDataEntry.thinkingDialogue) === JSON.stringify(thinkingContextString) &&
+                    JSON.stringify(lastDataEntry.ragContent) === JSON.stringify(ragContextString)) {
+                  shouldSave = false;
+                }
+              }
+              
+              if (shouldSave) {
+                await push(sessionDataRef, allFrameData);
+              }
+              
+              // Also save individual frame data for easier access
+              const framesToSave = [
+                { key: 'antagonisticResponse', data: allFrameData.antagonisticResponse },
+                { key: 'thinkingDialogue', data: allFrameData.thinkingDialogue },
+                { key: 'ragContent', data: allFrameData.ragContent },
+                { key: 'incorporateSuggestions', data: allFrameData.incorporateSuggestions },
+                { key: 'discardedPoints', data: allFrameData.discardedPoints },
+                { key: 'consensusPoints', data: allFrameData.consensusPoints },
+                { key: 'designProposal', data: allFrameData.designProposal },
+                { key: 'designChallenge', data: allFrameData.designChallenge }
+              ];
+              
+              for (const frame of framesToSave) {
+                if (frame.data) {
+                  const framePath = `sessions/${sessionId}/${frame.key}`;
+                  const frameDataRef = ref(database, framePath);
+                  await push(frameDataRef, {
+                    content: frame.data,
+                    timestamp: currentTimestamp,
+                    boardId: currentBoardId
+                  });
+                }
+              }
+              
+            } catch (saveError) {
+              console.error('Firebase save failed:', saveError);
+            }
+
+            logUserActivity({
+              action: 'generate_analysis_completed',
+              additionalData: {
+                hasThemes: false, // No themes by default
+                themedDisplay: false, // No themed display by default
+                challengeLength: designChallenge?.length || 0,
+                responseCount: critiquesToSave.length,
+                simplifiedResponseCount: 0, // No simplified by default
+                useThinkingDialogueInput: usedThinkingForThisOutput,
+                hasTagPreferences: pointTagMappings.length > 0,
+                hasRAGSynthesis: !!synthesizedRagInsights,
+                hasFrameContent: !!(thinkingContextString || ragContextString || incorporateSuggestionsString || consensusPointsString || discardedPointsString),
+                frameContentTypes: {
+                  thinking: !!thinkingContextString,
+                  rag: !!ragContextString,
+                  suggestions: !!incorporateSuggestionsString,
+                  consensus: !!consensusPointsString,
+                  discarded: !!discardedPointsString
+                },
+                duration: Date.now() - startTime 
+              }
+            }, sessionId);
+          } catch (error) {
+            Logger.error('AntagoInteract', 'Error saving analysis data to Firebase:', error);
+          }
+        })();
+
+      } catch (error) {
+        Logger.error('AntagoInteract', 'Error in comprehensive analysis generation:', error);
+        setError('Failed to generate analysis. Please try again.');
+        setLoading(false);
+        processingRef.current = false;
+        onComplete?.();
+        return;
       }
       
       // Mark as no longer loading once we have the initial results
@@ -1234,6 +1237,36 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         }
       };
       
+      // === OPTIMIZED: Use comprehensive generation for variations ===
+      const variations: any = {};
+      if (variationsToSend.principles && designPrinciplesText) {
+        variations.principles = designPrinciplesText;
+      }
+      if (variationsToSend.prompt && customPromptText) {
+        variations.prompt = customPromptText;
+      }
+
+      // Generate all requested variations in one call (if any non-RAG variations are needed)
+      let variationResults: any = {};
+      if (Object.keys(variations).length > 0) {
+        try {
+          variationResults = await OpenAIService.generateComprehensiveAnalysis(
+            designDecisionsContext,
+            {
+              designChallenge,
+              existingPoints: synthesizedPoints,
+              consensusPoints: consensusPoints,
+              pointTagMappings: currentPointTagMappings,
+              needsSimplified: false,
+              needsStandard: false,
+              variations: variations
+            }
+          );
+        } catch (error) {
+          console.error('Error generating variations:', error);
+        }
+      }
+      
       // Process each selected variation
       if (variationsToSend.rag) {
         try {
@@ -1261,21 +1294,11 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         }
       }
       
-      // For design principles, generate NEW points using only design principles
-      if (variationsToSend.principles && designPrinciplesText) {
+      // For design principles, use generated variation
+      if (variationsToSend.principles && variationResults.variations?.principles) {
         try {
-          // Generate a NEW analysis using only the design principles
-          const principlesResponse = await OpenAIService.generateAnalysis(
-            designDecisionsContext,  // Use the created context
-            designChallenge,
-            synthesizedPoints, 
-            consensusPoints,
-            designPrinciplesText, // Use design principles
-            undefined // No custom prompt
-          );
-          
           // Split the response into individual points
-          const points = splitResponse(principlesResponse);
+          const points = splitResponse(variationResults.variations.principles);
           
           // Create sticky notes with horizontal layout
           await StickyNoteService.createHorizontalStickyNotes(
@@ -1286,25 +1309,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             'light_yellow'
           );
         } catch (error) {
-          console.error('Error generating principles-based analysis:', error);
+          console.error('Error creating principles-based sticky notes:', error);
         }
       }
       
-      // For custom prompt, generate NEW points using only custom prompt
-      if (variationsToSend.prompt && customPromptText) {
+      // For custom prompt, use generated variation
+      if (variationsToSend.prompt && variationResults.variations?.prompt) {
         try {
-          // Generate a NEW analysis using only the custom prompt
-          const customPromptResponse = await OpenAIService.generateAnalysis(
-            designDecisionsContext,  // Use the created context
-            designChallenge,
-            synthesizedPoints, 
-            consensusPoints,
-            undefined, // No design principles
-            customPromptText // Use custom prompt
-          );
-          
           // Split the response into individual points
-          const points = splitResponse(customPromptResponse);
+          const points = splitResponse(variationResults.variations.prompt);
           
           // Create sticky notes with horizontal layout
           await StickyNoteService.createHorizontalStickyNotes(
@@ -1315,7 +1328,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             'light_green'
           );
         } catch (error) {
-          console.error('Error generating custom-prompt-based analysis:', error);
+          console.error('Error creating custom-prompt-based sticky notes:', error);
         }
       }
       
@@ -1357,7 +1370,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     synthesizedPoints,
     consensusPoints,
     stickyNotes,
-    sessionId
+    sessionId,
+    currentPointTagMappings
   ]);
 
   /**
@@ -1424,6 +1438,80 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           continue; // Skip to next point
         }
 
+        // === DEBUG LOGGING: Original sticky position ===
+        console.log('🔍 UNPACK DEBUG - Original Sticky Position:', {
+          pointText: pointToUnpack.substring(0, 50) + '...',
+          originalSticky: {
+            id: originalSticky.id,
+            x: originalSticky.x,
+            y: originalSticky.y,
+            width: originalSticky.width,
+            height: originalSticky.height,
+            parentId: originalSticky.parentId || 'none'
+          }
+        });
+
+        // === CONVERT TO ABSOLUTE COORDINATES ===
+        // Get the frame if sticky is inside one
+        let parentFrame = null;
+        if (originalSticky.parentId) {
+          try {
+            const frames = await miro.board.get({ type: 'frame' });
+            parentFrame = frames.find(frame => frame.id === originalSticky.parentId);
+          } catch (error) {
+            console.warn('Could not fetch parent frame:', error);
+          }
+        }
+
+        // Calculate absolute position based on Miro's coordinate system:
+        // - Frame coordinates (x,y) = frame CENTER relative to board center
+        // - Sticky coordinates inside frame (x,y) = sticky CENTER relative to frame TOP-LEFT corner
+        let absoluteX, absoluteY;
+        
+        if (parentFrame) {
+          // Convert frame center to frame top-left corner (relative to board center)
+          const frameTopLeftX = parentFrame.x - (parentFrame.width / 2);
+          const frameTopLeftY = parentFrame.y - (parentFrame.height / 2);
+          
+          // Add sticky's position (relative to frame top-left) to get absolute position
+          absoluteX = frameTopLeftX + originalSticky.x;
+          absoluteY = frameTopLeftY + originalSticky.y;
+        } else {
+          // Sticky is directly on board - coordinates already relative to board center
+          absoluteX = originalSticky.x;
+          absoluteY = originalSticky.y;
+        }
+
+        // === DEBUG LOGGING: Coordinate conversion ===
+        console.log('🔍 UNPACK DEBUG - Coordinate Conversion:', {
+          hasParentFrame: !!parentFrame,
+          parentFrame: parentFrame ? {
+            id: parentFrame.id,
+            title: parentFrame.title,
+            center: { x: parentFrame.x, y: parentFrame.y },
+            dimensions: { width: parentFrame.width, height: parentFrame.height },
+            topLeftCorner: {
+              x: parentFrame.x - (parentFrame.width / 2),
+              y: parentFrame.y - (parentFrame.height / 2)
+            }
+          } : null,
+          stickyRelativeToFrame: parentFrame ? {
+            x: originalSticky.x,
+            y: originalSticky.y
+          } : null,
+          stickyRelativeToBoard: !parentFrame ? {
+            x: originalSticky.x,
+            y: originalSticky.y
+          } : null,
+          calculatedAbsolutePosition: {
+            x: absoluteX,
+            y: absoluteY
+          },
+          conversionFormula: parentFrame 
+            ? `absolute = frameTopLeft + stickyRelative = (${parentFrame.x - (parentFrame.width / 2)}, ${parentFrame.y - (parentFrame.height / 2)}) + (${originalSticky.x}, ${originalSticky.y})`
+            : 'sticky coordinates already absolute (relative to board center)'
+        });
+
         // Generate detailed illustration as separate points
         const explanationPoints = await OpenAIService.unpackPointDetailAsPoints(
           pointToUnpack,
@@ -1432,9 +1520,22 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           allCurrentDisplayedPointsForContext // All current points for context
         );
 
-        // Calculate position for detail stickies - positioned in Antagonistic-Response area
-        const detailX = originalSticky.x + 4300; // DON'T CHANGE THIS
-        const detailY = originalSticky.y - 650; // DON'T CHANGE THIS
+        // Calculate position for detail stickies using ABSOLUTE coordinates
+        const detailX = absoluteX + 600; // Apply offset to absolute X
+        const detailY = absoluteY + 0;  // Apply offset to absolute Y
+
+        // === DEBUG LOGGING: Calculated unpack position ===
+        console.log('🔍 UNPACK DEBUG - Calculated Unpack Position:', {
+          calculatedPosition: {
+            detailX: detailX,
+            detailY: detailY,
+            offsetFromOriginal: {
+              xOffset: 600,
+              yOffset: 0
+            }
+          },
+          explanationPointsCount: explanationPoints.length
+        });
 
         // Create horizontal sticky notes instead of rectangle
         const unpackedStickies = await StickyNoteService.createHorizontalStickyNotes(
@@ -1444,6 +1545,32 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           2200, // maxWidth - enough space for 4 normal-sized sticky notes (500*4 + 30*3 = 2090px)
           'light_pink' // pink color
         );
+
+        // === DEBUG LOGGING: Actual created sticky positions ===
+        if (unpackedStickies.length > 0) {
+          console.log('🔍 UNPACK DEBUG - First Unpacked Sticky Actual Position:', {
+            firstUnpackedSticky: {
+              id: unpackedStickies[0].id,
+              x: unpackedStickies[0].x,
+              y: unpackedStickies[0].y,
+              width: unpackedStickies[0].width,
+              height: unpackedStickies[0].height
+            },
+            allUnpackedStickies: unpackedStickies.map((sticky, index) => ({
+              index: index,
+              id: sticky.id,
+              x: sticky.x,
+              y: sticky.y,
+              content: sticky.content?.substring(0, 30) + '...'
+            })),
+            positionDifference: {
+              actualVsCalculated: {
+                xDiff: unpackedStickies[0].x - detailX,
+                yDiff: unpackedStickies[0].y - detailY
+              }
+            }
+          });
+        }
 
         // Create connector to first sticky note instead of rectangle
         if (unpackedStickies.length > 0) {

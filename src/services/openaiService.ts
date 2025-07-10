@@ -167,6 +167,7 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
    * @param designPrinciples - Array of design principles to prioritize
    * @param customSystemPrompt - Custom system prompt to add additional instructions
    * @param pointTagMappings - Previous point-tag mappings for learning
+   * @param discardedPoints - Points the user found irrelevant or wrong (AVOID these patterns)
    * @returns Promise resolving to the formatted analysis
    */
   public static async generateAnalysis(
@@ -177,6 +178,7 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
     designPrinciples?: string,
     customSystemPrompt?: string,
     pointTagMappings?: PointTagMapping[],
+    discardedPoints?: string[]
   ): Promise<string> {
 
     // Base system prompt template
@@ -212,11 +214,23 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
       );
     }
     
-    // Add consensus points if any
+    // Add consensus points if any - STRONG INFLUENCE
     if (consensusPoints.length > 0) {
       messageParts.push(
-        `\n\nConsensus points from the design team (please do not question or criticize these points):\n${consensusPoints.join('\n')}`
+        `\n\n--- CONSENSUS POINTS (DO NOT QUESTION OR CRITICIZE) ---\nThese are established agreements that MUST be respected:\n${consensusPoints.join('\n')}`
       );
+      systemPrompt += `\n\nCRITICAL: NEVER question, criticize, or contradict the consensus points. These are established agreements that must be fully respected.`;
+    }
+    
+    // Add discarded points if any - STRONG INFLUENCE TO AVOID
+    if (discardedPoints && discardedPoints.length > 0) {
+      messageParts.push(
+        `\n\n--- DISCARDED POINTS (AVOID THESE PATTERNS) ---\nThe user found these types of criticisms irrelevant or wrong:\n${discardedPoints.join('\n')}`
+      );
+      systemPrompt += `\n\nIMPORTANT: The user has explicitly indicated that certain types of criticism are not useful. AVOID generating points that are similar in theme, focus, or approach to the discarded points. Instead, focus on different aspects, different user groups, different stages of the design process, or different social implications. Ensure your analysis is diverse and addresses areas NOT covered by the discarded patterns.`;
+      
+      // Add heterogeneity instructions for stronger diversity
+      systemPrompt += `\n\nFor HETEROGENEITY: Since the user has provided discarded patterns, ensure your 5 points cover diverse perspectives such as: (1) different stakeholder groups, (2) different phases of implementation, (3) different scales of impact (individual vs community vs society), (4) different timeframes (immediate vs long-term), and (5) different types of risks (technical, social, ethical, economic). Avoid clustering around similar themes.`;
     }
     
     // Check for the "Previous User Feedback & Suggestions" in the userPrompt and extract it if found
@@ -446,6 +460,7 @@ Respond to the user's message in a helpful and constructive way.`;
    * @param designPrinciples - Array of design principles to prioritize
    * @param customSystemPrompt - Custom system prompt to add additional instructions
    * @param pointTagMappings - Previous point-tag mappings for learning
+   * @param discardedPoints - Points the user found irrelevant or wrong (AVOID these patterns)
    * @returns Promise resolving to array of points specific to the theme
    */
   public static async generateThemeSpecificAnalysis(
@@ -455,7 +470,8 @@ Respond to the user's message in a helpful and constructive way.`;
     consensusPoints: string[] = [],
     designPrinciples?: string,
     customSystemPrompt?: string,
-    pointTagMappings?: PointTagMapping[]
+    pointTagMappings?: PointTagMapping[],
+    discardedPoints?: string[]
   ): Promise<string[]> {
 
     // Base system prompt template
@@ -480,6 +496,14 @@ Rules:
       if (tagMappingsText) {
         systemPrompt += `\n\nPrevious points and user tags (focus on the "${themeName}" theme while considering user preferences):\n${tagMappingsText}`;
       }
+    }
+    
+    // Add discarded points guidance if any
+    if (discardedPoints && discardedPoints.length > 0) {
+      systemPrompt += `\n\nIMPORTANT: The user has indicated these types of criticism are not useful. For the "${themeName}" theme, AVOID generating points similar to these discarded patterns. Focus on different aspects of ${themeName} that haven't been covered:\n${discardedPoints.join('\n')}\n\nEnsure your "${themeName}"-focused points address different angles, user groups, or implications than the discarded patterns.`;
+      
+      // Add theme-specific heterogeneity guidance
+      systemPrompt += `\n\nFor "${themeName}" HETEROGENEITY: Generate points that explore different dimensions of this theme - consider various stakeholder perspectives, different implementation challenges, immediate vs long-term implications, and different types of risks or opportunities within the ${themeName} domain. Ensure diversity even within this focused theme.`;
     }
     
     // Check for the "Previous User Feedback & Suggestions" in the userPrompt and extract it if found
@@ -511,6 +535,7 @@ Rules:
    * @param designPrinciples - Array of design principles to prioritize
    * @param customSystemPrompt - Custom system prompt to add additional instructions
    * @param pointTagMappings - Previous point-tag mappings for learning
+   * @param discardedPoints - Points the user found irrelevant or wrong (AVOID these patterns)
    * @returns Promise resolving to array of themed responses
    */
   public static async generateAllThemeAnalyses(
@@ -520,7 +545,8 @@ Rules:
     consensusPoints: string[] = [],
     designPrinciples?: string,
     customSystemPrompt?: string,
-    pointTagMappings?: PointTagMapping[]
+    pointTagMappings?: PointTagMapping[],
+    discardedPoints?: string[]
   ): Promise<Array<{name: string, color: string, points: string[]}>> {
     // Run all theme analyses in parallel
     const themeAnalysesPromises = themes.map(theme => 
@@ -531,7 +557,8 @@ Rules:
         consensusPoints,
         designPrinciples,
         customSystemPrompt,
-        pointTagMappings
+        pointTagMappings,
+        discardedPoints
       ).then(points => ({
         name: theme.name,
         color: theme.color,
@@ -837,5 +864,143 @@ Do not make direct criticisms of the current proposals - instead, provide contex
       }
       throw error;
     }
+  }
+
+  /**
+   * Comprehensive generation method that handles all analysis variants in one optimized call
+   * @param userPrompt - The combined design decisions to analyze
+   * @param options - Configuration object with all the options
+   * @returns Promise resolving to structured response with all variants
+   */
+  public static async generateComprehensiveAnalysis(
+    userPrompt: string,
+    options: {
+      designChallenge: string;
+      themes?: Array<{name: string, color: string}>;
+      existingPoints?: string[];
+      consensusPoints?: string[];
+      designPrinciples?: string;
+      customSystemPrompt?: string;
+      pointTagMappings?: PointTagMapping[];
+      discardedPoints?: string[];
+      needsSimplified?: boolean;
+      needsStandard?: boolean;
+      variations?: {
+        principles?: string;
+        prompt?: string;
+      };
+    }
+  ): Promise<{
+    themedResponses?: Array<{name: string, color: string, points: string[]}>;
+    standardResponse?: string;
+    simplifiedResponse?: string;
+    variations?: {
+      principles?: string;
+      prompt?: string;
+    };
+  }> {
+    const results: any = {};
+
+    // Main Analysis Generation - run in parallel
+    const mainPromises: Promise<any>[] = [];
+
+    // Generate themed analysis if themes are provided
+    if (options.themes && options.themes.length > 0) {
+      mainPromises.push(
+        this.generateAllThemeAnalyses(
+          userPrompt,
+          options.themes,
+          options.designChallenge,
+          options.consensusPoints || [],
+          options.designPrinciples,
+          options.customSystemPrompt,
+          options.pointTagMappings,
+          options.discardedPoints
+        ).then(themed => {
+          results.themedResponses = themed;
+          return themed;
+        })
+      );
+    }
+
+    // Generate standard analysis only if specifically needed or no themes
+    if (options.needsStandard || !options.themes || options.themes.length === 0) {
+      mainPromises.push(
+        this.generateAnalysis(
+          userPrompt,
+          options.designChallenge,
+          options.existingPoints || [],
+          options.consensusPoints || [],
+          options.designPrinciples,
+          options.customSystemPrompt,
+          options.pointTagMappings,
+          options.discardedPoints
+        ).then(standard => {
+          results.standardResponse = standard;
+          return standard;
+        })
+      );
+    }
+
+    // Generate variations if requested
+    if (options.variations?.principles) {
+      mainPromises.push(
+        this.generateAnalysis(
+          userPrompt,
+          options.designChallenge,
+          options.existingPoints || [],
+          options.consensusPoints || [],
+          options.variations.principles,
+          undefined,
+          options.pointTagMappings,
+          options.discardedPoints
+        ).then(principlesResponse => {
+          if (!results.variations) results.variations = {};
+          results.variations.principles = principlesResponse;
+          return principlesResponse;
+        })
+      );
+    }
+
+    if (options.variations?.prompt) {
+      mainPromises.push(
+        this.generateAnalysis(
+          userPrompt,
+          options.designChallenge,
+          options.existingPoints || [],
+          options.consensusPoints || [],
+          undefined,
+          options.variations.prompt,
+          options.pointTagMappings,
+          options.discardedPoints
+        ).then(promptResponse => {
+          if (!results.variations) results.variations = {};
+          results.variations.prompt = promptResponse;
+          return promptResponse;
+        })
+      );
+    }
+
+    // Wait for all main analyses to complete
+    await Promise.all(mainPromises);
+
+    // Post-processing: Generate simplified versions if needed
+    if (options.needsSimplified && results.standardResponse) {
+      const simplifiedPromise = this.simplifyAnalysis(results.standardResponse).then(simplified => {
+        results.simplifiedResponse = simplified;
+        return simplified;
+      });
+      
+      await simplifiedPromise;
+    }
+
+    Logger.log('OPENAI-API', 'Comprehensive analysis completed', {
+      hasThemed: !!results.themedResponses,
+      hasStandard: !!results.standardResponse,
+      hasSimplified: !!results.simplifiedResponse,
+      hasVariations: !!results.variations
+    });
+
+    return results;
   }
 } 
