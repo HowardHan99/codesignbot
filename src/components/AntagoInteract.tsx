@@ -242,6 +242,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       let thinkingContextString = ''; // Parsed thinking process
       let ragContextString = ''; // Parsed external knowledge/RAG
       let incorporateSuggestionsString = ''; // New: User responses to previous analysis points
+      let synthesizedRagInsights = ''; // NEW: Synthesized insights from RAG content
       
       // Always check for the frame, even if toggle is off (for debugging)
       try {
@@ -282,6 +283,44 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         // Update the current RAG content state
         setCurrentRagContent(ragContextString);
         
+        // === NEW: Synthesize RAG content into actionable insights ===
+        if (ragContextString && ragContextString.trim()) {
+          try {
+            Logger.log('AntagoInteract', 'Synthesizing RAG content into insights...');
+            
+            // Create base context for synthesis
+            const baseDesignContext = notes.map((noteContent, index) => 
+              `Design Decision ${index + 1}: ${noteContent || ''}`
+            ).join('\n');
+            
+            // If RAG content is very large (>10k chars), warn and truncate to avoid timeouts
+            let contentToSynthesize = ragContextString;
+            if (ragContextString.length > 10000) {
+              Logger.warn('AntagoInteract', `RAG content is very large (${ragContextString.length} chars), truncating to 10k chars to avoid timeout`);
+              contentToSynthesize = ragContextString.substring(0, 10000) + '\n\n[Content truncated due to length...]';
+            }
+            
+            synthesizedRagInsights = await OpenAIService.synthesizeRagInsights(
+              contentToSynthesize,
+              designChallenge,
+              baseDesignContext
+            );
+            
+            Logger.log('AntagoInteract', 'Successfully synthesized RAG insights', {
+              originalLength: ragContextString.length,
+              processedLength: contentToSynthesize.length,
+              synthesizedLength: synthesizedRagInsights.length,
+              wasTruncated: contentToSynthesize.length < ragContextString.length
+            });
+          } catch (synthesisError) {
+            Logger.warn('AntagoInteract', 'Failed to synthesize RAG insights, proceeding without synthesis:', synthesisError);
+            // Don't fall back to original content - just proceed without synthesis
+            // The original content will still be available for logging/debugging
+            synthesizedRagInsights = '';
+          }
+        }
+        // === END RAG SYNTHESIS ===
+        
         // Combine for backwards compatibility if needed
         dialogueContext = [ragContextString, thinkingContextString].filter(Boolean).join('\n\n');
         
@@ -316,14 +355,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         baseMessage: baseMessage
       });
         
-      // Construct the enhanced message with clear labels for the LLM
-      let enhancedContextParts: string[] = [];
-      if (ragContextString) {
-        enhancedContextParts.push(`Relevant Knowledge Context:\n${ragContextString}`);
-      }
-      if (thinkingContextString) {
-        enhancedContextParts.push(`Thinking Process Context:\n${thinkingContextString}`);
-      }
+        // Construct the enhanced message with clear labels for the LLM
+        let enhancedContextParts: string[] = [];
+        if (synthesizedRagInsights) {
+          enhancedContextParts.push(`Synthesized RAG Insights (Examples & Considerations):\n${synthesizedRagInsights}`);
+        }
+        // Note: Raw RAG content removed to avoid redundancy with synthesized insights
+        if (thinkingContextString) {
+          enhancedContextParts.push(`Thinking Process Context:\n${thinkingContextString}`);
+        }
       
       // Use provided incorporate suggestions if available, otherwise check for them in the userPrompt
       let hasFeedback = false;
@@ -362,6 +402,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         hasDialogue: !!dialogueContext,
         hasThinkingParsed: !!thinkingContextString,
         hasRAGParsed: !!ragContextString,
+        hasSynthesizedRAG: !!synthesizedRagInsights,
         hasIncorporateSuggestions: hasFeedback,
         hasTagPreferences: pointTagMappings.length > 0
       });
@@ -419,7 +460,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       console.log('🔍 === MESSAGE COMPONENTS BEING SENT TO OPENAI ===');
       console.log('1. TAG PAIRS:', pointTagMappings.length > 0 ? pointTagMappings : 'No tags found');
       console.log('2. THINKING DIALOGUE:', thinkingContextString || 'None');
-      console.log('3. RAG CONTENT:', ragContextString || 'None');
+      console.log('3. RAG CONTENT (Raw):', ragContextString ? `${ragContextString.length} chars (not sent to AI)` : 'None');
+      console.log('3a. SYNTHESIZED RAG INSIGHTS:', synthesizedRagInsights || 'None');
       console.log('4. INCORPORATE SUGGESTIONS:', incorporateSuggestionsString || 'None');
       console.log('5. DESIGN CHALLENGE:', designChallenge || 'None');
       console.log('6. CONSENSUS POINTS:', initialConsensusPoints && initialConsensusPoints.length > 0 ? initialConsensusPoints : 'None');

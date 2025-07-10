@@ -763,4 +763,79 @@ All Current Critique Points (for context, do not elaborate on these, only the on
       throw error; // Re-throw to be caught by caller
     }
   }
+
+  /**
+   * Synthesizes RAG content into actionable insights and takeaways
+   * @param ragContent - The raw RAG content to synthesize
+   * @param designChallenge - The current design challenge for context
+   * @param designProposals - The current design proposals/decisions
+   * @returns Promise resolving to synthesized insights as examples
+   */
+  public static async synthesizeRagInsights(
+    ragContent: string,
+    designChallenge: string,
+    designProposals: string
+  ): Promise<string> {
+    const systemPrompt = `You are a design research analyst who synthesizes external knowledge and insights for design teams.
+
+Your task is to analyze the provided external knowledge/research content and extract key insights that could inform design criticism for the current design challenge.
+
+DESIGN CHALLENGE: ${designChallenge || 'No challenge specified'}
+
+CURRENT DESIGN PROPOSALS TO INFORM:
+${designProposals}
+
+Instructions:
+1. Extract 3-5 key insights, patterns, or lessons from the external content
+2. For each insight, briefly explain how it might relate to the current design challenge and proposals
+3. Present these as EXAMPLES and CONSIDERATIONS rather than strict requirements
+4. Focus on insights that could help identify potential issues, risks, or opportunities
+5. Keep insights actionable and relevant to design criticism
+6. Use language like "Consider that...", "Research suggests...", "Similar projects have shown...", "One pattern to be aware of..."
+
+Format your response as clear, numbered insights that can be used to inform (not dictate) the design analysis.
+
+Do not make direct criticisms of the current proposals - instead, provide contextual insights that can help inform better criticism.`;
+
+    try {
+      // Use a custom timeout for synthesis since it can be complex
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout for synthesis
+
+      const response = await fetch('/api/openaiwrap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userPrompt: ragContent,
+          systemPrompt,
+          useGpt4: true // Use GPT-4 for synthesis
+        }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'No error text available');
+        throw new Error(`API error (${response.status}): ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      Logger.log('OPENAI-API', 'Successfully synthesized RAG insights', {
+        ragContentLength: ragContent.length,
+        responseLength: result.response.length
+      });
+
+      return result.response;
+    } catch (error: any) {
+      Logger.error('OPENAI-API', 'Error synthesizing RAG insights:', error);
+      if (error.name === 'AbortError') {
+        throw new Error('RAG synthesis timed out after 120 seconds - content may be too large');
+      }
+      throw error;
+    }
+  }
 } 
