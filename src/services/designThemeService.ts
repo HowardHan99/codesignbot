@@ -34,7 +34,7 @@ interface ThemeResponse {
  * Service for generating and visualizing design themes from content
  */
 export class DesignThemeService {
-  private static readonly THEME_FRAME_NAME = 'Antagonistic-Response';
+  private static readonly THEME_FRAME_NAME = frameConfig.names.antagonisticResponse;
   private static readonly THEME_COLORS = [
     'light_green', 'light_blue', 'light_yellow', 
     'light_pink', 'violet', 'light_gray'

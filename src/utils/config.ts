@@ -15,7 +15,7 @@ export const frameConfig = {
     designChallenge: 'Design-Challenge',
     sketchReference: 'Sketch-Reference',
     designProposal: 'Design-Proposal',
-    antagonisticResponse: 'Antagonistic-Response',
+    antagonisticResponse: 'Agent-Response',
     consensus: 'Consensus',
     incorporateSuggestions: 'Incorporate-Suggestions',
     thinkingDialogue: 'Thinking-Dialogue',
@@ -55,10 +55,11 @@ export const stickyConfig = {
         width: 500,
         height: 250
       },
-      'Antagonistic-Response': {
+      'Agent-Response': {
         shape: 'rectangle',
         width: 500,
-        height: 250
+        height: 250,
+        color: 'light_pink'
       }
     }
   },

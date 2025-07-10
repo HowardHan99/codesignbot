@@ -4,6 +4,7 @@ import { StickyNoteService } from '../services/miro/stickyNoteService';
 import { ProcessedDesignPoint } from '../types/common';
 import { MiroApiClient } from '../services/miro/miroApiClient';
 import { DesignThemeService } from '../services/designThemeService';
+import { frameConfig } from '../utils/config';
 
 /**
  * Interface for themed responses
@@ -20,7 +21,7 @@ interface SendtoBoardProps {
   useThemedDisplay?: boolean;
 }
 
-const FRAME_TITLE = 'Antagonistic-Response';
+const FRAME_TITLE = frameConfig.names.antagonisticResponse;
 
 export const SendtoBoard: FC<SendtoBoardProps> = ({ 
   responses, 
