@@ -7,6 +7,7 @@ import { StickyNoteService } from './miro/stickyNoteService';
 import { MiroApiClient } from './miro/miroApiClient';
 import { saveConsensusPoints } from '../utils/firebase';
 import { Logger } from '../utils/logger';
+import { frameConfig } from '../utils/config';
 
 // Log context for this service
 const LOG_CONTEXT = 'MIRO-SERVICE';
@@ -212,17 +213,23 @@ export async function readPointTagMappings(): Promise<PointTagMapping[]> {
       frameNames: allFrames.map(f => ({ title: f.title, id: f.id }))
     });
     
-    const antagonisticFrames = allFrames.filter(frame => 
-      frame.title?.includes('Antagonistic') || frame.title?.includes('Analysis')
+    // Use frame name from config for maintainability
+    const targetFrameName = frameConfig.names.antagonisticResponse;
+    const targetFrames = allFrames.filter(frame => 
+      frame.title?.includes(targetFrameName) || 
+      // Keep backward compatibility for older frame names
+      frame.title?.includes('Antagonistic') || 
+      frame.title?.includes('Analysis')
     );
     
-    Logger.log('MiroService', 'Filtered antagonistic frames:', {
-      antagonisticFramesCount: antagonisticFrames.length,
-      antagonisticFrames: antagonisticFrames.map(f => ({ title: f.title, id: f.id }))
+    Logger.log('MiroService', 'Filtered target frames for tag reading:', {
+      targetFrameName: targetFrameName,
+      targetFramesCount: targetFrames.length,
+      targetFrames: targetFrames.map(f => ({ title: f.title, id: f.id }))
     });
 
-    if (antagonisticFrames.length === 0) {
-      Logger.log('MiroService', 'No antagonistic analysis frames found for tag reading');
+    if (targetFrames.length === 0) {
+      Logger.log('MiroService', `No frames found matching "${targetFrameName}" or legacy names for tag reading`);
       return [];
     }
 
@@ -244,8 +251,8 @@ export async function readPointTagMappings(): Promise<PointTagMapping[]> {
 
     const pointTagMappings: PointTagMapping[] = [];
 
-    // Process sticky notes in antagonistic frames
-    for (const frame of antagonisticFrames) {
+    // Process sticky notes in target frames
+    for (const frame of targetFrames) {
       const frameStickyNotes = allStickyNotes.filter(note => note.parentId === frame.id);
       
       Logger.log('MiroService', `Processing frame "${frame.title}":`, {

@@ -619,24 +619,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               const sessionPath = `sessions/${sessionId}/allFrameData`;
               const sessionDataRef = ref(database, sessionPath);
               
-              // Check for duplicates by comparing last entry
-              const lastSnapshot = await get(query(ref(database, sessionPath), orderByChild('timestamp'), limitToLast(1)));
-              let shouldSave = true;
-              
-              if (lastSnapshot.exists()) {
-                const lastEntryKey = Object.keys(lastSnapshot.val())[0];
-                const lastDataEntry = lastSnapshot.val()[lastEntryKey];
-                
-                // Simple duplicate check - compare critiques and main frame content
-                if (JSON.stringify(lastDataEntry.antagonisticResponse?.critiques) === JSON.stringify(critiquesToSave) &&
-                    JSON.stringify(lastDataEntry.thinkingDialogue) === JSON.stringify(thinkingContextString) &&
-                    JSON.stringify(lastDataEntry.ragContent) === JSON.stringify(ragContextString)) {
-                  shouldSave = false;
-                }
-              }
-              
-              if (shouldSave) {
+              // Simply save the data without duplicate checking to avoid Firebase indexing requirements
+              try {
                 await push(sessionDataRef, allFrameData);
+                Logger.log('AntagoInteract', 'Successfully saved frame data to Firebase');
+              } catch (firebaseError) {
+                Logger.warn('AntagoInteract', 'Firebase save failed, continuing without persistence:', firebaseError);
+                // Continue execution even if Firebase save fails
               }
               
               // Also save individual frame data for easier access
@@ -653,13 +642,18 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               
               for (const frame of framesToSave) {
                 if (frame.data) {
-                  const framePath = `sessions/${sessionId}/${frame.key}`;
-                  const frameDataRef = ref(database, framePath);
-                  await push(frameDataRef, {
-                    content: frame.data,
-                    timestamp: currentTimestamp,
-                    boardId: currentBoardId
-                  });
+                  try {
+                    const framePath = `sessions/${sessionId}/${frame.key}`;
+                    const frameDataRef = ref(database, framePath);
+                    await push(frameDataRef, {
+                      content: frame.data,
+                      timestamp: currentTimestamp,
+                      boardId: currentBoardId
+                    });
+                  } catch (frameError) {
+                    Logger.warn('AntagoInteract', `Failed to save frame data for ${frame.key}:`, frameError);
+                    // Continue with next frame even if one fails
+                  }
                 }
               }
               
@@ -720,16 +714,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       processingRef.current = false;
     }
   }, [
-    designChallenge, 
-    imageContext, 
-    isSimplifiedMode, 
-    onComplete, 
-    onResponsesUpdate, 
-    selectedTone, 
-    synthesizedPoints, 
-    initialConsensusPoints,
-    useThemedDisplay, 
-    useThinkingDialogue, 
+    // Removed many dependencies that cause unnecessary re-renders
+    // Keep only essential ones that truly require re-processing
     sessionId,
     incorporateSuggestions
   ]);
@@ -741,7 +727,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       processNotes(stickyNotes, shouldRefresh || false)
         .catch(console.error);
     }
-  }, [stickyNotes, shouldRefresh, processNotes, sessionId, designChallenge]);
+  }, [stickyNotes, shouldRefresh, sessionId, designChallenge]);
 
   /**
    * Toggle between standard and thinking dialogue enhanced analysis
@@ -1163,7 +1149,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         onResponsesUpdate?.(splitResponse(currentResponses[0]));
       }
     }
-  }, [isSimplifiedMode, useThemedDisplay, responses, simplifiedResponses, themedResponses, onResponsesUpdate]);
+  }, [isSimplifiedMode, useThemedDisplay, responses, simplifiedResponses, themedResponses]); // Removed onResponsesUpdate to prevent loops
 
   // Reset stored responses when analysis is refreshed
   useEffect(() => {
@@ -1286,7 +1272,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               positions.rag.x,
               positions.rag.y,
               positions.rag.width,
-              'light_blue'
+              'light_blue',
+              variedResponsesFrame // Pass the frame for proper parent-child relationship
             );
           }
         } catch (error) {
@@ -1306,7 +1293,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             positions.principles.x,
             positions.principles.y,
             positions.principles.width,
-            'light_yellow'
+            'light_yellow',
+            variedResponsesFrame // Pass the frame for proper parent-child relationship
           );
         } catch (error) {
           console.error('Error creating principles-based sticky notes:', error);
@@ -1325,7 +1313,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             positions.prompt.x,
             positions.prompt.y,
             positions.prompt.width,
-            'light_green'
+            'light_green',
+            variedResponsesFrame // Pass the frame for proper parent-child relationship
           );
         } catch (error) {
           console.error('Error creating custom-prompt-based sticky notes:', error);
@@ -1357,21 +1346,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setIsVariationLoading(false);
     }
   }, [
-    designPrinciplesText, 
-    customPromptText, 
+    // Reduced dependencies to only essential ones that affect the core logic
     variationsToSend, 
-    responses, 
-    simplifiedResponses, 
-    thinkingResponses, 
-    thinkingSimplifiedResponses, 
-    isSimplifiedMode, 
-    useThinkingDialogue,
-    designChallenge,
-    synthesizedPoints,
-    consensusPoints,
-    stickyNotes,
     sessionId,
-    currentPointTagMappings
+    stickyNotes
   ]);
 
   /**
@@ -1614,18 +1592,11 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       setIsLoadingUnpack(false);
     }
   }, [
+    // Reduced dependencies to only essential ones
     selectedPointsForUnpack, 
     stickyNotes, 
     designChallenge, 
-    sessionId, 
-    isSimplifiedMode, 
-    responses, 
-    simplifiedResponses, 
-    themedResponses, 
-    thinkingResponses, 
-    thinkingSimplifiedResponses, 
-    useThemedDisplay, 
-    useThinkingDialogue,
+    sessionId,
     setError
   ]);
 

@@ -173,6 +173,95 @@ export class StickyNoteService {
   }
 
   /**
+   * Create multiple sticky notes for content that exceeds character limit with proper frame assignment
+   * @param frame The frame to add sticky notes to
+   * @param content The content to split
+   * @param baseX Base X position
+   * @param baseY Base Y position
+   * @param color The color to use for all sticky notes
+   * @param width Width for the sticky notes
+   * @param shape The shape to use for the sticky notes
+   * @private
+   * @returns Object containing created stickies array and the number of row spaces consumed
+   */
+  private static async createMultipleStickyNotesWithFrameAdd(
+    frame: Frame,
+    content: string,
+    baseX: number,
+    baseY: number,
+    color: string,
+    width: number,
+    shape: 'square' | 'rectangle' = 'square'
+  ): Promise<{stickies: any[], rowSpacesUsed: number}> {
+    // CONFIGURABLE: Adjust this value to control spacing between connected sticky notes
+    const CONNECTED_STICKY_SPACING = 200;  // Space between connected stickies
+    
+    // Split the content into chunks that fit within the character limit
+    const chunks = this.splitContentIntoChunks(content, this.STICKY_CHAR_LIMIT);
+    
+    // Create an array to hold the created sticky notes
+    const stickies: any[] = [];
+    
+    // Adjust the first sticky color to show it's the primary content
+    const adjustedColor = color; // Keep the original color for the first sticky
+    
+    try {
+      // Create sticky notes for each chunk
+      for (let i = 0; i < chunks.length; i++) {
+        // Calculate offset from the base position for each sticky
+        const yOffset = i * CONNECTED_STICKY_SPACING;
+        
+        // Append continuation marker if this is not the first chunk
+        let chunkContent = chunks[i];
+        if (i > 0) {
+          chunkContent = `(continued) ${chunkContent}`;
+        }
+        
+        // Create the sticky note
+        const sticky = await MiroApiClient.createStickyNote({
+          content: chunkContent,
+          x: baseX,
+          y: baseY + yOffset,
+          width: width,
+          shape: shape,
+          style: {
+            fillColor: adjustedColor
+          }
+        });
+        
+        // =========================================================================
+        // NEW: Properly add each sticky note to frame as child
+        // =========================================================================
+        if (sticky) {
+          try {
+            await frame.add(sticky);
+            stickies.push(sticky);
+            Logger.log('VR-STICKY', `Successfully added multi-sticky note ${i+1}/${chunks.length} (ID: ${sticky.id}) to frame "${frame.title}" as child`);
+          } catch (addError) {
+            Logger.warn('VR-STICKY', `Failed to add multi-sticky note ${i+1} to frame as child: ${addError}`);
+            stickies.push(sticky); // Still add to array even if frame assignment failed
+          }
+        }
+        
+        // Short delay between sticky creation to avoid rate limiting
+        await delay(50);
+      }
+      
+      // Return the array of created stickies and the number of row spaces used
+      return {
+        stickies: stickies,
+        rowSpacesUsed: chunks.length  // Each chunk takes up one row space
+      };
+    } catch (error) {
+      console.error('Error creating multiple sticky notes with frame add:', error);
+      return {
+        stickies: stickies,
+        rowSpacesUsed: stickies.length || 1  // Use the actual count or minimum 1
+      };
+    }
+  }
+
+  /**
    * Create a new sticky note with relevance score
    * @param frame The frame to place the sticky note in
    * @param content The content of the sticky note
@@ -253,24 +342,21 @@ export class StickyNoteService {
       }
       
       // =========================================================================
-      // IMPORTANT: Sticky Note Positioning for Frame Assignment
+      // REVISED: Proper Frame Assignment Using frame.add()
       // =========================================================================
-      // In Miro, sticky notes are automatically assigned to a frame based on their
-      // position coordinates. To ensure a sticky appears in the desired frame:
-      // 1. It MUST be positioned within the frame's bounds
-      // 2. There is NO API to directly set the parentId
-      // 3. Attempting to update parentId after creation does NOT work
-      // 4. The sticky note must be created with coordinates inside the frame
+      // Instead of relying on coordinate-based frame assignment, we:
+      // 1. Create the sticky note first with coordinates that place it inside the frame
+      // 2. Use frame.add() to establish proper parent-child relationship
+      // 3. The coordinates become relative to frame's top-left corner after add()
       // =========================================================================
       
-      // Calculate the frame bounds
+      // Calculate the frame bounds for validation
       const frameLeft = frame.x - frame.width/2;
       const frameTop = frame.y - frame.height/2;
       const frameRight = frame.x + frame.width/2;
       const frameBottom = frame.y + frame.height/2;
       
       // Ensure the position is within the frame bounds with margin
-      // This is CRITICAL for proper frame assignment
       const margin = 10; // Margin from frame edge
       const adjustedX = Math.max(
         frameLeft + width/2 + margin, 
@@ -295,13 +381,14 @@ export class StickyNoteService {
       }
       
       Logger.log('STICKY-POS', `Adjusted position (within frame bounds): X=${adjustedX.toFixed(0)}, Y=${adjustedY.toFixed(0)}`);
+      
       // HANDLE MIRO'S CHARACTER LIMIT
       
       // Check if content exceeds the character limit
       if (content.length > this.STICKY_CHAR_LIMIT) {
         console.log(`Content exceeds character limit (${content.length} > ${this.STICKY_CHAR_LIMIT}), creating multiple sticky notes`);
         // Create multiple sticky notes for the long content
-        const { stickies, rowSpacesUsed } = await this.createMultipleStickyNotes(
+        const { stickies, rowSpacesUsed } = await this.createMultipleStickyNotesWithFrameAdd(
           frame,
           content,
           adjustedX,
@@ -328,6 +415,20 @@ export class StickyNoteService {
             fillColor: color
           }
         });
+        
+        // =========================================================================
+        // NEW: Properly add sticky note to frame as child
+        // =========================================================================
+        if (sticky) {
+          try {
+            // Add the sticky note to the frame to establish parent-child relationship
+            await frame.add(sticky);
+            Logger.log('VR-STICKY', `Successfully added sticky note (ID: ${sticky.id}) to frame "${frame.title}" as child`);
+          } catch (addError) {
+            Logger.warn('VR-STICKY', `Failed to add sticky note to frame as child: ${addError}. Sticky was created but may not have proper parent-child relationship.`);
+            // Note: The sticky note was still created, just may not have proper parentId
+          }
+        }
         
         Logger.log('VR-STICKY', `StickyNoteService: Single sticky note created. ID: ${sticky?.id}`, { content: content.substring(0,50) });
         return { sticky, rowSpacesUsed: 1 };
@@ -834,6 +935,7 @@ export class StickyNoteService {
    * @param baseY Base Y position to start from
    * @param maxWidth Maximum width available for the layout
    * @param color Color for the sticky notes
+   * @param frame Optional frame to add sticky notes to as children
    * @returns Array of created sticky notes
    */
   public static async createHorizontalStickyNotes(
@@ -841,7 +943,8 @@ export class StickyNoteService {
     baseX: number, 
     baseY: number, 
     maxWidth: number,
-    color: string
+    color: string,
+    frame?: Frame
   ): Promise<any[]> {
     if (!points.length) return [];
     
@@ -876,6 +979,19 @@ export class StickyNoteService {
         });
         
         if (sticky) {
+          // =========================================================================
+          // NEW: Properly add sticky note to frame as child if frame is provided
+          // =========================================================================
+          if (frame) {
+            try {
+              await frame.add(sticky);
+              Logger.log('STICKY-HORIZONTAL', `Successfully added horizontal sticky note ${i + 1}/${points.length} (ID: ${sticky.id}) to frame "${frame.title}" as child`);
+            } catch (addError) {
+              Logger.warn('STICKY-HORIZONTAL', `Failed to add horizontal sticky note ${i + 1} to frame as child: ${addError}`);
+              // Continue anyway - the sticky was still created
+            }
+          }
+          
           createdStickies.push(sticky);
           Logger.log('STICKY-HORIZONTAL', `Created sticky note ${i + 1}/${points.length} at (${x}, ${y})`);
         }

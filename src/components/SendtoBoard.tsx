@@ -106,7 +106,7 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({
             
             // Create a theme header
             const headerX = frame.x;
-            await MiroApiClient.createStickyNote({
+            const headerSticky = await MiroApiClient.createStickyNote({
               content: `Theme: ${theme.name} (${theme.points.length} points)`,
               x: headerX,
               y: headerY,
@@ -119,6 +119,18 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({
               }
             });
             
+            // =========================================================================
+            // NEW: Properly add header sticky note to frame as child
+            // =========================================================================
+            if (headerSticky) {
+              try {
+                await frame.add(headerSticky);
+                console.log(`Added theme header "${theme.name}" to frame as child`);
+              } catch (addError) {
+                console.warn(`Failed to add theme header to frame as child: ${addError}`);
+              }
+            }
+            
             // Position points in a row beneath the header
             const pointsY = rowTopEdge + (rowHeight * 0.6); // 60% down in the row
             const pointWidth = 200;
@@ -128,7 +140,7 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({
             
             // Create each point sticky note in a row
             for (const point of theme.points) {
-              await MiroApiClient.createStickyNote({
+              const pointSticky = await MiroApiClient.createStickyNote({
                 content: point,
                 x: pointX,
                 y: pointsY,
@@ -138,6 +150,18 @@ export const SendtoBoard: FC<SendtoBoardProps> = ({
                   textAlignVertical: 'top'
                 }
               });
+              
+              // =========================================================================
+              // NEW: Properly add point sticky note to frame as child
+              // =========================================================================
+              if (pointSticky) {
+                try {
+                  await frame.add(pointSticky);
+                  console.log(`Added theme point sticky to frame as child`);
+                } catch (addError) {
+                  console.warn(`Failed to add theme point sticky to frame as child: ${addError}`);
+                }
+              }
               
               // Move to next position
               pointX += pointWidth + spacing;
