@@ -111,6 +111,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   const [storedThinkingFullResponses, setStoredThinkingFullResponses] = useState<StoredResponses>({ normal: '' });
   const [storedThinkingSimplifiedResponses, setStoredThinkingSimplifiedResponses] = useState<StoredResponses>({ normal: '' });
   
+  // Add cache for synthesized RAG insights
+  const [ragSynthesisCache, setRagSynthesisCache] = useState<Map<string, string>>(new Map());
+  
   const [simplifiedResponses, setSimplifiedResponses] = useState<string[]>([]);
   const [selectedTone, setSelectedTone] = useState<string>('');
   const [synthesizedPoints, setSynthesizedPoints] = useState<string[]>([]);
@@ -248,6 +251,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       let consensusPointsString = ''; // Consensus points from frame
       let discardedPointsString = ''; // Discarded points the user found irrelevant or wrong
       let synthesizedRagInsights = ''; // NEW: Synthesized insights from RAG content
+      let existingAntagonisticPointsString = ''; // Existing antagonistic points to avoid repetition
       
       // Always check for the frame, even if toggle is off (for debugging)
       try {
@@ -259,6 +263,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         const incorporateSuggestionsFrame = allFrames.find(f => f.title === frameConfig.names.incorporateSuggestions);
         const discardedPointsFrame = allFrames.find(f => f.title === frameConfig.names.discardedPoints);
         const consensusFrame = allFrames.find(f => f.title === frameConfig.names.consensus);
+        const agentResponseFrame = allFrames.find(f => f.title === frameConfig.names.antagonisticResponse);
         
         // Function to extract content from a frame
         const extractContentFromFrame = async (frame: any) => {
@@ -289,38 +294,84 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         discardedPointsString = await extractContentFromFrame(discardedPointsFrame);
         consensusPointsString = await extractContentFromFrame(consensusFrame);
         
+        // Extract existing antagonistic points to avoid repetition
+        existingAntagonisticPointsString = await extractContentFromFrame(agentResponseFrame);
+        
         // Update the current RAG content state
         setCurrentRagContent(ragContextString);
         
         // === NEW: Synthesize RAG content into actionable insights ===
         if (ragContextString && ragContextString.trim()) {
           try {
-            Logger.log('AntagoInteract', 'Synthesizing RAG content into insights...');
+            Logger.log('AntagoInteract', 'Checking RAG content synthesis cache...');
             
             // Create base context for synthesis
             const baseDesignContext = notes.map((noteContent, index) => 
               `Design Decision ${index + 1}: ${noteContent || ''}`
             ).join('\n');
             
-            // If RAG content is very large (>10k chars), warn and truncate to avoid timeouts
-            let contentToSynthesize = ragContextString;
-            if (ragContextString.length > 10000) {
-              Logger.warn('AntagoInteract', `RAG content is very large (${ragContextString.length} chars), truncating to 10k chars to avoid timeout`);
-              contentToSynthesize = ragContextString.substring(0, 10000) + '\n\n[Content truncated due to length...]';
+            // Create cache key based on RAG content, design proposals, and challenge
+            const cacheKey = createRagCacheKey(ragContextString, notes, designChallenge);
+            
+            // Check if we have cached synthesis for this exact content
+            let cachedSynthesis = ragSynthesisCache.get(cacheKey);
+            
+            // Also check localStorage for persistence across sessions (unless forcing refresh)
+            if (!cachedSynthesis && !forceProcess && typeof window !== 'undefined') {
+              const storedSynthesis = localStorage.getItem(cacheKey);
+              if (storedSynthesis) {
+                cachedSynthesis = storedSynthesis;
+                // Update in-memory cache
+                setRagSynthesisCache(prev => new Map(prev.set(cacheKey, storedSynthesis)));
+                Logger.log('AntagoInteract', 'Found cached RAG synthesis in localStorage');
+              }
             }
             
-            synthesizedRagInsights = await OpenAIService.synthesizeRagInsights(
-              contentToSynthesize,
-              designChallenge,
-              baseDesignContext
-            );
-            
-            Logger.log('AntagoInteract', 'Successfully synthesized RAG insights', {
-              originalLength: ragContextString.length,
-              processedLength: contentToSynthesize.length,
-              synthesizedLength: synthesizedRagInsights.length,
-              wasTruncated: contentToSynthesize.length < ragContextString.length
-            });
+            if (cachedSynthesis && !forceProcess) {
+              // Use cached synthesis
+              synthesizedRagInsights = cachedSynthesis;
+              Logger.log('AntagoInteract', 'Using cached RAG synthesis', {
+                cacheKey,
+                synthesizedLength: cachedSynthesis.length
+              });
+            } else {
+              // Need to synthesize - content has changed or force refresh requested
+              const reason = forceProcess ? 'force refresh requested' : 'cache miss';
+              Logger.log('AntagoInteract', `Synthesizing RAG content into insights (${reason})...`);
+              
+              // If RAG content is very large (>10k chars), warn and truncate to avoid timeouts
+              let contentToSynthesize = ragContextString;
+              if (ragContextString.length > 10000) {
+                Logger.warn('AntagoInteract', `RAG content is very large (${ragContextString.length} chars), truncating to 10k chars to avoid timeout`);
+                contentToSynthesize = ragContextString.substring(0, 10000) + '\n\n[Content truncated due to length...]';
+              }
+              
+              synthesizedRagInsights = await OpenAIService.synthesizeRagInsights(
+                contentToSynthesize,
+                designChallenge,
+                baseDesignContext
+              );
+              
+              // Cache the result
+              setRagSynthesisCache(prev => new Map(prev.set(cacheKey, synthesizedRagInsights)));
+              
+              // Also store in localStorage for persistence
+              if (typeof window !== 'undefined') {
+                try {
+                  localStorage.setItem(cacheKey, synthesizedRagInsights);
+                } catch (error) {
+                  Logger.warn('AntagoInteract', 'Failed to store RAG synthesis in localStorage:', error);
+                }
+              }
+              
+              Logger.log('AntagoInteract', 'Successfully synthesized and cached RAG insights', {
+                cacheKey,
+                originalLength: ragContextString.length,
+                processedLength: contentToSynthesize.length,
+                synthesizedLength: synthesizedRagInsights.length,
+                wasTruncated: contentToSynthesize.length < ragContextString.length
+              });
+            }
           } catch (synthesisError) {
             Logger.warn('AntagoInteract', 'Failed to synthesize RAG insights, proceeding without synthesis:', synthesisError);
             // Don't fall back to original content - just proceed without synthesis
@@ -393,6 +444,15 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         });
       }
       
+      // Add existing antagonistic points to avoid repetition
+      if (existingAntagonisticPointsString && existingAntagonisticPointsString.trim()) {
+        enhancedContextParts.push(`Existing Antagonistic Points (Avoid Repetition):\n${existingAntagonisticPointsString}`);
+        Logger.log('AntagoInteract', 'Added existing antagonistic points to avoid repetition:', {
+          existingPointsLength: existingAntagonisticPointsString.length,
+          existingPointsPreview: existingAntagonisticPointsString.substring(0, 200) + '...'
+        });
+      }
+      
       const enhancedMessageWithContext = enhancedContextParts.length > 0
         ? `${baseMessage}\n\n${enhancedContextParts.join('\n\n')}`
         : baseMessage;
@@ -435,6 +495,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       console.log('7. DESIGN CHALLENGE:', designChallenge || 'None');
       console.log('8. CONSENSUS POINTS (Props):', initialConsensusPoints && initialConsensusPoints.length > 0 ? initialConsensusPoints : 'None');
       console.log('9. SYNTHESIZED POINTS:', synthesizedPoints && synthesizedPoints.length > 0 ? synthesizedPoints : 'None');
+      console.log('10. EXISTING ANTAGONISTIC POINTS:', existingAntagonisticPointsString ? `${existingAntagonisticPointsString.length} chars - AVOID REPETITION` : 'None');
       console.log('🔍 === FULL MESSAGE CONTENT ===');
       console.log('USER MESSAGE (complete):', enhancedMessageWithContext);
       console.log('🔍 === END MESSAGE COMPONENTS ===');
@@ -1599,6 +1660,44 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
     sessionId,
     setError
   ]);
+
+  // Helper function to create cache key for RAG synthesis
+  const createRagCacheKey = useCallback((ragContent: string, designProposals: string[], designChallenge: string): string => {
+    // Create a hash-like key from the content
+    const combinedContent = `${ragContent}|${designProposals.join('|')}|${designChallenge}`;
+    // Simple hash function for cache key
+    let hash = 0;
+    for (let i = 0; i < combinedContent.length; i++) {
+      const char = combinedContent.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return `rag_synthesis_${Math.abs(hash)}`;
+  }, []);
+
+  // Helper function to clean up old cache entries
+  const cleanupRagCache = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        // Remove old RAG synthesis entries from localStorage (keep last 10)
+        const ragKeys = Object.keys(localStorage).filter(key => key.startsWith('rag_synthesis_'));
+        if (ragKeys.length > 10) {
+          // Sort by timestamp (if available) or just remove oldest ones
+          ragKeys.sort().slice(0, ragKeys.length - 10).forEach(key => {
+            localStorage.removeItem(key);
+          });
+          Logger.log('AntagoInteract', `Cleaned up ${ragKeys.length - 10} old RAG synthesis cache entries`);
+        }
+      } catch (error) {
+        Logger.warn('AntagoInteract', 'Failed to cleanup RAG cache:', error);
+      }
+    }
+  }, []);
+
+  // Clean up cache on mount
+  useEffect(() => {
+    cleanupRagCache();
+  }, [cleanupRagCache]);
 
   if (error) {
     return <div className="error-message">{error}</div>;

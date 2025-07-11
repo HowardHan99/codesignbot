@@ -85,8 +85,8 @@ export class OpenAIService {
     if (points.length >= pointCount - 2) {
       console.log(`Found ${points.length} points, adding ${pointCount - points.length} fallbacks`);
       const fallbacks = [
-        `${fallbackText} with user needs in mind.`,
-        `${fallbackText} considering implementation constraints.`,
+        `For community members: ${fallbackText} with user needs in mind?`,
+        `For stakeholders: ${fallbackText} considering implementation constraints?`,
       ];
       
       while (points.length < pointCount) {
@@ -115,21 +115,22 @@ The original response should have contained exactly ${pointCount} distinct criti
 
 Your task:
 1. Identify ${pointCount} distinct critical points from the text
-2. Format each point as a clear, standalone criticism
+2. Format each point using this exact format: "For [specific stakeholder group]: [A potential conflict or concern they might raise - can be phrased as a question]"
 3. Return exactly ${pointCount} points, numbered 1-${pointCount}
 4. If there aren't enough distinct points, create additional relevant ones based on the context
-5. Each point should be concise but complete
+5. Each point should focus on a different stakeholder group
+6. Points should be concise but complete
 
 Format your response as exactly ${pointCount} numbered points, with one point per line:
-1. First point
-2. Second point
+1. For [stakeholder]: [concern/question]
+2. For [stakeholder]: [concern/question]
 ...and so on.
 
-Do not include any introduction, explanation, or conclusion. Just the ${pointCount} numbered points.`;
+Do not include any introduction, explanation, or conclusion. Just the ${pointCount} numbered points in stakeholder format.`;
 
     try {
       const result = await this.makeRequest('/api/openaiwrap', {
-        userPrompt: `Malformed response that needs reformatting into ${pointCount} distinct points:\n\n${malformedResponse}`,
+        userPrompt: `Malformed response that needs reformatting into ${pointCount} distinct stakeholder-focused points:\n\n${malformedResponse}`,
         systemPrompt,
         useGpt4: true 
       });
@@ -151,9 +152,9 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
       return formattedPoints.slice(0, pointCount);
     } catch (error) {
       console.error('Error in reformatting response:', error);
-      // If reformatting fails, return generic fallbacks
+      // If reformatting fails, return generic fallbacks in stakeholder format
       return Array(pointCount).fill(null).map((_, i) => 
-        `This design element needs further analysis. ${i + 1}`
+        `For stakeholders: This design element needs further analysis - what are the potential impacts? ${i + 1}`
       );
     }
   }
@@ -182,7 +183,26 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
   ): Promise<string> {
 
     // Base system prompt template
-    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge with the following conditions background, and design challenge: "${designChallenge || 'No challenge specified'}". Provide exactly 5 provacative points that identify potential problems or conflicts in these decisions. The  points should focus on constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design proposals. The points should be concise and suitable for a stickynote length. It should also be understood by a non-design audience - try to avoid design jargon and big words. `;
+    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge with the following conditions background, and design challenge, the challenge is redesign a public website: "${designChallenge || 'No challenge specified'}". 
+
+Provide exactly 5 provocative points that identify potential problems or conflicts in these decisions. Each point MUST follow this exact format:
+
+"For [specific group of people/community members]: [A potential conflict or concern they might raise - can be phrased as a question]"
+
+Requirements:
+- Each point should focus on a different group of people (e.g., community members, users, local government, elderly, youth, or people with different needs and values, etc.)
+- The conflicts should be constructive and help the designer understand broader social implications and the needs of the community members
+- Points should be concise and suitable for sticky note length
+- Use language understandable by a non-design audience - avoid design jargon and big words
+- The conflicts can be phrased as questions (e.g., "Won't this exclude people who...?" or "How will this affect...")
+- Focus on real concerns that stakeholder would genuinely raise
+- Better to focus on the the tensions relevant to the design challenge and the design proposals.
+
+Example format:
+"For elderly residents: Won't this new digital interface exclude those who aren't comfortable with technology?"
+"For local businesses: How will this change affect foot traffic and customer access to our stores?"
+"For community members: Won't this new digital interface exclude those who aren't comfortable with technology?"
+"For people with different needs and values: Won't this new digital interface exclude those who aren't comfortable with technology?"`;
 
     // Use custom prompt if provided, otherwise use base prompt
     let systemPrompt = customSystemPrompt || BASE_SYSTEM_PROMPT;
@@ -237,11 +257,31 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
     const incorporateSuggestionsLabel = "Previous User Feedback & Suggestions:";
     const hasFeedback = userPrompt.includes(incorporateSuggestionsLabel);
     
+    // Check for existing antagonistic points to avoid repetition
+    const existingPointsLabel = "Existing Antagonistic Points (Avoid Repetition):";
+    const hasExistingPoints = userPrompt.includes(existingPointsLabel);
+    
     if (hasFeedback) {
       // Add instructions to consider previous feedback in the system prompt
       systemPrompt += `\n\nIMPORTANT: The user has provided feedback on previous iterations of design criticism. Please carefully review their feedback and incorporate it into your analysis. Evolve your criticism based on what they've found useful or what they've addressed already. Don't repeat criticisms that have been addressed, but you may build upon partially addressed issues with more nuanced perspectives.`;
       
       Logger.log('OPENAI-API', 'Found user feedback in the prompt. Adding special instructions to system prompt.');
+    }
+    
+    if (hasExistingPoints) {
+      // Add instructions to avoid repeating existing antagonistic points
+      systemPrompt += `\n\nCRITICAL: The user has provided existing antagonistic critique points. You MUST avoid generating points that are similar in content, focus, or approach to these existing points. However, you CAN repeat the same stakeholder groups as long as the concerns are genuinely different. Focus on:
+      - Different types of conflicts or concerns from the same or different stakeholder groups (social, technical, ethical, economic, accessibility, etc.)
+      - Different aspects of the design decisions not already critiqued
+      - Different timeframes or scales of impact not covered
+      - Different implementation challenges or consequences not mentioned
+      - Different underlying values, needs, or priorities not addressed
+      
+      For example, if existing points cover "For elderly residents: technology concerns", you could generate "For elderly residents: physical accessibility concerns" since these are different types of concerns.
+      
+      Ensure your new critique points raise genuinely NEW concerns that complement (not duplicate) the existing critique points, even if they come from similar stakeholder groups.`;
+      
+      Logger.log('OPENAI-API', 'Found existing antagonistic points in the prompt. Adding anti-repetition instructions to system prompt.');
     }
 
     try {
@@ -265,15 +305,15 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
       });
 
       // Try to process with basic delimiter parsing
-      let points = this.processOpenAIResponse(result, 10, 'This design decision requires further analysis');
+      let points = this.processOpenAIResponse(result, 5, 'This design decision requires further analysis');
       
       // If we didn't get enough points with basic parsing, use GPT to reformat
-      if (points.length < 10) {
+      if (points.length < 5) {
         Logger.log('OPENAI-API', 'Response format not ideal, using GPT to reformat');
-        points = await this.reformatWithGPT(result.response, 10);
+        points = await this.reformatWithGPT(result.response, 5);
       }
 
-      // Filter for conflicts and preserve all 10 points
+      // Filter for conflicts and preserve all 5 points
       const filteredPoints = await this.filterNonConflictingPoints(points, consensusPoints);      
       return filteredPoints.join(' ** ');
     } catch (error) {
@@ -291,14 +331,15 @@ Do not include any introduction, explanation, or conclusion. Just the ${pointCou
   ): Promise<string[]> {
     const systemPrompt = `You are filtering design criticism points to ensure they don't conflict with consensus points.
 
-Consensus points that you should defintely follow:
+Consensus points that you should definitely follow:
 ${consensusPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}
 
 Review these criticism points and:
 1. Select all points that do NOT conflict with the consensus points 
 2. If a point conflicts with the consensus points such as the designer has already considered or addresses, skip it and move to the next one
-3. If fewer than 10 non-conflicting points are found, generate substitutes that:
-   - focus on different aspects, such as different user groups, different parts of the design decision, or different parts of the design process
+3. If fewer than 5 non-conflicting points are found, generate substitutes that:
+   - Follow this exact format: "For [specific stakeholder group]: [A potential conflict or concern they might raise - can be phrased as a question]"
+   - Focus on different stakeholder groups than existing points
    - Address different aspects than the consensus points
    - Maintain critical perspective
    - Are unique from other selected points
@@ -312,7 +353,7 @@ Return exactly 5 final points separated by ** **.`;
       useGpt4: true // Use GPT-4 for filtering points
     });
 
-    return this.processOpenAIResponse(result, 10, 'This point needs revision');
+    return this.processOpenAIResponse(result, 5, 'For stakeholders: This point needs revision');
   }
 
   /**
@@ -477,12 +518,22 @@ Respond to the user's message in a helpful and constructive way.`;
     // Base system prompt template
     const BASE_THEME_SYSTEM_PROMPT = `You are analyzing design decisions for the design challenge with the following background, conditions, and design challenge: "${designChallenge || 'No challenge specified'}" with a specific focus on the theme "${themeName}".
 
-Provide exactly 3 critical points that identify potential problems or conflicts related specifically to the "${themeName}" theme of these design proposals, your critical points should be constructive conflicts that can be used to make the designer be aware of the broader social implications and community members of their design proposals.
+Provide exactly 3 critical points that identify potential problems or conflicts related specifically to the "${themeName}" theme of these design proposals. Each point MUST follow this exact format:
+
+"For [specific stakeholder group]: [A potential conflict or concern they might raise related to ${themeName} - can be phrased as a question]"
+
+Requirements:
+- Each point should focus on a different stakeholder group affected by the ${themeName} theme
+- The conflicts should be constructive and help the designer understand broader social implications
+- Points should be concise and suitable for sticky note length
+- Use language understandable by a non-design audience - avoid design jargon and big words
+- The conflicts can be phrased as questions (e.g., "Won't this exclude people who...?" or "How will this affect...")
+- Focus on real concerns that stakeholder would genuinely raise about the ${themeName} aspect
 
 Rules:
 1. NEVER question or criticize the consensus points - these are established agreements that must be respected
 2. Focus on potential problems, conflicts, or negative consequences related to ${themeName}
-3. Always provide EXACTLY 5 points, no more, no less
+3. Always provide EXACTLY 3 points, no more, no less
 4. Each point should be a complete, self-contained criticism
 5. Keep each point focused on a single issue within the ${themeName} theme`;
 
