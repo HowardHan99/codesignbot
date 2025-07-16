@@ -79,6 +79,7 @@ export class OpenAIService {
    * @param customSystemPrompt - Custom system prompt to add additional instructions
    * @param pointTagMappings - Previous point-tag mappings for learning
    * @param discardedPoints - Points the user found irrelevant or wrong (AVOID these patterns)
+   * @param ragContent - RAG content to be included in system prompt for caching
    * @returns Promise resolving to the formatted analysis as JSON
    */
   public static async generateAnalysis(
@@ -89,7 +90,8 @@ export class OpenAIService {
     designPrinciples?: string,
     customSystemPrompt?: string,
     pointTagMappings?: PointTagMapping[],
-    discardedPoints?: string[]
+    discardedPoints?: string[],
+    ragContent?: string
   ): Promise<string> {
 
     // Base system prompt template with JSON output requirement
@@ -104,7 +106,7 @@ Provide exactly 5 potential seed points that identify potential problems or conf
 "For [specific group of people/community members]: [A potential conflict or pushback they might raise - can be phrased as a question]"
 
 Requirements:
-- Each point should focus on a different group of people (e.g., community members, users, local government, elderly, youth, or people with different needs and values, etc.)
+- Each point should focus on a different conflict or pushback that stakeholders might raise
 - The conflicts should be constructive and help the designer understand broader social implications and the needs of the community members
 - Points should be concise and suitable for sticky note length
 - Use language understandable by a non-design audience - avoid design jargon and big words
@@ -118,11 +120,11 @@ Requirements:
 CRITICAL: You must respond with valid JSON in exactly this format:
 {
   "points": [
-    "For elderly residents: Won't this new digital interface exclude those who aren't comfortable with technology?",
-    "For local businesses: How will this change affect foot traffic and customer access to our stores?",
-    "For community members: Won't this new digital interface exclude those who aren't comfortable with technology?",
-    "For people with different needs and values: Won't this new digital interface exclude those who aren't comfortable with technology?",
-    "For stakeholders: What are the potential implementation challenges of this approach?"
+    "For stakeholder 1 or comunity group 1: [A potential conflict or pushback they might raise - can be phrased as a question]",
+    "For stakeholder 2 or comunity group 2: [A potential conflict or pushback they might raise - can be phrased as a question]",
+    "For stakeholder 3 or comunity group 3: [A potential conflict or pushback they might raise - can be phrased as a question]",
+    "For stakeholder 4 or comunity group 4: [A potential conflict or pushback they might raise - can be phrased as a question]",
+    "For stakeholder 5 or comunity group 5: [A potential conflict or pushback they might raise - can be phrased as a question]"
   ]
 }
 
@@ -136,6 +138,42 @@ QUALITY CRITERIA - Prioritize points that are:
     // Use custom prompt if provided, otherwise use base prompt
     let systemPrompt = customSystemPrompt || BASE_SYSTEM_PROMPT;
 
+    // Add RAG content to system prompt for caching optimization
+    // When design proposals don't change, this allows the system prompt (including RAG content) to be cached
+    if (ragContent) {
+      systemPrompt += `\n\n--- EXTERNAL KNOWLEDGE & RESEARCH INSIGHTS ---\nConsider these research insights and external knowledge when generating your analysis:\n\n${ragContent}\n\nUse this information to inform your critique but don't directly reference it unless highly relevant.`;
+    }
+
+    // Add user preference guidance notes to system prompt
+    let userGuidanceNotes: string[] = [];
+    if (pointTagMappings && pointTagMappings.length > 0) {
+      userGuidanceNotes.push("user tagging preferences");
+    }
+    if (consensusPoints.length > 0) {
+      userGuidanceNotes.push("consensus agreements");
+    }
+    if (discardedPoints && discardedPoints.length > 0) {
+      userGuidanceNotes.push("discarded criticism patterns");
+    }
+    
+    // Check for user feedback in the user prompt
+    const incorporateSuggestionsLabel = "Previous User Define Directions: these are the directions that users want to go in";
+    const hasFeedback = userPrompt.includes(incorporateSuggestionsLabel);
+    if (hasFeedback) {
+      userGuidanceNotes.push("user feedback/directions");
+    }
+    
+    // Check for existing antagonistic points
+    const existingPointsLabel = "Existing Antagonistic Points (Avoid Repetition):";
+    const hasExistingPoints = userPrompt.includes(existingPointsLabel);
+    if (hasExistingPoints) {
+      userGuidanceNotes.push("existing antagonistic points");
+    }
+
+    if (userGuidanceNotes.length > 0) {
+      systemPrompt += `\n\nNOTE: The user has provided ${userGuidanceNotes.join(', ')} in their prompt. Follow these guidelines carefully to align with their demonstrated preferences and requirements.`;
+    }
+
     // Construct the main message parts
     const messageParts = [
       `Analyze the following design decisions:\n\n${userPrompt}`
@@ -147,7 +185,7 @@ QUALITY CRITERIA - Prioritize points that are:
       const tagMappingsText = formatPointTagMappingsForPrompt(pointTagMappings);
       if (tagMappingsText) {
         messageParts.push(tagMappingsText);
-        systemPrompt += `\n\nNote: You can see previous antagonistic points and how users tagged them. Use this to understand what types of points users found useful vs not useful. Generate points that align with the user's demonstrated preferences while still being critical and constructive.`;
+        messageParts.push(`\n--- USER TAGGING PREFERENCES ---\nBased on the above tagged points, generate points that align with the user's demonstrated preferences for what constitutes useful vs not useful criticism. Focus on the patterns they found valuable while still being critical and constructive.`);
       }
     }
 
@@ -163,53 +201,32 @@ QUALITY CRITERIA - Prioritize points that are:
       );
     }
     
-    // Add consensus points if any - STRONG INFLUENCE
+    // Add consensus points if any - MOVED TO USER PROMPT
     if (consensusPoints.length > 0) {
       messageParts.push(
-        `\n\n--- CONSENSUS POINTS (DO NOT QUESTION OR CRITICIZE) ---\nThese are established agreements, or features that users want to preserve, that MUST be respected:\n${consensusPoints.join('\n')}`
+        `\n\n--- CONSENSUS POINTS (DO NOT QUESTION OR CRITICIZE) ---\nThese are established agreements, or features that users want to preserve, that MUST be respected:\n${consensusPoints.join('\n')}\n\nCRITICAL: Do NOT question, criticize, or contradict the consensus points. These are the features that designers have agreed to keep.`
       );
-      systemPrompt += `\n\nCRITICAL: Do NOT question, criticize, or contradict the consensus points. These are the features that designers have agreed to keep.`;
     }
     
-    // Add discarded points if any - STRONG INFLUENCE TO AVOID
+    // Add discarded points if any - MOVED TO USER PROMPT
     if (discardedPoints && discardedPoints.length > 0) {
       messageParts.push(
-        `\n\n--- DISCARDED POINTS (AVOID THESE PATTERNS OR ANY SIMILAR TOPICS OR GROUP OF PEOPLE) ---\nThe user found these types of criticisms irrelevant or wrong, try to avoid these topics:\n${discardedPoints.join('\n')}`
+        `\n\n--- DISCARDED POINTS (AVOID THESE PATTERNS) ---\nThe user found these types of criticisms irrelevant or wrong, try to avoid these topics and similar patterns:\n${discardedPoints.join('\n')}\n\nIMPORTANT: AVOID generating points that are similar in theme, focus, or approach to the discarded points. Instead, focus on different aspects, different user groups, different stages of the design process, or different social implications. Ensure your analysis is diverse and addresses areas NOT covered by the discarded patterns.\n\nFor HETEROGENEITY: Since the user has provided discarded patterns, ensure your 5 points cover diverse perspectives such as: (1) different stakeholder groups, (2) different phases of implementation, (3) different scales of impact (individual vs community vs society), (4) different timeframes (immediate vs long-term), and (5) different types of risks (technical, social, ethical, economic). Avoid clustering around similar themes.`
       );
-      systemPrompt += `\n\nIMPORTANT: The user has explicitly indicated that certain types of criticism are not useful. AVOID generating points that are similar in theme, focus, or approach to the discarded points. Instead, focus on different aspects, different user groups, different stages of the design process, or different social implications. Ensure your analysis is diverse and addresses areas NOT covered by the discarded patterns.`;
-      
-      // Add heterogeneity instructions for stronger diversity
-      systemPrompt += `\n\nFor HETEROGENEITY: Since the user has provided discarded patterns, ensure your 5 points cover diverse perspectives such as: (1) different stakeholder groups, (2) different phases of implementation, (3) different scales of impact (individual vs community vs society), (4) different timeframes (immediate vs long-term), and (5) different types of risks (technical, social, ethical, economic). Avoid clustering around similar themes.`;
     }
     
-    // Check for the "Previous User Feedback & Suggestions" in the userPrompt and extract it if found
-    const incorporateSuggestionsLabel = "Previous User Define Directions: these are the directions that users want to go in OR SUGGESTIONS FOR THE GENERATION, CONSIDER THESE";
-    const hasFeedback = userPrompt.includes(incorporateSuggestionsLabel);
-    
-    // Check for existing antagonistic points to avoid repetition
-    const existingPointsLabel = "Existing Antagonistic Points (Avoid Repetition):";
-    const hasExistingPoints = userPrompt.includes(existingPointsLabel);
-    
+    // Handle user feedback - MOVED TO USER PROMPT
     if (hasFeedback) {
-      // Add instructions to consider previous feedback in the system prompt
-      systemPrompt += `\n\nIMPORTANT: The user has provided feedback or directions that they might want more pushback on. Please carefully review their feedback and incorporate it into your analysis. Evolve your criticism based on what they've found useful or what directions they want to go in. Don't repeat criticisms that have been addressed, but you may build upon partially addressed issues with more nuanced perspectives.`;
-      
-      Logger.log('OPENAI-API', 'Found user feedback in the prompt. Adding special instructions to system prompt.');
+      messageParts.push(
+        `\n\n--- USER FEEDBACK & DIRECTIONS ---\nThe user has provided feedback or directions that they want more focus on. Please carefully review their feedback and incorporate it into your analysis. Evolve your criticism based on what they've found useful or what directions they want to go in. Don't repeat criticisms that have been addressed, but you may build upon partially addressed issues with more nuanced perspectives.`
+      );
     }
     
+    // Handle existing antagonistic points - MOVED TO USER PROMPT
     if (hasExistingPoints) {
-      // Add instructions to avoid repeating existing antagonistic points
-      systemPrompt += `\n\nCRITICAL: The user has provided existing antagonistic critique points. You MUST avoid generating points that are similar in content, focus, or approach to these existing points. However, you CAN repeat the same stakeholder groups as long as the concerns are genuinely different. Focus on:
-      - Different types of conflicts or concerns from the same or different stakeholder groups (social, technical, ethical, economic, accessibility, etc.)
-      - Different aspects of the design decisions not already critiqued
-      - Different timeframes or scales of impact not covered
-      - Different underlying values, needs, or priorities not addressed
-      
-      For example, if existing points cover "For elderly residents: technology concerns", you could generate "For elderly residents: physical accessibility concerns" since these are different types of conflicts.
-      
-      Ensure your new critique points raise genuinely NEW concerns that complement (not duplicate) the existing critique points, even if they come from similar stakeholder groups.`;
-      
-      Logger.log('OPENAI-API', 'Found existing antagonistic points in the prompt. Adding anti-repetition instructions to system prompt.');
+      messageParts.push(
+        `\n\n--- AVOID REPETITION ---\nThe user has provided existing antagonistic critique points. You MUST avoid generating points that are similar in content, focus, or approach to these existing points. However, you CAN repeat the same stakeholder groups as long as the concerns are genuinely different. Focus on:\n- Different types of conflicts or concerns from the same or different stakeholder groups (social, technical, ethical, economic, accessibility, etc.)\n- Different aspects of the design decisions not already critiqued\n- Different timeframes or scales of impact not covered\n- Different underlying values, needs, or priorities not addressed\n\nFor example, if existing points cover "For elderly residents: technology concerns", you could generate "For elderly residents: physical accessibility concerns" since these are different types of conflicts.\n\nEnsure your new critique points raise genuinely NEW concerns that complement (not duplicate) the existing critique points, even if they come from similar stakeholder groups.`
+      );
     }
 
     // Add final JSON formatting reminder
@@ -345,98 +362,98 @@ QUALITY CRITERIA - Prioritize points that are:
    * @param response - The analysis to simplify
    * @returns Promise resolving to the simplified analysis
    */
-  public static async simplifyAnalysis(response: string): Promise<string> {
-    // First parse the input to understand structure
-    let inputPoints: string[] = [];
-    try {
-      const parsed = JSON.parse(response);
-      if (parsed.points && Array.isArray(parsed.points)) {
-        inputPoints = parsed.points;
-      }
-    } catch (e) {
-      // Legacy format - split by ** delimiters
-      inputPoints = response.split('**').map(point => point.trim()).filter(point => point.length > 0);
-    }
+//   public static async simplifyAnalysis(response: string): Promise<string> {
+//     // First parse the input to understand structure
+//     let inputPoints: string[] = [];
+//     try {
+//       const parsed = JSON.parse(response);
+//       if (parsed.points && Array.isArray(parsed.points)) {
+//         inputPoints = parsed.points;
+//       }
+//     } catch (e) {
+//       // Legacy format - split by ** delimiters
+//       inputPoints = response.split('**').map(point => point.trim()).filter(point => point.length > 0);
+//     }
     
-    const pointCount = inputPoints.length;
+//     const pointCount = inputPoints.length;
 
-    const systemPrompt = `Please simplify the following criticism points into ${pointCount} very concise, clear points.
+//     const systemPrompt = `Please simplify the following criticism points into ${pointCount} very concise, clear points.
 
-Rules:
-1. You MUST provide exactly ${pointCount} points, no more, no less
-2. Each point should be no more than 20 words
-3. Keep the core message of each original point
-4. Maintain the same stakeholder focus as the original points
-5. Do not use any numbering, bullet points, or labels
+// Rules:
+// 1. You MUST provide exactly ${pointCount} points, no more, no less
+// 2. Each point should be no more than 20 words
+// 3. Keep the core message of each original point
+// 4. Maintain the same stakeholder focus as the original points
+// 5. Do not use any numbering, bullet points, or labels
 
-CRITICAL: You must respond with valid JSON in exactly this format:
-{
-  "points": [
-    "simplified point 1",
-    "simplified point 2",
-    "simplified point 3"
-  ]
-}
+// CRITICAL: You must respond with valid JSON in exactly this format:
+// {
+//   "points": [
+//     "simplified point 1",
+//     "simplified point 2",
+//     "simplified point 3"
+//   ]
+// }
 
-The JSON must contain exactly ${pointCount} points corresponding to the ${pointCount} original points.`;
+// The JSON must contain exactly ${pointCount} points corresponding to the ${pointCount} original points.`;
 
-    const MAX_RETRIES = 3;
+//     const MAX_RETRIES = 3;
     
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const result = await this.makeRequest('/api/openaiwrap', {
-          userPrompt: response,
-          systemPrompt,
-          useGpt4: true,
-          expectsJson: true
-        });
+//     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+//       try {
+//         const result = await this.makeRequest('/api/openaiwrap', {
+//           userPrompt: response,
+//           systemPrompt,
+//           useGpt4: true,
+//           expectsJson: true
+//         });
 
-        // Parse JSON response
-        let parsedResponse;
-        try {
-          parsedResponse = JSON.parse(result.response);
-        } catch (parseError) {
-          console.error(`JSON parsing failed on simplify attempt ${attempt}:`, result.response);
-          if (attempt === MAX_RETRIES) {
-            throw new Error(`Failed to get valid JSON response after ${MAX_RETRIES} attempts`);
-          }
-          continue;
-        }
+//         // Parse JSON response
+//         let parsedResponse;
+//         try {
+//           parsedResponse = JSON.parse(result.response);
+//         } catch (parseError) {
+//           console.error(`JSON parsing failed on simplify attempt ${attempt}:`, result.response);
+//           if (attempt === MAX_RETRIES) {
+//             throw new Error(`Failed to get valid JSON response after ${MAX_RETRIES} attempts`);
+//           }
+//           continue;
+//         }
 
-        // Validate response structure
-        if (!parsedResponse.points || !Array.isArray(parsedResponse.points)) {
-          if (attempt === MAX_RETRIES) {
-            throw new Error(`Invalid JSON response structure after ${MAX_RETRIES} attempts`);
-          }
-          continue;
-        }
+//         // Validate response structure
+//         if (!parsedResponse.points || !Array.isArray(parsedResponse.points)) {
+//           if (attempt === MAX_RETRIES) {
+//             throw new Error(`Invalid JSON response structure after ${MAX_RETRIES} attempts`);
+//           }
+//           continue;
+//         }
 
-        // Ensure we have the right number of points
-        let points = parsedResponse.points.filter((point: string) => point && point.trim().length > 0);
+//         // Ensure we have the right number of points
+//         let points = parsedResponse.points.filter((point: string) => point && point.trim().length > 0);
         
-        if (points.length < pointCount) {
-          if (attempt === MAX_RETRIES) {
-            throw new Error(`Could not get ${pointCount} valid points after ${MAX_RETRIES} attempts`);
-          }
-          continue;
-        }
+//         if (points.length < pointCount) {
+//           if (attempt === MAX_RETRIES) {
+//             throw new Error(`Could not get ${pointCount} valid points after ${MAX_RETRIES} attempts`);
+//           }
+//           continue;
+//         }
 
-        // Take exactly the right number of points
-        points = points.slice(0, pointCount);
+//         // Take exactly the right number of points
+//         points = points.slice(0, pointCount);
 
-        // Return as JSON string for compatibility
-        return JSON.stringify({ points });
+//         // Return as JSON string for compatibility
+//         return JSON.stringify({ points });
         
-      } catch (error) {
-        if (attempt === MAX_RETRIES) {
-          throw error;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
+//       } catch (error) {
+//         if (attempt === MAX_RETRIES) {
+//           throw error;
+//         }
+//         await new Promise(resolve => setTimeout(resolve, 1000));
+//       }
+//     }
     
-    throw new Error(`Failed to simplify analysis after ${MAX_RETRIES} attempts`);
-  }
+//     throw new Error(`Failed to simplify analysis after ${MAX_RETRIES} attempts`);
+//   }
 
   /**
    * Adjusts the tone of an analysis while maintaining the core message
@@ -444,107 +461,107 @@ The JSON must contain exactly ${pointCount} points corresponding to the ${pointC
    * @param newTone - The desired tone (e.g., 'persuasive', 'aggressive', 'critical')
    * @returns Promise resolving to the tone-adjusted analysis
    */
-  public static async adjustTone(response: string, newTone: string): Promise<string> {
-    // First parse the input to understand structure
-    let inputPoints: string[] = [];
-    try {
-      const parsed = JSON.parse(response);
-      if (parsed.points && Array.isArray(parsed.points)) {
-        inputPoints = parsed.points;
-      }
-    } catch (e) {
-      // Legacy format - split by ** delimiters
-      inputPoints = response.split('**').map(point => point.trim()).filter(point => point.length > 0);
-    }
+//   public static async adjustTone(response: string, newTone: string): Promise<string> {
+//     // First parse the input to understand structure
+//     let inputPoints: string[] = [];
+//     try {
+//       const parsed = JSON.parse(response);
+//       if (parsed.points && Array.isArray(parsed.points)) {
+//         inputPoints = parsed.points;
+//       }
+//     } catch (e) {
+//       // Legacy format - split by ** delimiters
+//       inputPoints = response.split('**').map(point => point.trim()).filter(point => point.length > 0);
+//     }
     
-    const pointCount = inputPoints.length;
+//     const pointCount = inputPoints.length;
 
-    const toneInstructions = {
-      persuasive: `Act as a charismatic consultant who genuinely wants to help. Use phrases like "Consider this perspective...", "What if we looked at it this way...", "I understand the intention, however...", "Let's explore a different angle...". Be diplomatic but firm in your critiques.`,
-      aggressive: `Act as a brutally honest critic who doesn't hold back. Use strong phrases like "This approach is fundamentally flawed!", "This completely misses the mark...". Be confrontational and direct, expressing strong disagreement and frustration.`,
-      critical: `Act as a meticulous academic reviewer. Use analytical phrases like "The evidence does not support...", "This lacks rigorous consideration of...", "A critical examination reveals...". Be thorough and uncompromising in your analysis.`
-    };
+//     const toneInstructions = {
+//       persuasive: `Act as a charismatic consultant who genuinely wants to help. Use phrases like "Consider this perspective...", "What if we looked at it this way...", "I understand the intention, however...", "Let's explore a different angle...". Be diplomatic but firm in your critiques.`,
+//       aggressive: `Act as a brutally honest critic who doesn't hold back. Use strong phrases like "This approach is fundamentally flawed!", "This completely misses the mark...". Be confrontational and direct, expressing strong disagreement and frustration.`,
+//       critical: `Act as a meticulous academic reviewer. Use analytical phrases like "The evidence does not support...", "This lacks rigorous consideration of...", "A critical examination reveals...". Be thorough and uncompromising in your analysis.`
+//     };
 
-    const systemPrompt = `${toneInstructions[newTone as keyof typeof toneInstructions] || 'Be direct but professional.'}
+//     const systemPrompt = `${toneInstructions[newTone as keyof typeof toneInstructions] || 'Be direct but professional.'}
 
-Rules for the response:
-1. You MUST provide exactly ${pointCount} points, no more, no less
-2. Each point should be a complete, self-contained criticism
-3. Do not use any numbering, bullet points, or labels
-4. Keep each point focused on a single issue
-5. Maintain the core message of each original point while adjusting the tone
-6. Preserve the stakeholder focus of each original point
+// Rules for the response:
+// 1. You MUST provide exactly ${pointCount} points, no more, no less
+// 2. Each point should be a complete, self-contained criticism
+// 3. Do not use any numbering, bullet points, or labels
+// 4. Keep each point focused on a single issue
+// 5. Maintain the core message of each original point while adjusting the tone
+// 6. Preserve the stakeholder focus of each original point
 
-CRITICAL: You must respond with valid JSON in exactly this format:
-{
-  "points": [
-    "tone-adjusted point 1",
-    "tone-adjusted point 2",
-    "tone-adjusted point 3"
-  ]
-}
+// CRITICAL: You must respond with valid JSON in exactly this format:
+// {
+//   "points": [
+//     "tone-adjusted point 1",
+//     "tone-adjusted point 2",
+//     "tone-adjusted point 3"
+//   ]
+// }
 
-The JSON must contain exactly ${pointCount} points corresponding to the ${pointCount} original points.
+// The JSON must contain exactly ${pointCount} points corresponding to the ${pointCount} original points.
 
-Rewrite the following criticism points using this format and tone. Do not add any additional text or formatting.`;
+// Rewrite the following criticism points using this format and tone. Do not add any additional text or formatting.`;
 
-    const MAX_RETRIES = 3;
+//     const MAX_RETRIES = 3;
     
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const result = await this.makeRequest('/api/openaiwrap', {
-          userPrompt: response,
-          systemPrompt,
-          useGpt4: true,
-          expectsJson: true
-        });
+//     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+//       try {
+//         const result = await this.makeRequest('/api/openaiwrap', {
+//           userPrompt: response,
+//           systemPrompt,
+//           useGpt4: true,
+//           expectsJson: true
+//         });
 
-        // Parse JSON response
-        let parsedResponse;
-        try {
-          parsedResponse = JSON.parse(result.response);
-        } catch (parseError) {
-          console.error(`JSON parsing failed on tone adjust attempt ${attempt}:`, result.response);
-          if (attempt === MAX_RETRIES) {
-            throw new Error(`Failed to get valid JSON response after ${MAX_RETRIES} attempts`);
-          }
-          continue;
-        }
+//         // Parse JSON response
+//         let parsedResponse;
+//         try {
+//           parsedResponse = JSON.parse(result.response);
+//         } catch (parseError) {
+//           console.error(`JSON parsing failed on tone adjust attempt ${attempt}:`, result.response);
+//           if (attempt === MAX_RETRIES) {
+//             throw new Error(`Failed to get valid JSON response after ${MAX_RETRIES} attempts`);
+//           }
+//           continue;
+//         }
 
-        // Validate response structure
-        if (!parsedResponse.points || !Array.isArray(parsedResponse.points)) {
-          if (attempt === MAX_RETRIES) {
-            throw new Error(`Invalid JSON response structure after ${MAX_RETRIES} attempts`);
-          }
-          continue;
-        }
+//         // Validate response structure
+//         if (!parsedResponse.points || !Array.isArray(parsedResponse.points)) {
+//           if (attempt === MAX_RETRIES) {
+//             throw new Error(`Invalid JSON response structure after ${MAX_RETRIES} attempts`);
+//           }
+//           continue;
+//         }
 
-        // Ensure we have the right number of points
-        let points = parsedResponse.points.filter((point: string) => point && point.trim().length > 0);
+//         // Ensure we have the right number of points
+//         let points = parsedResponse.points.filter((point: string) => point && point.trim().length > 0);
         
-        if (points.length < pointCount) {
-          if (attempt === MAX_RETRIES) {
-            throw new Error(`Could not get ${pointCount} valid points after ${MAX_RETRIES} attempts`);
-          }
-          continue;
-        }
+//         if (points.length < pointCount) {
+//           if (attempt === MAX_RETRIES) {
+//             throw new Error(`Could not get ${pointCount} valid points after ${MAX_RETRIES} attempts`);
+//           }
+//           continue;
+//         }
 
-        // Take exactly the right number of points
-        points = points.slice(0, pointCount);
+//         // Take exactly the right number of points
+//         points = points.slice(0, pointCount);
 
-        // Return as JSON string for compatibility
-        return JSON.stringify({ points });
+//         // Return as JSON string for compatibility
+//         return JSON.stringify({ points });
         
-      } catch (error) {
-        if (attempt === MAX_RETRIES) {
-          throw error;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
+//       } catch (error) {
+//         if (attempt === MAX_RETRIES) {
+//           throw error;
+//         }
+//         await new Promise(resolve => setTimeout(resolve, 1000));
+//       }
+//     }
     
-    throw new Error(`Failed to adjust tone after ${MAX_RETRIES} attempts`);
-  }
+//     throw new Error(`Failed to adjust tone after ${MAX_RETRIES} attempts`);
+//   }
 
   /**
    * Generates a response in a conversation context
@@ -554,39 +571,39 @@ Rewrite the following criticism points using this format and tone. Do not add an
    * @param conversationContext - Previous conversation history
    * @returns Promise resolving to the assistant's response
    */
-  public static async generateConversationResponse(
-    userMessage: string,
-    designChallenge: string,
-    currentCriticism: string[],
-    conversationContext: string
-  ): Promise<string> {
-    const systemPrompt = `You are a design critique agent helping with the design challenge: "${designChallenge || DEFAULT_DESIGN_CHALLENGE}".
+//   public static async generateConversationResponse(
+//     userMessage: string,
+//     designChallenge: string,
+//     currentCriticism: string[],
+//     conversationContext: string
+//   ): Promise<string> {
+//     const systemPrompt = `You are a design critique agent helping with the design challenge: "${designChallenge || DEFAULT_DESIGN_CHALLENGE}".
 
-${!designChallenge ? DEFAULT_BACKGROUND : ''}
+// ${!designChallenge ? DEFAULT_BACKGROUND : ''}
 
-You have provided these criticisms:
-${currentCriticism.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+// You have provided these criticisms:
+// ${currentCriticism.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
-Previous conversation context:
-${conversationContext}
+// Previous conversation context:
+// ${conversationContext}
 
-Rules:
-1. If the user clarifies something about your criticism, remember it for future interactions
-2. If the user disagrees with a point, engage in a constructive discussion
-3. Keep responses focused on the design challenge and your criticisms
-4. Be direct but professional
-5. If the user types "noted", acknowledge and move on
-6. If you receive an instruction starting with "instruct:", follow it precisely
+// Rules:
+// 1. If the user clarifies something about your criticism, remember it for future interactions
+// 2. If the user disagrees with a point, engage in a constructive discussion
+// 3. Keep responses focused on the design challenge and your criticisms
+// 4. Be direct but professional
+// 5. If the user types "noted", acknowledge and move on
+// 6. If you receive an instruction starting with "instruct:", follow it precisely
 
-Respond to the user's message in a helpful and constructive way.`;
+// Respond to the user's message in a helpful and constructive way.`;
 
-    const result = await this.makeRequest('/api/openaiwrap', {
-      userPrompt: userMessage,
-      systemPrompt,
-    });
+//     const result = await this.makeRequest('/api/openaiwrap', {
+//       userPrompt: userMessage,
+//       systemPrompt,
+//     });
 
-    return result.response;
-  }
+//     return result.response;
+//   }
 
   /**
    * Analyzes images using OpenAI's Vision model
@@ -635,6 +652,7 @@ Respond to the user's message in a helpful and constructive way.`;
    * @param discardedPoints - Points the user found irrelevant or wrong (AVOID these patterns)
    * @returns Promise resolving to array of points specific to the theme
    */
+  /*
   public static async generateThemeSpecificAnalysis(
     userPrompt: string,
     themeName: string,
@@ -780,71 +798,71 @@ Rules:
    * @param discardedPoints - Points the user found irrelevant or wrong (AVOID these patterns)
    * @returns Promise resolving to array of themed responses
    */
-  public static async generateAllThemeAnalyses(
-    userPrompt: string,
-    themes: Array<{name: string, color: string}>,
-    designChallenge: string,
-    consensusPoints: string[] = [],
-    designPrinciples?: string,
-    customSystemPrompt?: string,
-    pointTagMappings?: PointTagMapping[],
-    discardedPoints?: string[]
-  ): Promise<Array<{name: string, color: string, points: string[]}>> {
-    // Run all theme analyses in parallel
-    const themeAnalysesPromises = themes.map(theme => 
-      this.generateThemeSpecificAnalysis(
-        userPrompt,
-        theme.name,
-        designChallenge,
-        consensusPoints,
-        designPrinciples,
-        customSystemPrompt,
-        pointTagMappings,
-        discardedPoints
-      ).then(points => ({
-        name: theme.name,
-        color: theme.color,
-        points
-      }))
-    );
+  // public static async generateAllThemeAnalyses(
+  //   userPrompt: string,
+  //   themes: Array<{name: string, color: string}>,
+  //   designChallenge: string,
+  //   consensusPoints: string[] = [],
+  //   designPrinciples?: string,
+  //   customSystemPrompt?: string,
+  //   pointTagMappings?: PointTagMapping[],
+  //   discardedPoints?: string[]
+  // ): Promise<Array<{name: string, color: string, points: string[]}>> {
+  //   // Run all theme analyses in parallel
+  //   const themeAnalysesPromises = themes.map(theme => 
+  //     this.generateThemeSpecificAnalysis(
+  //       userPrompt,
+  //       theme.name,
+  //       designChallenge,
+  //       consensusPoints,
+  //       designPrinciples,
+  //       customSystemPrompt,
+  //       pointTagMappings,
+  //       discardedPoints
+  //     ).then(points => ({
+  //       name: theme.name,
+  //       color: theme.color,
+  //       points
+  //     }))
+  //   );
     
-    // Wait for all analyses to complete
-    return Promise.all(themeAnalysesPromises);
-  }
+  //   // Wait for all analyses to complete
+  //   return Promise.all(themeAnalysesPromises);
+  // }
 
   /**
    * Simplifies a single analysis point to make it more concise
    * @param point - The analysis point to simplify
    * @returns Promise resolving to simplified point
    */
-  public static async simplifyPoint(point: string): Promise<string> {
-    const systemPrompt = `You are helping to simplify design criticism points to make them more concise and actionable.
+//   public static async simplifyPoint(point: string): Promise<string> {
+//     const systemPrompt = `You are helping to simplify design criticism points to make them more concise and actionable.
 
-Task: Simplify the given design criticism point to make it more concise while preserving the core critique.
+// Task: Simplify the given design criticism point to make it more concise while preserving the core critique.
 
-Guidelines:
-1. Reduce the length by 30-50% while preserving the main idea
-2. Remove unnecessary explanations but keep the key pushback
-3. Maintain the tone of the original point
-4. Make it direct and actionable
-5. Don't add any new criticism that wasn't in the original`;
+// Guidelines:
+// 1. Reduce the length by 30-50% while preserving the main idea
+// 2. Remove unnecessary explanations but keep the key pushback
+// 3. Maintain the tone of the original point
+// 4. Make it direct and actionable
+// 5. Don't add any new criticism that wasn't in the original`;
 
-    const result = await this.makeRequest('/api/openaiwrap', {
-      userPrompt: point,
-      systemPrompt,
-      useGpt4: true
-    });
+//     const result = await this.makeRequest('/api/openaiwrap', {
+//       userPrompt: point,
+//       systemPrompt,
+//       useGpt4: true
+//     });
 
-    // Remove any bullets or numbering the AI might have added
-    let simplified = result.response.replace(/^\s*[\d*-]+\s*/, '').trim();
+//     // Remove any bullets or numbering the AI might have added
+//     let simplified = result.response.replace(/^\s*[\d*-]+\s*/, '').trim();
     
-    // If somehow we got a completely empty result, return the original
-    if (!simplified) {
-      simplified = point;
-    }
+//     // If somehow we got a completely empty result, return the original
+//     if (!simplified) {
+//       simplified = point;
+//     }
 
-    return simplified;
-  }
+//     return simplified;
+//   }
 
   /**
    * Adjusts the tone of a single analysis point
@@ -852,53 +870,53 @@ Guidelines:
    * @param tone - The target tone (persuasive, aggressive, critical)
    * @returns Promise resolving to tone-adjusted point
    */
-  public static async adjustPointTone(point: string, tone: string): Promise<string> {
-    // Map the tone to a more descriptive guideline
-    let toneGuideline = '';
-    switch (tone) {
-      case 'persuasive':
-        toneGuideline = 'This should sound convincing, empathetic, and focused on mutual benefit. Use persuasive language that appeals to shared goals and values.';
-        break;
-      case 'aggressive':
-        toneGuideline = 'This should sound forceful, direct, and uncompromising. Use strong language and be very direct about the issues.';
-        break;
-      case 'critical':
-        toneGuideline = 'This should sound analytical, detailed, and thorough in the criticism. Emphasize specific flaws and why they are problematic.';
-        break;
-      default:
-        // If an unrecognized tone, default to normal
-        return point;
-    }
+//   public static async adjustPointTone(point: string, tone: string): Promise<string> {
+//     // Map the tone to a more descriptive guideline
+//     let toneGuideline = '';
+//     switch (tone) {
+//       case 'persuasive':
+//         toneGuideline = 'This should sound convincing, empathetic, and focused on mutual benefit. Use persuasive language that appeals to shared goals and values.';
+//         break;
+//       case 'aggressive':
+//         toneGuideline = 'This should sound forceful, direct, and uncompromising. Use strong language and be very direct about the issues.';
+//         break;
+//       case 'critical':
+//         toneGuideline = 'This should sound analytical, detailed, and thorough in the criticism. Emphasize specific flaws and why they are problematic.';
+//         break;
+//       default:
+//         // If an unrecognized tone, default to normal
+//         return point;
+//     }
 
-    const systemPrompt = `You are helping to adjust the tone of design criticism points without changing their core message.
+//     const systemPrompt = `You are helping to adjust the tone of design criticism points without changing their core message.
 
-Task: Rewrite the given design criticism point in a ${tone} tone.
+// Task: Rewrite the given design criticism point in a ${tone} tone.
 
-Tone guidelines: ${toneGuideline}
+// Tone guidelines: ${toneGuideline}
 
-IMPORTANT:
-1. Do NOT change the core criticism or pushback
-2. Do NOT add new criticisms or remove existing ones
-3. Only change the tone and wording
-4. Keep approximately the same length
-5. Maintain the same level of technical detail`;
+// IMPORTANT:
+// 1. Do NOT change the core criticism or pushback
+// 2. Do NOT add new criticisms or remove existing ones
+// 3. Only change the tone and wording
+// 4. Keep approximately the same length
+// 5. Maintain the same level of technical detail`;
 
-    const result = await this.makeRequest('/api/openaiwrap', {
-      userPrompt: point,
-      systemPrompt,
-      useGpt4: true
-    });
+//     const result = await this.makeRequest('/api/openaiwrap', {
+//       userPrompt: point,
+//       systemPrompt,
+//       useGpt4: true
+//     });
 
-    // Remove any bullets or numbering the AI might have added
-    let adjusted = result.response.replace(/^\s*[\d*-]+\s*/, '').trim();
+//     // Remove any bullets or numbering the AI might have added
+//     let adjusted = result.response.replace(/^\s*[\d*-]+\s*/, '').trim();
     
-    // If somehow we got a completely empty result, return the original
-    if (!adjusted) {
-      adjusted = point;
-    }
+//     // If somehow we got a completely empty result, return the original
+//     if (!adjusted) {
+//       adjusted = point;
+//     }
 
-    return adjusted;
-  }
+//     return adjusted;
+//   }
 
   /**
    * Generates a detailed illustration for a specific critique point.
@@ -1047,15 +1065,18 @@ All Current Critique Points (for context, do not elaborate on these, only the on
   ): Promise<string> {
     const systemPrompt = `You are a design research analyst who synthesizes external knowledge and insights for design teams.
 
-Your task is to analyze the provided external knowledge/research content and extract key insights that could inform design criticism for the current design challenge.
+Your task is to analyze the provided external knowledge/research content and extract key insights that could inform design criticism for the current design challenge.  
 
 DESIGN CHALLENGE: ${designChallenge || 'No challenge specified'}
 
 CURRENT DESIGN PROPOSALS TO INFORM:
 ${designProposals}
 
+--- EXTERNAL KNOWLEDGE & RESEARCH CONTENT ---
+${ragContent}
+
 Instructions:
-1. Extract 3-5 key insights, patterns, or lessons from the external content
+1. Extract 3-5 key insights, patterns, or lessons from the external content above
 2. For each insight, briefly explain how it might relate to the current design challenge and proposals
 3. Present these as EXAMPLES and CONSIDERATIONS rather than strict requirements
 4. Focus on insights that could help identify potential issues, risks, or opportunities
@@ -1065,6 +1086,8 @@ Instructions:
 Format your response as clear, numbered insights that can be used to inform (not dictate) the design analysis.
 
 Do not make direct criticisms of the current proposals - instead, provide contextual insights that can help inform better criticism.`;
+
+    const userPrompt = `Please synthesize the provided external knowledge and research content into actionable insights that could inform design criticism for the current design challenge and proposals.`;
 
     try {
       // Use a custom timeout for synthesis since it can be complex
@@ -1077,7 +1100,7 @@ Do not make direct criticisms of the current proposals - instead, provide contex
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          userPrompt: ragContent,
+          userPrompt: userPrompt,
           systemPrompt,
           useGpt4: true // Use GPT-4 for synthesis
         }),
@@ -1147,6 +1170,7 @@ Do not make direct criticisms of the current proposals - instead, provide contex
     const mainPromises: Promise<any>[] = [];
 
     // Generate themed analysis if themes are provided
+    /*
     if (options.themes && options.themes.length > 0) {
       mainPromises.push(
         this.generateAllThemeAnalyses(
@@ -1164,6 +1188,7 @@ Do not make direct criticisms of the current proposals - instead, provide contex
         })
       );
     }
+    */
 
     // Generate standard analysis only if specifically needed or no themes
     if (options.needsStandard || !options.themes || options.themes.length === 0) {
@@ -1227,14 +1252,14 @@ Do not make direct criticisms of the current proposals - instead, provide contex
     await Promise.all(mainPromises);
 
     // Post-processing: Generate simplified versions if needed
-    if (options.needsSimplified && results.standardResponse) {
-      const simplifiedPromise = this.simplifyAnalysis(results.standardResponse).then(simplified => {
-        results.simplifiedResponse = simplified;
-        return simplified;
-      });
+    // if (options.needsSimplified && results.standardResponse) {
+    //   const simplifiedPromise = this.simplifyAnalysis(results.standardResponse).then(simplified => {
+    //     results.simplifiedResponse = simplified;
+    //     return simplified;
+    //   });
       
-      await simplifiedPromise;
-    }
+    //   await simplifiedPromise;
+    // }
 
     Logger.log('OPENAI-API', 'Comprehensive analysis completed', {
       hasThemed: !!results.themedResponses,
