@@ -1,0 +1,78 @@
+Background
+Pittsburgh 311 serves as the city's primary platform for residents to report non-emergency issues, such as potholes, graffiti, and bicycling hazards. According to a Civic Innovation Specialist in the Department of Innovation and Performance, "In some ways, 311 is the city’s first line of defense." While the website is intended to facilitate digital reporting, the majority of users still rely on calling the 311 center. As a result, the digital platform remains underutilized. City staff must contend with an overwhelming volume of reports, many of which are low in quality or duplicated, adding to their operational burden.
+1. Public Website Page (Image 1)
+This is the main interface of the Pittsburgh 311 online service request portal. It prominently features a search bar to submit non-emergency service requests and a list of "Suggested Requests" such as:
+Potholes
+Overgrowth
+Missed Pick Up
+Illegal Parking
+Street Light Concerns
+Abandoned Vehicles
+Below this section, various request categories are visually displayed with icons, including:
+ADA Concerns
+Garbage, Litter, Graffiti
+Parks and Playgrounds
+Street Lights
+Traffic and Mobility Safety Concerns
+Public Safety (Police, Fire, EMS)
+Parking
+The layout is clean and citizen-friendly, with a background image of Pittsburgh’s skyline and bridge.
+Orientation: Current Context
+Multi-Channel Reporting with Limited Digital Adoption
+- The 311 service is available via phone, website, and mobile app
+- Despite multiple channels, most residents prefer reporting issues by phone
+- The call volume exceeds 80,000 annually and continues to grow
+Residents' Friction and Frustration
+- Residents often feel their reports do not result in visible outcomes
+- Many users feel disconnected from the issue resolution process
+- The current platform lacks features to help users track the status of their reports
+Operational Inefficiency and Staff Workload Challenges
+- City staff face a high volume of incoming reports, many of which are vague, incomplete, or outside the scope of 311 services
+- A significant portion of staff time is dedicated to manually reviewing, categorizing, and consolidating duplicate submissions
+- The overwhelming and repetitive nature of the work contributes to delays in response and increases the risk of staff burnout
+Untapped Community Engagement
+- Local advocates and grassroots groups actively report issues informally
+- These community efforts are rarely connected to official systems
+Website page
+2. Pittsburgh 311 Report Issue Interface (Image 2)
+This mobile interface shows a step-by-step report flow for filing a concern via the 311 app. It is divided into three screens:
+Left: A scrollable list of issue categories like "Garbage and Litter," "Parks Issues," and the highlighted "Pedestrian/Bicycle Concerns."
+Middle: A sub-category screen under "Pedestrian/Bicycle Concerns" with options such as "Bike Lane Bollard" and "Trail Maintenance."
+Right: The final submission screen where the user inputs a comment and optionally attaches a photo before tapping "Send Report."
+This mobile UI enables quick issue reporting by location and category.
+Pittsburgh 311 Mobile App Report Issue Interface - It's another mobile channel for reporting issues
+Design Challenge
+How might we redesign the Pittsburgh 311 website to support civic participation and improve communication between residents and the city?
+Subgoals
+- Increase usage of the website to reduce the volume of phone calls. Differentiate the site from the mobile app.
+- Improve the quality of submitted reports to reduce staff workload.
+- Enhance residents' overall satisfaction with the reporting process, encouraging continued engagement with digital platforms.
+
+
+3. Submit Tickets (Image 3)
+This screen highlights the “Bicycle Traffic and Safety Concerns” request page under the "Traffic and Mobility Safety Concerns" category. The right-hand panel provides a description:
+“Report concerns related to Bicycle Traffic and Safety… may include infrastructure requests, repairs, safety improvements, or blocked lanes.”
+It includes:
+Responsible Department: Department of Mobility and Infrastructure
+Resolution Estimate: 90 Business Days
+Action Button: “Request This Service”
+This interface is part of the expanded detail view for selecting and confirming ticket submission.
+4. View Other Tickets (Image 4)
+This image shows the status tracking page for a service request titled "Missed Pick Up." Key elements:
+Status: Closed
+Request Location: 126-E-110, 431 Hastings St, Pittsburgh, PA 15206
+Map View: Displays location pin
+Timeline: Shows the progress:
+SR Submitted (with date/time)
+Work Outcome
+Resolution (same date as submission, indicating a quick response)
+This provides transparency for residents to view resolution outcomes and monitor progress.
+
+Submission- Flow
+Submit tickets
+View other tickets
+Upload a image
+Select locations
+Answer several question
+Add a description
+

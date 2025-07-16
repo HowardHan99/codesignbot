@@ -153,6 +153,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   // State for tag preferences (NEW) - simplified
   const [currentPointTagMappings, setCurrentPointTagMappings] = useState<PointTagMapping[]>([]);
 
+  // Ref to track last processed state to prevent duplicate calls
+  const lastProcessedStateRef = useRef<string>('');
+
   // Save to localStorage whenever useThinkingDialogue changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -306,8 +309,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             Logger.log('AntagoInteract', 'Checking RAG content synthesis cache...');
             
             // Create base context for synthesis
-            const baseDesignContext = notes.map((noteContent, index) => 
-              `Design Decision ${index + 1}: ${noteContent || ''}`
+            const baseDesignContext = notes.map((noteContent) => 
+              `- ${noteContent || ''}`
             ).join('\n');
             
             // Create cache key based on RAG content, design proposals, and challenge
@@ -402,11 +405,11 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       // Directly use the notes parameter passed from the parent component
       const baseMessage = imageContext 
-        ? `${notes.map((noteContent, index) => 
-            `Design Decision ${index + 1}: ${noteContent || ''}`
+        ? `${notes.map((noteContent) => 
+            `- ${noteContent || ''}`
           ).join('\n')}\n\nRelevant visual context from design sketches:\n${imageContext}`
-        : notes.map((noteContent, index) => 
-            `Design Decision ${index + 1}: ${noteContent || ''}`
+        : notes.map((noteContent) => 
+            `- ${noteContent || ''}`
           ).join('\n');
         
       Logger.log('AntagoInteract', 'Base message constructed:', {
@@ -427,7 +430,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       
       // Use provided incorporate suggestions if available, otherwise check for them in the userPrompt
       let hasFeedback = false;
-      const incorporateSuggestionsLabel = "Previous User Feedback & Suggestions:";
+      const incorporateSuggestionsLabel = "Previous User Feedback & Suggestions:  These are the directions that users want to go in OR SUGGESTIONS FOR THE GENERATION, CONSIDER THESE";
       
       if (incorporateSuggestions && incorporateSuggestions.length > 0) {
         enhancedContextParts.push(`${incorporateSuggestionsLabel}\n${incorporateSuggestions.join('\n')}`);
@@ -784,9 +787,58 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   // Process notes when they change or when shouldRefresh is true
   useEffect(() => {
     // Only process if we have sticky notes AND design challenge has been loaded
-    if (stickyNotes.length > 0 && designChallenge !== '') {
-      processNotes(stickyNotes, shouldRefresh || false)
-        .catch(console.error);
+    if (stickyNotes.length > 0 && designChallenge !== '' && !processingRef.current) {
+      // Create a state signature to avoid duplicate processing
+      const stateSignature = JSON.stringify({
+        stickyNotes: stickyNotes.map(note => note.substring(0, 100)), // Truncate for performance
+        shouldRefresh,
+        sessionId,
+        designChallenge: designChallenge.substring(0, 100), // Truncate for performance
+        timestamp: shouldRefresh ? Math.floor(Date.now() / 1000) : 0 // Use seconds to batch calls within same second
+      });
+      
+      Logger.log('AntagoInteract', 'useEffect triggered', {
+        shouldRefresh,
+        sessionId,
+        designChallenge: designChallenge.substring(0, 50),
+        stickyNotesCount: stickyNotes.length,
+        stateSignature: stateSignature.substring(0, 100),
+        lastProcessedSignature: lastProcessedStateRef.current.substring(0, 100),
+        isProcessing: processingRef.current
+      });
+      
+      // Only process if this is a different state than last time
+      if (stateSignature !== lastProcessedStateRef.current) {
+        lastProcessedStateRef.current = stateSignature;
+        
+        Logger.log('AntagoInteract', 'State signature changed, scheduling processNotes', {
+          shouldRefresh,
+          forceProcess: shouldRefresh || false
+        });
+        
+        // Add a small delay to batch multiple state updates together
+        setTimeout(() => {
+          // Double-check that we're not already processing
+          if (!processingRef.current) {
+            Logger.log('AntagoInteract', 'Executing processNotes', {
+              shouldRefresh,
+              forceProcess: shouldRefresh || false
+            });
+            processNotes(stickyNotes, shouldRefresh || false)
+              .catch(console.error);
+          } else {
+            Logger.log('AntagoInteract', 'Skipping processNotes - already processing');
+          }
+        }, 50);
+      } else {
+        Logger.log('AntagoInteract', 'Skipping processNotes - same state signature');
+      }
+    } else {
+      Logger.log('AntagoInteract', 'Skipping processNotes - conditions not met', {
+        hasStickyNotes: stickyNotes.length > 0,
+        hasDesignChallenge: designChallenge !== '',
+        isProcessing: processingRef.current
+      });
     }
   }, [stickyNotes, shouldRefresh, sessionId, designChallenge]);
 
@@ -1257,8 +1309,8 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       }
       
       // Create message context from sticky notes
-      const designDecisionsContext = stickyNotes.map((noteContent, index) => 
-        `Design Decision ${index + 1}: ${noteContent || ''}`
+      const designDecisionsContext = stickyNotes.map((noteContent) => 
+        `- ${noteContent || ''}`
       ).join('\n');
       
       // Set a separate loading state for variations that doesn't affect the main UI

@@ -147,6 +147,16 @@ export function processSuggestion(text: string): ProcessedPoint {
 export const splitResponse = (response: string): string[] => {
   if (!response) return [];
   
+  // First try to parse as JSON (new format)
+  try {
+    const parsed = JSON.parse(response);
+    if (parsed.points && Array.isArray(parsed.points)) {
+      return parsed.points.filter((point: string) => point && point.trim().length > 0);
+    }
+  } catch (e) {
+    // Not JSON, continue with legacy parsing
+  }
+  
   // Split by ## headings (for new format) or ** markers (for legacy format)
   let points: string[] = [];
   
