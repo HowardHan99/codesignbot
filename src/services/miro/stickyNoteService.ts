@@ -18,7 +18,7 @@ type ColorCategory = 'highRelevance' | 'mediumRelevance' | 'lowRelevance';
  */
 export class StickyNoteService {
   // Configurable character limit for sticky notes
-  private static STICKY_CHAR_LIMIT = 300; // Increased from 80 to 200
+  private static STICKY_CHAR_LIMIT = 500; // Increased from 80 to 200
   // Configurable reserved space for sticky notes
   public static RESERVED_SPACE = 400;
 

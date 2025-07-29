@@ -24,6 +24,7 @@ import { StickyNoteService } from '../services/miro/stickyNoteService';
 import { getFirebaseDB } from '../utils/firebase';
 import { ref, push, get, query, orderByChild, limitToLast } from 'firebase/database';
 import { MiroFrameService } from '../services/miro/frameService';
+import { ConfigurationService } from '../services/configurationService';
 
 /**
  * Interface for themed response
@@ -116,6 +117,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   
   const [simplifiedResponses, setSimplifiedResponses] = useState<string[]>([]);
   const [selectedTone, setSelectedTone] = useState<string>('');
+  const [selectedProvider, setSelectedProvider] = useState<'openai' | 'gemini'>('openai'); // Default to openai
   const [synthesizedPoints, setSynthesizedPoints] = useState<string[]>([]);
   const [designChallenge, setDesignChallenge] = useState<string>('');
   const [consensusPoints, setConsensusPoints] = useState<string[]>([]);
@@ -155,6 +157,26 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
   // Ref to track last processed state to prevent duplicate calls
   const lastProcessedStateRef = useRef<string>('');
+
+  // Initialize provider from configuration service after component mounts
+  useEffect(() => {
+    const aiConfig = ConfigurationService.getAiConfig();
+    setSelectedProvider(aiConfig.provider);
+  }, []);
+  
+  // Effect to update configuration when provider changes
+  useEffect(() => {
+    // Update the configuration service when provider changes
+    ConfigurationService.overrideAiConfig({ provider: selectedProvider });
+    
+    // Clear cached responses when provider changes to ensure fresh responses
+    responseStore.clear();
+    setStoredFullResponses({ normal: '' });
+    setStoredSimplifiedResponses({ normal: '' });
+    setStoredThinkingFullResponses({ normal: '' });
+    setStoredThinkingSimplifiedResponses({ normal: '' });
+    console.log(`🔄 Cleared all cached responses due to provider change to: ${selectedProvider}`);
+  }, [selectedProvider]);
 
   // Save to localStorage whenever useThinkingDialogue changes
   useEffect(() => {
@@ -200,22 +222,23 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
    */
   const processNotes = useCallback(async (notes: string[], forceProcess: boolean = false) => {
     const startTime = Date.now(); // Define startTime
-    // If forcing process, reset state flags first
-    if (forceProcess) {
-      Logger.log('AntagoInteract', 'Force processing requested, resetting state');
-      processedRef.current = false;
-      processingRef.current = false;
+
+    // === CLEAR CACHED DATA FOR NEW INTERACTION ===
+    // Reset user tagging mappings to prevent caching across sessions
+    setCurrentPointTagMappings([]);
+    Logger.log('AntagoInteract', '🧹 CLEARED cached user tagging data for new interaction');
+    
+    // === END CACHE CLEARING ===
+
+    // Prevent concurrent processing
+    if (processingRef.current && !forceProcess) {
+      Logger.log('AntagoInteract', 'Already processing, skipping request');
+      return;
     }
     
     // Don't process if already processed and not forcing
     if (processedRef.current && !forceProcess) {
       Logger.log('AntagoInteract', 'Notes already processed, skipping processing');
-      return;
-    }
-    
-    // Prevent concurrent processing
-    if (processingRef.current) {
-      Logger.log('AntagoInteract', 'Already processing notes, skipping duplicate processing');
       return;
     }
     
@@ -259,35 +282,107 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       // Always check for the frame, even if toggle is off (for debugging)
       try {
         const allFrames = await miro.board.get({ type: 'frame' });
-        const thinkingFrame = allFrames.find(f => f.title === frameConfig.names.thinkingDialogue);
-        const enhancedContextFrame = allFrames.find(f => f.title === frameConfig.names.ragContent);
-        const variedResponsesFrame = allFrames.find(f => f.title === frameConfig.names.variedResponses);
-        const agentPromptFrame = allFrames.find(f => f.title === frameConfig.names.agentPrompt);
-        const incorporateSuggestionsFrame = allFrames.find(f => f.title === frameConfig.names.incorporateSuggestions);
-        const discardedPointsFrame = allFrames.find(f => f.title === frameConfig.names.discardedPoints);
-        const consensusFrame = allFrames.find(f => f.title === frameConfig.names.consensus);
-        const agentResponseFrame = allFrames.find(f => f.title === frameConfig.names.antagonisticResponse);
         
-        // Function to extract content from a frame
+        // === COMPREHENSIVE FRAME DEBUGGING ===
+        Logger.log('AntagoInteract', '🔍 ALL FRAMES ON BOARD:', {
+          totalFrames: allFrames.length,
+          frameDetails: allFrames.map(f => ({
+            title: f.title,
+            id: f.id,
+            isConsensusMatch: f.title === 'Consensus' || f.title === frameConfig.names.consensus,
+            titleLower: f.title?.toLowerCase()
+          }))
+        });
+        
+        // === IMPROVED FRAME FINDING LOGIC ===
+        // More robust frame finding that handles case variations and partial matches
+        const findFrameByName = (frames: any[], targetName: string) => {
+          // First try exact match
+          let frame = frames.find(f => f.title === targetName);
+          if (frame) return frame;
+          
+          // Then try case-insensitive match
+          frame = frames.find(f => f.title?.toLowerCase() === targetName.toLowerCase());
+          if (frame) return frame;
+          
+          // Then try partial match (contains)
+          frame = frames.find(f => f.title?.toLowerCase().includes(targetName.toLowerCase()));
+          if (frame) return frame;
+          
+          return null;
+        };
+        
+        const thinkingFrame = findFrameByName(allFrames, frameConfig.names.thinkingDialogue);
+        const enhancedContextFrame = findFrameByName(allFrames, frameConfig.names.ragContent);
+        const variedResponsesFrame = findFrameByName(allFrames, frameConfig.names.variedResponses);
+        const agentPromptFrame = findFrameByName(allFrames, frameConfig.names.agentPrompt);
+        const incorporateSuggestionsFrame = findFrameByName(allFrames, frameConfig.names.incorporateSuggestions);
+        const discardedPointsFrame = findFrameByName(allFrames, frameConfig.names.discardedPoints);
+        const consensusFrame = findFrameByName(allFrames, frameConfig.names.consensus) || findFrameByName(allFrames, 'Consensus'); // Extra fallback for "Consensus"
+        const agentResponseFrame = findFrameByName(allFrames, frameConfig.names.antagonisticResponse);
+        
+        // === FRAME FINDING RESULTS DEBUGGING ===
+        Logger.log('AntagoInteract', '📋 FRAME FINDING RESULTS:', {
+          consensusFrame: consensusFrame ? `✅ FOUND: "${consensusFrame.title}" (ID: ${consensusFrame.id})` : '❌ NOT FOUND',
+          agentResponseFrame: agentResponseFrame ? `✅ FOUND: "${agentResponseFrame.title}"` : '❌ NOT FOUND',
+          thinkingFrame: thinkingFrame ? `✅ FOUND: "${thinkingFrame.title}"` : '❌ NOT FOUND',
+          incorporateSuggestionsFrame: incorporateSuggestionsFrame ? `✅ FOUND: "${incorporateSuggestionsFrame.title}"` : '❌ NOT FOUND',
+          
+          // Detailed consensus frame search debugging
+          consensusSearchDetails: {
+            searchedFor: [frameConfig.names.consensus, 'Consensus'],
+            configValue: frameConfig.names.consensus,
+            foundByConfigName: !!findFrameByName(allFrames, frameConfig.names.consensus),
+            foundByLiteralConsensus: !!findFrameByName(allFrames, 'Consensus'),
+            allFrameNames: allFrames.map(f => f.title),
+            framesWithConsensusInName: allFrames.filter(f => f.title?.toLowerCase().includes('consensus')).map(f => ({ title: f.title, id: f.id }))
+          }
+        });
+        
+        // === ENHANCED FRAME EXTRACTION FUNCTION ===
+        // Improved function to extract content from a frame (sticky notes AND text elements)
         const extractContentFromFrame = async (frame: any) => {
           if (!frame) return '';
           
-          // Get both sticky notes and text elements from the frame
-          const stickyNotesFromBoard = await miro.board.get({ type: 'sticky_note' });
-          const frameStickyNotes = stickyNotesFromBoard.filter(
-            note => note.parentId === frame.id
-          );
-          const textElements = await miro.board.get({ type: 'text' });
-          const frameTextElements = textElements.filter(
-            text => text.parentId === frame.id
-          );
+          Logger.log('AntagoInteract', `🔍 Extracting content from frame: "${frame.title}" (ID: ${frame.id})`);
+          
+          // Get ALL sticky notes and text elements from the board
+          const allStickyNotes = await miro.board.get({ type: 'sticky_note' });
+          const allTextElements = await miro.board.get({ type: 'text' });
+          
+          // Filter items that belong to this frame
+          const frameStickyNotes = allStickyNotes.filter(note => note.parentId === frame.id);
+          const frameTextElements = allTextElements.filter(text => text.parentId === frame.id);
+          
+          // Extract content from sticky notes
+          const stickyNotesContent = frameStickyNotes
+            .map(note => note.content || '')
+            .filter(content => content.trim() !== '')
+            .join('\\n');
+          
+          // Extract content from text elements  
+          const textElementsContent = frameTextElements
+            .map(text => text.content || '')
+            .filter(content => content.trim() !== '')
+            .join('\\n');
           
           // Combine content from both sources
-          const stickyNotesContent = frameStickyNotes.map(note => note.content || '').join('\n');
-          const textElementsContent = frameTextElements.map(text => text.content || '').join('\n');
-          const combinedContent = [stickyNotesContent, textElementsContent].filter(Boolean).join('\n\n').trim();
+          const allContent = [stickyNotesContent, textElementsContent]
+            .filter(content => content.trim() !== '')
+            .join('\\n\\n')
+            .trim();
           
-          return combinedContent;
+          Logger.log('AntagoInteract', `📋 Frame "${frame.title}" extraction results:`, {
+            frameId: frame.id,
+            stickyNotesFound: frameStickyNotes.length,
+            textElementsFound: frameTextElements.length,
+            stickyContent: stickyNotesContent || 'NONE',
+            textContent: textElementsContent || 'NONE',
+            combinedLength: allContent.length,
+            combinedPreview: allContent.substring(0, 200) + (allContent.length > 200 ? '...' : '')
+          });
+          
+          return allContent;
         };
         
         // Extract content from each frame separately
@@ -296,6 +391,71 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         incorporateSuggestionsString = await extractContentFromFrame(incorporateSuggestionsFrame);
         discardedPointsString = await extractContentFromFrame(discardedPointsFrame);
         consensusPointsString = await extractContentFromFrame(consensusFrame);
+        
+        // === DETAILED CONSENSUS POINTS DEBUGGING ===
+        Logger.log('AntagoInteract', '🔍 CONSENSUS POINTS EXTRACTION DEBUG:', {
+          consensusFrameFound: !!consensusFrame,
+          consensusFrameTitle: consensusFrame?.title || 'NOT FOUND',
+          consensusFrameId: consensusFrame?.id || 'NO ID',
+          rawConsensusString: consensusPointsString,
+          consensusStringLength: consensusPointsString?.length || 0,
+          consensusStringPreview: consensusPointsString ? consensusPointsString.substring(0, 200) + '...' : 'EMPTY OR NULL',
+          
+          // NEW: Show if extraction was successful
+          extractionSuccess: !!consensusPointsString && consensusPointsString.trim() !== '',
+          hasActualContent: consensusPointsString ? consensusPointsString.split('\\n').filter(p => p.trim()).length : 0
+        });
+        
+        // === ENHANCED CONSENSUS FRAME CONTENT ANALYSIS ===
+        if (consensusFrame) {
+          const allStickyNotes = await miro.board.get({ type: 'sticky_note' });
+          const consensusStickies = allStickyNotes.filter(note => note.parentId === consensusFrame.id);
+          const allTextElements = await miro.board.get({ type: 'text' });
+          const consensusTexts = allTextElements.filter(text => text.parentId === consensusFrame.id);
+          
+          Logger.log('AntagoInteract', '📋 DETAILED CONSENSUS FRAME ANALYSIS:', {
+            frameInfo: {
+              title: consensusFrame.title,
+              id: consensusFrame.id,
+              type: 'frame'
+            },
+            
+            stickyNotesAnalysis: {
+              totalStickiesInFrame: consensusStickies.length,
+              stickiesWithContent: consensusStickies.filter(s => s.content && s.content.trim()).length,
+              stickyDetails: consensusStickies.map(s => ({
+                id: s.id,
+                content: s.content || 'EMPTY',
+                hasContent: !!(s.content && s.content.trim()),
+                contentLength: s.content?.length || 0
+              })),
+              allStickyContent: consensusStickies.map(s => s.content || '').filter(c => c.trim()).join(' | ')
+            },
+            
+            textElementsAnalysis: {
+              totalTextsInFrame: consensusTexts.length,
+              textsWithContent: consensusTexts.filter(t => t.content && t.content.trim()).length,
+              textDetails: consensusTexts.map(t => ({
+                id: t.id,
+                content: t.content || 'EMPTY',
+                hasContent: !!(t.content && t.content.trim()),
+                contentLength: t.content?.length || 0
+              })),
+              allTextContent: consensusTexts.map(t => t.content || '').filter(c => c.trim()).join(' | ')
+            },
+            
+            combinedAnalysis: {
+              totalContentSources: consensusStickies.length + consensusTexts.length,
+              totalWithActualContent: consensusStickies.filter(s => s.content?.trim()).length + consensusTexts.filter(t => t.content?.trim()).length,
+              finalExtractedString: consensusPointsString,
+              extractionWorkedProperly: consensusPointsString === [
+                ...consensusStickies.map(s => s.content || '').filter(c => c.trim()),
+                ...consensusTexts.map(t => t.content || '').filter(c => c.trim())
+              ].join('\\n\\n').trim()
+            }
+          });
+        }
+        // === END CONSENSUS DEBUGGING ===
         
         // Extract existing antagonistic points to avoid repetition
         existingAntagonisticPointsString = await extractContentFromFrame(agentResponseFrame);
@@ -420,12 +580,13 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         
         // Construct the enhanced message with clear labels for the LLM
         let enhancedContextParts: string[] = [];
-        if (synthesizedRagInsights) {
-          enhancedContextParts.push(`Synthesized RAG Insights (Examples & Considerations):\n${synthesizedRagInsights}`);
-        }
+        // Remove synthesized RAG insights from user prompt - they should be in system prompt
+        // if (synthesizedRagInsights) {
+        //   enhancedContextParts.push(`Synthesized RAG Insights (Examples & Considerations):\n${synthesizedRagInsights}`);
+        // }
         // Note: Raw RAG content removed to avoid redundancy with synthesized insights
         if (thinkingContextString) {
-          enhancedContextParts.push(`Thinking Process Context:\n${thinkingContextString}`);
+          enhancedContextParts.push(`Thinking Process Context,there might be some random contexts because of the noise, but you should focus on the main points relevant to the design proposal and points they made to the existing agent points:\n${thinkingContextString}`);
         }
       
       // Use provided incorporate suggestions if available, otherwise check for them in the userPrompt
@@ -444,6 +605,47 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         hasFeedback = true;
         Logger.log('AntagoInteract', 'Added incorporate suggestions from frame:', {
           suggestionsContent: incorporateSuggestionsString
+        });
+      }
+      
+      // Add consensus points to the user message (NEW - previously missing!)
+      const messageConsensusPointsFromFrame = consensusPointsString ? consensusPointsString.split('\n').filter(p => p.trim()) : [];
+      const combinedConsensusPoints = [
+        ...(initialConsensusPoints || []),
+        ...messageConsensusPointsFromFrame
+      ].filter((point, index, array) => array.indexOf(point) === index); // Remove duplicates
+      
+      // === CONSENSUS POINTS MESSAGE INCLUSION DEBUG ===
+      Logger.log('AntagoInteract', '🎯 CONSENSUS POINTS MESSAGE INCLUSION:', {
+        rawConsensusString: consensusPointsString || 'EMPTY',
+        consensusStringLength: consensusPointsString?.length || 0,
+        messageConsensusPointsFromFrame: messageConsensusPointsFromFrame,
+        messageConsensusCount: messageConsensusPointsFromFrame.length,
+        initialConsensusPoints: initialConsensusPoints || [],
+        initialConsensusCount: initialConsensusPoints?.length || 0,
+        combinedConsensusPoints: combinedConsensusPoints,
+        combinedCount: combinedConsensusPoints.length,
+        willBeAddedToMessage: combinedConsensusPoints.length > 0
+      });
+      
+      if (combinedConsensusPoints.length > 0) {
+        const consensusLabel = "Consensus Agreements (CRITICAL - DO NOT CONTRADICT): These are established agreements and features that users want to preserve";
+        const consensusSection = `${consensusLabel}\\n${combinedConsensusPoints.join('\\n')}`;
+        enhancedContextParts.push(consensusSection);
+        
+        Logger.log('AntagoInteract', '✅ CONSENSUS POINTS ADDED TO MESSAGE:', {
+          consensusCount: combinedConsensusPoints.length,
+          consensusPoints: combinedConsensusPoints,
+          consensusSection: consensusSection,
+          enhancedContextPartsLength: enhancedContextParts.length,
+          consensusSectionLength: consensusSection.length
+        });
+      } else {
+        Logger.log('AntagoInteract', '❌ NO CONSENSUS POINTS TO ADD - CHECKING WHY:', {
+          consensusStringEmpty: !consensusPointsString || consensusPointsString.trim() === '',
+          initialConsensusEmpty: !initialConsensusPoints || initialConsensusPoints.length === 0,
+          frameConsensusEmpty: messageConsensusPointsFromFrame.length === 0,
+          debugging: 'Check consensus frame content and initial props'
         });
       }
       
@@ -542,11 +744,16 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
             customSystemPrompt: undefined, // Only for variations
             pointTagMappings,
             discardedPoints: discardedPointsFromFrame,
+            ragContent: ragContextString, // Raw RAG content for system prompt
+            synthesizedRagInsights: synthesizedRagInsights, // Synthesized RAG insights for system prompt
             needsSimplified: false, // No simplified analysis by default
             needsStandard: true, // Always generate standard analysis
+            provider: selectedProvider, // Use selected provider
             variations: undefined // Variations handled separately in handleSendVariations
           }
         );
+        
+        console.log(`🔥 ANTAGO INTERACT: Received response from ${selectedProvider}:`, comprehensiveResults);
 
         // Process results - we should always have standardResponse now
         if (comprehensiveResults.standardResponse) {
@@ -914,38 +1121,14 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       // If switching to simplified mode but we don't have simplified responses yet
       if (newMode && currentResponses.length > 0 && !currentSimplifiedResponses.length) {
         // Generate simplified version on demand
-        (async () => {
-          try {
-            setIsChangingTone(true);
-            
-            // Choose the correct response to simplify based on current toggle state
-            const responseToSimplify = useThinkingDialogue ? thinkingResponses[0] : responses[0];
-            const simplified = await OpenAIService.simplifyAnalysis(responseToSimplify);
-            
-            // Store in the correct state variable based on current toggle
-            if (useThinkingDialogue) {
-              setThinkingSimplifiedResponses([simplified]);
-              setStoredThinkingSimplifiedResponses({ normal: simplified });
-            } else {
-              setSimplifiedResponses([simplified]);
-              setStoredSimplifiedResponses({ normal: simplified });
-            }
-            
-            if (!useThemedDisplay) {
-              onResponsesUpdate?.(splitResponse(simplified));
-            }
-            setIsChangingTone(false);
-          } catch (error) {
-            console.error('Error generating simplified response:', error);
-            // If we failed to generate simplified version, fall back to full version
-            setIsSimplifiedMode(false);
-            setIsChangingTone(false);
-          }
+        (() => {
+          // Temporary: Set loading to false since simplifyAnalysis is not implemented
+          setIsChangingTone(false);
         })();
       } else if (currentResponses.length > 0 && !useThemedDisplay) {
         // If we already have the right responses, just update
-        const responsesToShow = newMode ? currentSimplifiedResponses : currentResponses;
-        onResponsesUpdate?.(splitResponse(responsesToShow[0]));
+        const responsesToUse = newMode ? currentSimplifiedResponses : currentResponses;
+        onResponsesUpdate?.(splitResponse(responsesToUse[0]));
       }
       
       // Log user activity
@@ -998,30 +1181,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         // When switching back to standard display, restore previous settings
         if (isSimplifiedMode && !currentSimplifiedResponses.length && currentResponses.length > 0) {
           // If we need to generate simplified responses
-          (async () => {
-            try {
-              setIsChangingTone(true);
-              const responseToSimplify = currentResponses[0];
-              const simplified = await OpenAIService.simplifyAnalysis(responseToSimplify);
-              
-              // Store in the correct state variable
-              if (useThinkingDialogue) {
-                setThinkingSimplifiedResponses([simplified]);
-                setStoredThinkingSimplifiedResponses({ normal: simplified });
-              } else {
-                setSimplifiedResponses([simplified]);
-                setStoredSimplifiedResponses({ normal: simplified });
-              }
-              
-              if (!useThemedDisplay) {
-                onResponsesUpdate?.(splitResponse(simplified));
-              }
-              setIsChangingTone(false);
-            } catch (error) {
-              console.error('Error generating simplified response:', error);
-              setIsSimplifiedMode(false);
-              setIsChangingTone(false);
-            }
+          (() => {
+            // Temporary: Set loading to false since simplifyAnalysis is not implemented
+            setIsChangingTone(false);
           })();
         }
       }
@@ -1033,9 +1195,9 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         onResponsesUpdate?.(allPoints);
       } else if (!newDisplayMode && currentResponses.length > 0) {
         // If switching to standard display, use the normal or simplified responses
-        const responsesToShow = isSimplifiedMode ? currentSimplifiedResponses : currentResponses;
-        if (responsesToShow.length > 0) {
-          onResponsesUpdate?.(splitResponse(responsesToShow[0]));
+        const responsesToUse = isSimplifiedMode ? currentSimplifiedResponses : currentResponses;
+        if (responsesToUse.length > 0) {
+          onResponsesUpdate?.(splitResponse(responsesToUse[0]));
         }
       }
       
@@ -1121,19 +1283,22 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
 
       // If we don't have this tone stored, generate it
       const currentResponse = isSimplifiedMode ? currentSimplifiedResponses[0] : currentResponses[0];
-      const adjustedResponse = await OpenAIService.adjustTone(currentResponse, newTone);
+      // const adjustedResponse = await OpenAIService.adjustTone(currentResponse, newTone);
       
       // Store the new tone version
-      if (isSimplifiedMode) {
-        setCurrentStoredSimplifiedResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
-        setCurrentSimplifiedResponses([adjustedResponse]);
-      } else {
-        setCurrentStoredFullResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
-        setCurrentResponses([adjustedResponse]);
-      }
+      // if (isSimplifiedMode) {
+      //   setCurrentStoredSimplifiedResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
+      //   setCurrentSimplifiedResponses([adjustedResponse]);
+      // } else {
+      //   setCurrentStoredFullResponses(prev => ({ ...prev, [newTone]: adjustedResponse }));
+      //   setCurrentResponses([adjustedResponse]);
+      // }
+      
+      // Temporary: Just set loading to false since adjustTone is not implemented
+      setIsChangingTone(false);
 
       if (!useThemedDisplay) {
-        onResponsesUpdate?.(splitResponse(adjustedResponse));
+        onResponsesUpdate?.(splitResponse(currentResponse));
       }
 
       // Save tone change to Firebase
@@ -1267,12 +1432,30 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
   // Reset stored responses when analysis is refreshed
   useEffect(() => {
     if (shouldRefresh) {
+      // Clear all main response states (these should never be cached anyway)
+      setResponses([]);
+      setSimplifiedResponses([]);
+      setThemedResponses([]);
+      setThinkingResponses([]);
+      setThinkingSimplifiedResponses([]);
+      setThinkingThemedResponses([]);
+      
+      // Clear stored response states (these should never be cached anyway)
       setStoredFullResponses({ normal: '' });
       setStoredSimplifiedResponses({ normal: '' });
-      // Also reset thinking dialogue stored responses if they exist
       setStoredThinkingFullResponses({ normal: '' });
       setStoredThinkingSimplifiedResponses({ normal: '' });
-      setSelectedPointsForUnpack([]); // Clear selection on refresh
+      
+      // Clear selection and UI states
+      setSelectedPointsForUnpack([]);
+      setSelectedTone('');
+      setError(null);
+      
+      // DON'T clear ResponseStore - this is for frame content which shouldn't be cached
+      // DON'T clear RAG synthesis cache - this is the ONLY thing that should be cached
+      // The RAG synthesis cache persists across refreshes since it's expensive to regenerate
+      
+      Logger.log('AntagoInteract', 'Frame content states cleared due to refresh (RAG synthesis cache preserved)');
     }
   }, [shouldRefresh]);
 
@@ -1358,6 +1541,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               pointTagMappings: currentPointTagMappings,
               needsSimplified: false,
               needsStandard: false,
+              provider: selectedProvider, // Use selected provider
               variations: variations
             }
           );
@@ -1511,23 +1695,65 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
         // Find the original sticky note containing this point text
         // We look for sticky notes whose content includes the point text (exact or close match)
         const originalSticky = allStickyNotes.find(sticky => {
+          // Skip sticky notes that have no content or are empty/whitespace only
+          if (!sticky.content || sticky.content.trim() === '') {
+            return false;
+          }
+          
           // First try exact match
           if (sticky.content === pointToUnpack) {
             return true;
           }
           
           // Then try a more lenient match that ignores case, whitespace, and punctuation
-          const normalizedContent = sticky.content?.toLowerCase().replace(/\s+/g, ' ').trim() || '';
+          const normalizedContent = sticky.content.toLowerCase().replace(/\s+/g, ' ').trim();
           const normalizedPoint = pointToUnpack.toLowerCase().replace(/\s+/g, ' ').trim();
-          const isMatch = normalizedContent.includes(normalizedPoint) || normalizedPoint.includes(normalizedContent);
+          
+          // Only consider it a match if there's substantial overlap
+          // Require at least 20 characters of meaningful content to avoid false positives
+          if (normalizedContent.length < 20 && normalizedPoint.length < 20) {
+            // For shorter content, require exact match or very high similarity
+            return normalizedContent === normalizedPoint || 
+                   (normalizedContent.includes(normalizedPoint) && normalizedPoint.length > 10) ||
+                   (normalizedPoint.includes(normalizedContent) && normalizedContent.length > 10);
+          }
+          
+          // For longer content, use contains logic but ensure meaningful overlap
+          const isMatch = (normalizedContent.includes(normalizedPoint) && normalizedPoint.length > 15) || 
+                          (normalizedPoint.includes(normalizedContent) && normalizedContent.length > 15);
           
           return isMatch;
         });
 
         if (!originalSticky) {
           console.warn(`Could not find original sticky for point: "${pointToUnpack.substring(0, 30)}..."`);
+          
+          // === ENHANCED DEBUG: Show all sticky notes content for debugging ===
+          console.log('🔍 UNPACK DEBUG - Available sticky notes for matching:', {
+            pointToMatch: pointToUnpack,
+            availableStickies: allStickyNotes.map((sticky, index) => ({
+              index: index,
+              id: sticky.id,
+              content: sticky.content || 'EMPTY/NULL',
+              contentLength: sticky.content?.length || 0,
+              hasContent: !!(sticky.content && sticky.content.trim()),
+              isBlank: !sticky.content || sticky.content.trim() === ''
+            })).slice(0, 10) // Show first 10 for debugging
+          });
+          
           continue; // Skip to next point
         }
+
+        // === ENHANCED DEBUG: Show which sticky was matched ===
+        console.log('🔍 UNPACK DEBUG - Successfully matched sticky:', {
+          pointText: pointToUnpack.substring(0, 50) + '...',
+          matchedSticky: {
+            id: originalSticky.id,
+            content: originalSticky.content?.substring(0, 100) + '...',
+            contentLength: originalSticky.content?.length || 0,
+            isExactMatch: originalSticky.content === pointToUnpack
+          }
+        });
 
         // === DEBUG LOGGING: Original sticky position ===
         console.log('🔍 UNPACK DEBUG - Original Sticky Position:', {
@@ -1781,6 +2007,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               selectedTone={selectedTone}
               isSimplifiedMode={isSimplifiedMode}
               synthesizedPointsCount={synthesizedPoints.length}
+              selectedProvider={selectedProvider}
               onToneChange={handleToneChange}
               onModeToggle={handleModeToggle}
               onShowSynthesizedPoints={() => MiroService.sendSynthesizedPointsToBoard(synthesizedPoints)}
@@ -1788,6 +2015,7 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
               onDisplayToggle={handleDisplayToggle}
               useThinkingDialogue={useThinkingDialogue}
               onThinkingDialogueToggle={handleThinkingDialogueToggle}
+              onProviderChange={setSelectedProvider}
               hasThinkingResults={thinkingResponses.length > 0}
               // Add new props for variations
               hasRagContent={!!currentRagContent}

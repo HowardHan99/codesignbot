@@ -7,6 +7,7 @@ export interface OpenAIResponse {
 
 import { PointTagMapping } from './miroService';
 import { Logger } from '../utils/logger';
+import { ConfigurationService } from './configurationService';
 
 // Content from DesignChallenge.txt
 const DEFAULT_DESIGN_CHALLENGE = 'How might we redesign the Pittsburgh 311 website to support civic participation and improve communication between residents and the city?';
@@ -26,12 +27,12 @@ SUBGOALS:
 
 /**
  * Service class for handling OpenAI API interactions
- * Provides methods for generating, simplifying, and adjusting the tone of analysis
+ * Provides methods for generating stakeholder pushback and objections to design decisions
  */
 export class OpenAIService {
   /**
-   * Makes a request to the OpenAI API endpoint
-   * @param endpoint - The API endpoint to call
+   * Makes a request to the AI API endpoint (OpenAI or Gemini)
+   * @param endpoint - The API endpoint to call ('/api/openaiwrap' or '/api/geminiwrap')
    * @param data - The request payload
    * @returns Promise resolving to the API response
    */
@@ -61,7 +62,7 @@ export class OpenAIService {
       const jsonResponse = await response.json();
       return jsonResponse;
     } catch (error: any) {
-      console.error('Error in OpenAI API request:', error);
+      console.error('Error in AI API request:', error);
       if (error.name === 'AbortError') {
         throw new Error('API request timed out after 60 seconds');
       }
@@ -70,7 +71,7 @@ export class OpenAIService {
   }
 
   /**
-   * Generates an antagonistic analysis of design decisions with JSON output
+   * Generates stakeholder pushback and objections to design decisions with JSON output
    * @param userPrompt - The combined design decisions to analyze
    * @param designChallenge - The context of the design challenge
    * @param existingPoints - Array of existing synthesized points to avoid overlap
@@ -80,7 +81,9 @@ export class OpenAIService {
    * @param pointTagMappings - Previous point-tag mappings for learning
    * @param discardedPoints - Points the user found irrelevant or wrong (AVOID these patterns)
    * @param ragContent - RAG content to be included in system prompt for caching
-   * @returns Promise resolving to the formatted analysis as JSON
+   * @param synthesizedRagInsights - RAG insights to be included in system prompt for caching
+   * @param provider - AI provider to use (optional, uses configured provider by default)
+   * @returns Promise resolving to the stakeholder pushback as JSON
    */
   public static async generateAnalysis(
     userPrompt: string, 
@@ -91,60 +94,77 @@ export class OpenAIService {
     customSystemPrompt?: string,
     pointTagMappings?: PointTagMapping[],
     discardedPoints?: string[],
-    ragContent?: string
+    ragContent?: string,
+    synthesizedRagInsights?: string,
+    provider?: 'openai' | 'gemini'
   ): Promise<string> {
 
+    // Use provider parameter if provided, otherwise use configured provider
+    const aiConfig = ConfigurationService.getAiConfig();
+    const selectedProvider = provider || aiConfig.provider;
+
     // Base system prompt template with JSON output requirement
-    const BASE_SYSTEM_PROMPT = `You are a public-service design expert who is good at identifying the tensions and broad social implications of design proposals. You are analyzing design proposals and solutions for the design challenge with the following conditions background, and design challenge:
+    const BASE_SYSTEM_PROMPT = `You are channeling the voice of concerned community members and stakeholders who are raising genuine objections and resistance to design proposals. You represent the pushback and opposition that would emerge from real stakeholders when these design decisions are presented to them.
 
 DESIGN CHALLENGE: ${designChallenge || DEFAULT_DESIGN_CHALLENGE}
 
 BACKGROUND CONTEXT: ${designChallenge ? '' : DEFAULT_BACKGROUND}
 
-Provide exactly 5 potential seed points that identify potential problems or conflicts in these decisions. Each point MUST follow this exact format:
+Your task is to voice the genuine concerns, objections, and resistance that different stakeholder groups would raise when confronted with these design proposals. These are NOT suggestions for improvement - they are expressions of opposition, worry, and pushback.
 
-"For [specific group of people/community members]: [A potential conflict or pushback they might raise - can be phrased as a question]"
+Provide exactly 4 stakeholder objections that represent genuine pushback and resistance to these decisions. Each point MUST follow this exact format:
+
+"[specific group of people/community members] might push back: [A genuine objection, concern, or resistance they would voice - can be phrased as a question or statement]"
 
 Requirements:
-- Each point should focus on a different conflict or pushback that stakeholders might raise
-- The conflicts should be constructive and help the designer understand broader social implications and the needs of the community members
-- Points should be concise and suitable for sticky note length
-- Use language understandable by a non-design audience - avoid design jargon and big words
-- The conflicts can be phrased as questions (e.g., "Won't this exclude people who...?" or "How will this affect...")
-- Focus on real concerns that stakeholder would genuinely raise
-- Remember that the user is redesigning a public service website, so the conflicts should be relevant to the design challenge and the design proposals
-- Better to focus on the the tensions relevant to the design challenge and the design proposals
-- Generate a diverse range of conflicts covering different aspects, stakeholder groups, and types of concerns
-- In the Point Don't use Design Decision number as the user doesn't number the design decisions
+- Each point should voice genuine opposition, resistance, or pushback that stakeholders would actually raise
+- Each point should be a single stakeholder of a single concern
+- These should sound like real objections you'd hear in community meetings, not helpful suggestions or advice on how to fix the design decisions.
+- DO NOT GIVE ANY SUGGESTIONS OR ANALYSIS OF pushback point.
+- YOU CAN USE AGGRESIVE TONE TO PUSHBACK TO THE DESIGN PROPOSALS .
+- Points should be concise and suitable for sticky note length, which is about 50 words
+- Don't be 50 words longer but also don't be too short
+- The objections can be phrased as questions (e.g., "Why should we trust this when...?" or "What happens to people who...?") or statements of pushback. 
+- Focus on CONCEPTUAL concerns that would create pushback, opposition, or resistance at this ideation stage - not implementation concerns or too much detail.
+- Don't use any real commuity names or locations in the points
+- Remember that these are objections to a public service website redesign ideation, so try to maintain the pushback and resistance at this stage and link it to specific design decisions. 
+- Make it sound like stakeholders pushing back, not experts giving advice.
+- Don't use the dash (-) in the points
+- THERE CAN ALSO BE CONFLICTS BETWEEN THE POINTS YOU GENERATED. 
 
 CRITICAL: You must respond with valid JSON in exactly this format:
 {
   "points": [
-    "For stakeholder 1 or comunity group 1: [A potential conflict or pushback they might raise - can be phrased as a question]",
-    "For stakeholder 2 or comunity group 2: [A potential conflict or pushback they might raise - can be phrased as a question]",
-    "For stakeholder 3 or comunity group 3: [A potential conflict or pushback they might raise - can be phrased as a question]",
-    "For stakeholder 4 or comunity group 4: [A potential conflict or pushback they might raise - can be phrased as a question]",
-    "For stakeholder 5 or comunity group 5: [A potential conflict or pushback they might raise - can be phrased as a question]"
+    "stakeholder 1 or comunity group 1 might push back: [A genuine objection, concern, or resistance they would voice - can be phrased as a question or statement]",
+    "stakeholder 2 or comunity group 2 might push back: [A genuine objection, concern, or resistance they would voice - can be phrased as a question or statement]",
+    "stakeholder 3 or comunity group 3 might push back: [A genuine objection, concern, or resistance they would voice - can be phrased as a question or statement]",
+    "stakeholder 4 or comunity group 4 might push back: [A genuine objection, concern, or resistance they would voice - can be phrased as a question or statement]"
   ]
 }
 
 QUALITY CRITERIA - Prioritize points that are:
-1. HIGHLY RELEVANT to the design challenge and specific design proposals (8+/10)
-2. DIRECTLY MAPPED to specific design decisions in the proposal
-3. HIGHLY CONFLICTUAL - challenging and likely to generate pushback (8+/10)
-4. HIGHLY CONSTRUCTIVE - helping designers understand broader social implications (8+/10)
-5. DIVERSE in stakeholder groups, concerns, and impact types`;
+1. HIGHLY RELEVANT to the design challenge and specific design proposals, especially something special that the designer is trying to do.
+2. HIGHLY CONFLICTUAL - challenging and likely to generate genuine pushback
+3. AUTHENTIC - sounding like real stakeholder resistance, not expert advice, or suggestions and advice on how to fix the design decisions.
+4. DIVERSE in stakeholder groups, pushback, and types of opposition
+
+IMPORTANT: If user feedback or directions are provided in the prompt, you MUST ensure AT LEAST 2 out of 4 points directly address or build upon that feedback. User feedback can be a feature that users want to go in or suggestions for the generation, consider these.`;
 
     // Use custom prompt if provided, otherwise use base prompt
     let systemPrompt = customSystemPrompt || BASE_SYSTEM_PROMPT;
 
     // Add RAG content to system prompt for caching optimization
     // When design proposals don't change, this allows the system prompt (including RAG content) to be cached
-    if (ragContent) {
-      systemPrompt += `\n\n--- EXTERNAL KNOWLEDGE & RESEARCH INSIGHTS ---\nConsider these research insights and external knowledge when generating your analysis:\n\n${ragContent}\n\nUse this information to inform your critique but don't directly reference it unless highly relevant.`;
+    // if (ragContent) {
+    //   systemPrompt += `\n\n--- EXTERNAL KNOWLEDGE & RESEARCH INSIGHTS ---\nConsider these research insights and external knowledge when generating your analysis:Use this information to inform your critique but don't directly reference it unless highly relevant.`;
+    // }
+
+    // Add synthesized RAG insights to system prompt for caching optimization
+    if (synthesizedRagInsights) {
+      systemPrompt += `\n\n--- SYNTHESIZED RAG INSIGHTS (EXAMPLES & CONSIDERATIONS) ---\nConsider these synthesized insights and examples when generating your analysis:\n\n${synthesizedRagInsights}\n\nUse these insights to inform your critique but don't directly reference them unless highly relevant.`;
     }
 
-    // Add user preference guidance notes to system prompt
+    // Add high-level guidance for handling different types of user input to system prompt
     let userGuidanceNotes: string[] = [];
     if (pointTagMappings && pointTagMappings.length > 0) {
       userGuidanceNotes.push("user tagging preferences");
@@ -157,7 +177,7 @@ QUALITY CRITERIA - Prioritize points that are:
     }
     
     // Check for user feedback in the user prompt
-    const incorporateSuggestionsLabel = "Previous User Define Directions: these are the directions that users want to go in";
+    const incorporateSuggestionsLabel = "Previous User Define Directions: these are the directions that users want to go in OR SUGGESTIONS FOR THE GENERATION, CONSIDER THESE";
     const hasFeedback = userPrompt.includes(incorporateSuggestionsLabel);
     if (hasFeedback) {
       userGuidanceNotes.push("user feedback/directions");
@@ -170,8 +190,21 @@ QUALITY CRITERIA - Prioritize points that are:
       userGuidanceNotes.push("existing antagonistic points");
     }
 
+    // Add high-level behavioral guidance to system prompt for caching
     if (userGuidanceNotes.length > 0) {
-      systemPrompt += `\n\nNOTE: The user has provided ${userGuidanceNotes.join(', ')} in their prompt. Follow these guidelines carefully to align with their demonstrated preferences and requirements.`;
+      systemPrompt += `\n\n--- USER INPUT GUIDANCE ---\nThe user has provided ${userGuidanceNotes.join(', ')} in their prompt. Follow these high-level principles while maintaining the tone of genuine stakeholder pushback and resistance:
+
+      1. **User Tagging Preferences**: Learn from previously tagged points to understand what types of stakeholder opposition and resistance the user finds valuable vs not useful. Generate pushback that aligns with their demonstrated preferences for authentic stakeholder concerns.
+
+      2. **Consensus Agreements**: Respect established agreements and features that users want to preserve. NEVER question, criticize, or contradict consensus points. These are off-limits for stakeholder pushback.
+
+      3. **Discarded Criticism Patterns**: Avoid generating pushback similar to patterns the user found irrelevant or wrong. Focus on different types of stakeholder resistance, concerns from different user groups, implementation objections, or social opposition.
+
+      4. **User Feedback/Directions**: When user feedback is provided, PRIORITIZE IT HEAVILY. Ensure AT LEAST 2 out of 4 points are directly relevant to the user's feedback, suggestions, or directions. Voice stakeholder concerns that specifically address what the user highlighted. Don't just acknowledge the feedback - make it a central focus of the stakeholder resistance. Build upon partially addressed issues with more nuanced opposition and ensure the feedback fundamentally shapes the type of pushback you generate.
+
+      5. **Existing Antagonistic Points**: Avoid repetition by generating genuinely NEW stakeholder objections that complement (not duplicate) existing pushback points. You can use similar stakeholder groups if their concerns are genuinely different types of opposition.
+
+  Apply these principles while maintaining authentic stakeholder voice and genuine resistance. The detailed content for these guidance types will be provided in the user prompt.`;
     }
 
     // Construct the main message parts
@@ -179,53 +212,64 @@ QUALITY CRITERIA - Prioritize points that are:
       `Analyze the following design decisions:\n\n${userPrompt}`
     ];
 
-    // Add point-tag mappings if provided (simple format)
+    // Add point-tag mappings if provided (detailed content in user prompt)
     if (pointTagMappings && pointTagMappings.length > 0) {
       const { formatPointTagMappingsForPrompt } = await import('./miroService');
       const tagMappingsText = formatPointTagMappingsForPrompt(pointTagMappings);
       if (tagMappingsText) {
-        messageParts.push(tagMappingsText);
-        messageParts.push(`\n--- USER TAGGING PREFERENCES ---\nBased on the above tagged points, generate points that align with the user's demonstrated preferences for what constitutes useful vs not useful criticism. Focus on the patterns they found valuable while still being critical and constructive.`);
+        messageParts.push(`\n--- USER TAGGING PREFERENCES (DETAILED) ---\n${tagMappingsText}`);
+        messageParts.push(`\nBased on the above tagged points, generate points that align with the user's demonstrated preferences for what constitutes useful vs not useful criticism. Focus on the patterns they found valuable while still being critical and constructive.`);
       }
     }
 
     // Add design principles if provided
     if (designPrinciples) {
-      messageParts.push(`\n\n--- Key Design Principles to Prioritize ---\n${designPrinciples}`);
+      messageParts.push(`\n\n--- KEY DESIGN PRINCIPLES TO PRIORITIZE ---\n${designPrinciples}`);
     }
 
     // Add synthesized points if any
     if (existingPoints.length > 0) {
       messageParts.push(
-        `\n\nAlso consider these synthesized themes from previous discussions:\n${existingPoints.join('\n')}`
+        `\n\n--- SYNTHESIZED THEMES FROM PREVIOUS DISCUSSIONS ---\nConsider these synthesized themes from previous discussions:\n${existingPoints.join('\n')}`
       );
     }
     
-    // Add consensus points if any - MOVED TO USER PROMPT
+    // Add consensus points if any (detailed content in user prompt)
     if (consensusPoints.length > 0) {
       messageParts.push(
-        `\n\n--- CONSENSUS POINTS (DO NOT QUESTION OR CRITICIZE) ---\nThese are established agreements, or features that users want to preserve, that MUST be respected:\n${consensusPoints.join('\n')}\n\nCRITICAL: Do NOT question, criticize, or contradict the consensus points. These are the features that designers have agreed to keep.`
+        `\n\n--- CONSENSUS POINTS (DETAILED) ---\nThese are established agreements, or features that users want to preserve, that MUST be respected:\n${consensusPoints.join('\n')}\n\nCRITICAL: Do NOT question, criticize, or contradict these consensus points. These are the features that designers have agreed to keep.`
       );
     }
     
-    // Add discarded points if any - MOVED TO USER PROMPT
+    // Add discarded points if any (detailed content in user prompt)
     if (discardedPoints && discardedPoints.length > 0) {
       messageParts.push(
-        `\n\n--- DISCARDED POINTS (AVOID THESE PATTERNS) ---\nThe user found these types of criticisms irrelevant or wrong, try to avoid these topics and similar patterns:\n${discardedPoints.join('\n')}\n\nIMPORTANT: AVOID generating points that are similar in theme, focus, or approach to the discarded points. Instead, focus on different aspects, different user groups, different stages of the design process, or different social implications. Ensure your analysis is diverse and addresses areas NOT covered by the discarded patterns.\n\nFor HETEROGENEITY: Since the user has provided discarded patterns, ensure your 5 points cover diverse perspectives such as: (1) different stakeholder groups, (2) different phases of implementation, (3) different scales of impact (individual vs community vs society), (4) different timeframes (immediate vs long-term), and (5) different types of risks (technical, social, ethical, economic). Avoid clustering around similar themes.`
+        `\n\n--- DISCARDED POINTS (DETAILED PATTERNS TO AVOID) ---\nThe user found these types of criticisms irrelevant or wrong, avoid these topics and similar patterns:\n${discardedPoints.join('\n')}\n\nIMPORTANT: AVOID generating points that are similar in theme, focus, or approach to the discarded points. Instead, focus on different aspects, different user groups, different stages of the design process, or different social implications. Ensure your analysis is diverse and addresses areas NOT covered by the discarded patterns.\n\nFor HETEROGENEITY: Since the user has provided discarded patterns, ensure your 4 points cover diverse perspectives, don't cluster around similar themes.`
       );
     }
     
-    // Handle user feedback - MOVED TO USER PROMPT
+    // Handle user feedback (detailed content in user prompt)
     if (hasFeedback) {
       messageParts.push(
-        `\n\n--- USER FEEDBACK & DIRECTIONS ---\nThe user has provided feedback or directions that they want more focus on. Please carefully review their feedback and incorporate it into your analysis. Evolve your criticism based on what they've found useful or what directions they want to go in. Don't repeat criticisms that have been addressed, but you may build upon partially addressed issues with more nuanced perspectives.`
+        `\n\n--- USER FEEDBACK & DIRECTIONS (DETAILED) ---\nThe user has provided feedback or directions that they want more focus on. 
+
+CRITICAL PRIORITY: You MUST ensure that AT LEAST 2 out of your 4 points are directly relevant to, build upon, or address the user's feedback and suggestions. This is not optional.
+
+Instructions:
+1. Carefully review the user feedback/suggestions provided
+2. Generate stakeholder pushback that specifically responds to or builds upon what the user has highlighted
+3. If the user suggests exploring certain stakeholder groups, conflicts, or aspects, voice opposition and concerns from those perspectives
+4. Build upon partially addressed issues with more nuanced stakeholder resistance and objections
+5. Ensure the feedback fundamentally shapes the type of pushback and opposition you generate
+
+The remaining 2 points can address other aspects of the design, but the user's feedback should be the primary driver of the stakeholder pushback you voice.`
       );
     }
     
-    // Handle existing antagonistic points - MOVED TO USER PROMPT
+    // Handle existing antagonistic points (detailed content in user prompt)
     if (hasExistingPoints) {
       messageParts.push(
-        `\n\n--- AVOID REPETITION ---\nThe user has provided existing antagonistic critique points. You MUST avoid generating points that are similar in content, focus, or approach to these existing points. However, you CAN repeat the same stakeholder groups as long as the concerns are genuinely different. Focus on:\n- Different types of conflicts or concerns from the same or different stakeholder groups (social, technical, ethical, economic, accessibility, etc.)\n- Different aspects of the design decisions not already critiqued\n- Different timeframes or scales of impact not covered\n- Different underlying values, needs, or priorities not addressed\n\nFor example, if existing points cover "For elderly residents: technology concerns", you could generate "For elderly residents: physical accessibility concerns" since these are different types of conflicts.\n\nEnsure your new critique points raise genuinely NEW concerns that complement (not duplicate) the existing critique points, even if they come from similar stakeholder groups.`
+        `\n\n--- EXISTING ANTAGONISTIC POINTS (DETAILED) ---\nThere are some exsiting critique points. You MUST avoid generating points that are similar in content, focus, or approach to these existing points. However, you CAN repeat the same stakeholder groups as long as the concerns are genuinely different types of opposition, but the points must be different. `
       );
     }
 
@@ -236,8 +280,7 @@ QUALITY CRITERIA - Prioritize points that are:
     "point1",
     "point2", 
     "point3",
-    "point4",
-    "point5"
+    "point4"
   ]
 }`;
 
@@ -254,19 +297,37 @@ QUALITY CRITERIA - Prioritize points that are:
         console.log('GENERATION USER PROMPT:');
         console.log(messageParts.join('\n'));
         
-        const result = await this.makeRequest('/api/openaiwrap', {
+        // Determine API endpoint based on provider
+        const endpoint = selectedProvider === 'gemini' ? '/api/geminiwrap' : '/api/openaiwrap';
+        
+        const result = await this.makeRequest(endpoint, {
           userPrompt: messageParts.join('\n'),
           systemPrompt,
           useGpt4: true,
           expectsJson: true // Signal that we expect JSON response
         });
 
-        Logger.log('OPENAI-API', 'request to openai with JSON format', {
+        Logger.log('OPENAI-API', `request to ${selectedProvider} for stakeholder pushback generation with JSON format`, {
           userPrompt: messageParts.join('\n'),
           systemPrompt: systemPrompt,
           expectsJson: true,
-          attempt: attempt
+          attempt: attempt,
+          provider: selectedProvider
         });
+
+        // Check if we got an empty response (common with Gemini)
+        if (!result.response || result.response.trim() === '' || result.response === 'No response') {
+          console.error(`Empty response from ${selectedProvider} on attempt ${attempt}`);
+          Logger.error('OPENAI-API', `Empty response from ${selectedProvider} on attempt ${attempt}`);
+          
+          if (attempt === MAX_RETRIES) {
+            throw new Error(`${selectedProvider} returned empty responses after ${MAX_RETRIES} attempts - this may be due to content filtering or API issues`);
+          }
+          
+          // Wait longer before retrying for empty responses
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          continue; // Try again
+        }
 
         // Parse JSON response
         let parsedResponse;
@@ -274,10 +335,14 @@ QUALITY CRITERIA - Prioritize points that are:
           parsedResponse = JSON.parse(result.response);
         } catch (parseError) {
           console.error(`JSON parsing failed on attempt ${attempt}, raw response:`, result.response);
-          Logger.error('OPENAI-API', `Failed to parse JSON response on attempt ${attempt}:`, parseError);
+          Logger.error('OPENAI-API', `Failed to parse JSON response from ${selectedProvider} on attempt ${attempt}:`, {
+            error: parseError,
+            rawResponse: result.response.substring(0, 500),
+            provider: selectedProvider
+          });
           
           if (attempt === MAX_RETRIES) {
-            throw new Error(`Failed to get valid JSON response after ${MAX_RETRIES} attempts`);
+            throw new Error(`Failed to get valid JSON response from ${selectedProvider} after ${MAX_RETRIES} attempts. Last response: ${result.response.substring(0, 200)}`);
           }
           continue; // Try again
         }
@@ -292,23 +357,23 @@ QUALITY CRITERIA - Prioritize points that are:
           continue; // Try again
         }
 
-        // Ensure we have exactly 5 points
+        // Ensure we have exactly 4 points
         let points = parsedResponse.points.filter((point: string) => point && point.trim().length > 0);
         
-        if (points.length < 5) {
-          Logger.log('OPENAI-API', `Only got ${points.length} points on attempt ${attempt}, need 5`);
+        if (points.length < 4) {
+          Logger.log('OPENAI-API', `Only got ${points.length} points on attempt ${attempt}, need 4`);
           
           if (attempt === MAX_RETRIES) {
-            throw new Error(`Could not get 5 valid points after ${MAX_RETRIES} attempts`);
+            throw new Error(`Could not get 4 valid points after ${MAX_RETRIES} attempts`);
           }
           continue; // Try again
         }
 
-        // Take exactly 5 points
-        points = points.slice(0, 5);
+        // Take exactly 4 points
+        points = points.slice(0, 4);
 
         console.log(`JSON GENERATION COMPLETE - Attempt ${attempt} successful`);
-        console.log(`Final result: ${points.length} points in JSON format`);
+        console.log(`Final result: ${points.length} stakeholder pushback points in JSON format`);
         
         // Return as JSON string for compatibility with existing code
         return JSON.stringify({ points });
@@ -317,6 +382,14 @@ QUALITY CRITERIA - Prioritize points that are:
         Logger.error('OPENAI-API', `Error in generateAnalysis attempt ${attempt}:`, error);
         
         if (attempt === MAX_RETRIES) {
+          // Add helpful error message for Gemini-specific issues
+          if (selectedProvider === 'gemini' && error instanceof Error) {
+            if (error.message.includes('safety restrictions') || error.message.includes('blocked')) {
+              throw new Error(`${error.message}\n\nTip: Try switching to the OpenAI provider in the AI Provider dropdown, as it may be less restrictive for this type of content.`);
+            } else if (error.message.includes('empty response')) {
+              throw new Error(`${error.message}\n\nTip: Try switching to the OpenAI provider in the AI Provider dropdown, or try again as this may be a temporary Gemini API issue.`);
+            }
+          }
           throw error; // Re-throw on final attempt
         }
         
@@ -335,11 +408,31 @@ QUALITY CRITERIA - Prioritize points that are:
    * @returns Array of extracted points
    */
   private static extractPointsFromMalformedResponse(response: string): string[] {
-    // Try to find "For [group]:" patterns
+    // Try to find "[group] would push back:" patterns
+    const pushbackPatterns = response.split('\n')
+      .map(line => line.trim())
+      .filter(line => line.toLowerCase().includes('would push back:'))
+      .slice(0, 4);
+    
+    if (pushbackPatterns.length >= 3) {
+      return pushbackPatterns;
+    }
+    
+    // Fallback: Try to find older "might disagree:" patterns
+    const mightDisagreePatterns = response.split('\n')
+      .map(line => line.trim())
+      .filter(line => line.toLowerCase().includes('might disagree:'))
+      .slice(0, 4);
+    
+    if (mightDisagreePatterns.length >= 3) {
+      return mightDisagreePatterns;
+    }
+    
+    // Fallback: Try to find older "For [group]:" patterns
     const forPatternPoints = response.split('\n')
       .map(line => line.trim())
       .filter(line => line.toLowerCase().startsWith('for ') && line.includes(':'))
-      .slice(0, 5);
+      .slice(0, 4);
     
     if (forPatternPoints.length >= 3) {
       return forPatternPoints;
@@ -350,7 +443,7 @@ QUALITY CRITERIA - Prioritize points that are:
     if (numberedMatches && numberedMatches.length >= 3) {
       return numberedMatches
         .map(match => match.replace(/^\d+\.\s*/, '').trim())
-        .slice(0, 5);
+        .slice(0, 4);
     }
     
     // Return empty array instead of fallback points - let retry logic handle it
@@ -641,284 +734,6 @@ QUALITY CRITERIA - Prioritize points that are:
   }
 
   /**
-   * Generates theme-specific antagonistic analysis points
-   * @param userPrompt - The combined design decisions to analyze
-   * @param themeName - The name of the design theme to focus on
-   * @param designChallenge - The context of the design challenge
-   * @param consensusPoints - Array of consensus points that should not be questioned
-   * @param designPrinciples - Array of design principles to prioritize
-   * @param customSystemPrompt - Custom system prompt to add additional instructions
-   * @param pointTagMappings - Previous point-tag mappings for learning
-   * @param discardedPoints - Points the user found irrelevant or wrong (AVOID these patterns)
-   * @returns Promise resolving to array of points specific to the theme
-   */
-  /*
-  public static async generateThemeSpecificAnalysis(
-    userPrompt: string,
-    themeName: string,
-    designChallenge: string,
-    consensusPoints: string[] = [],
-    designPrinciples?: string,
-    customSystemPrompt?: string,
-    pointTagMappings?: PointTagMapping[],
-    discardedPoints?: string[]
-  ): Promise<string[]> {
-
-    // Base system prompt template
-    const BASE_THEME_SYSTEM_PROMPT = `You are analyzing design decisions for the design challenge: "${designChallenge || DEFAULT_DESIGN_CHALLENGE}" with a specific focus on the theme "${themeName}".
-
-${!designChallenge ? `BACKGROUND: Pittsburgh 311 serves as the city's primary platform for residents to report non-emergency issues, such as potholes, graffiti, and bicycling hazards. According to a Civic Innovation Specialist in the Department of Innovation and Performance, "In some ways, 311 is the city's first line of defense." While the website is intended to facilitate digital reporting, the majority of users still rely on calling the 311 center. As a result, the digital platform remains underutilized. City staff must contend with an overwhelming volume of reports, many of which are low in quality or duplicated, adding to their operational burden.` : ''}
-
-Provide exactly 3 critical points that identify potential problems or conflicts related specifically to the "${themeName}" theme of these design proposals. Each point MUST follow this exact format:
-
-"For [specific stakeholder group]: [A potential conflict or pushback they might raise related to ${themeName} - can be phrased as a question]"
-
-Requirements:
-- Each point should focus on a different stakeholder group affected by the ${themeName} theme
-- The conflicts should be constructive and help the designer understand broader social implications
-- Points should be concise and suitable for sticky note length
-- Use language understandable by a non-design audience - avoid design jargon and big words
-- The conflicts can be phrased as questions (e.g., "Won't this exclude people who...?" or "How will this affect...")
-- Focus on real concerns that stakeholder would genuinely raise about the ${themeName} aspect
-
-Rules:
-1. NEVER question or criticize the consensus points - these are established agreements that must be respected
-2. Focus on potential problems, conflicts, or negative consequences related to ${themeName}
-3. Always provide EXACTLY 3 points, no more, no less
-4. Each point should be a complete, self-contained criticism
-5. Keep each point focused on a single issue within the ${themeName} theme`;
-
-    // Use custom prompt if provided, otherwise use base prompt
-    let systemPrompt = customSystemPrompt || BASE_THEME_SYSTEM_PROMPT;
-
-    // Add point-tag mappings if provided
-    if (pointTagMappings && pointTagMappings.length > 0) {
-      const { formatPointTagMappingsForPrompt } = await import('./miroService');
-      const tagMappingsText = formatPointTagMappingsForPrompt(pointTagMappings);
-      if (tagMappingsText) {
-        systemPrompt += `\n\nPrevious points and user tags (focus on the "${themeName}" theme while considering user preferences):\n${tagMappingsText}`;
-      }
-    }
-    
-    // Add discarded points guidance if any
-    if (discardedPoints && discardedPoints.length > 0) {
-      systemPrompt += `\n\nIMPORTANT: The user has indicated these types of criticism are not useful. For the "${themeName}" theme, AVOID generating points similar to these discarded patterns. Focus on different aspects of ${themeName} that haven't been covered:\n${discardedPoints.join('\n')}\n\nEnsure your "${themeName}"-focused points address different angles, user groups, or implications than the discarded patterns.`;
-      
-      // Add theme-specific heterogeneity guidance
-      systemPrompt += `\n\nFor "${themeName}" HETEROGENEITY: Generate points that explore different dimensions of this theme - consider various stakeholder perspectives, different implementation challenges, immediate vs long-term implications, and different types of risks or opportunities within the ${themeName} domain. Ensure diversity even within this focused theme.`;
-    }
-    
-    // Check for the "Previous User Feedback & Suggestions" in the userPrompt and extract it if found
-    const incorporateSuggestionsLabel = "Previous User Define Directions: these are the directions that users want to go in OR SUGGESTIONS FOR THE GENERATION, CONSIDER THESE";
-    const hasFeedback = userPrompt.includes(incorporateSuggestionsLabel);
-    
-    if (hasFeedback) {
-      // Add instructions to consider previous feedback in the system prompt
-      systemPrompt += `\n\nIMPORTANT: The user has provided feedback on previous iterations of design criticism related to the "${themeName}" theme. Please carefully review their feedback and incorporate it into your analysis. Evolve your criticism based on what they've found useful or what they've addressed already. Don't repeat criticisms that have been addressed, but you may build upon partially addressed issues with more nuanced perspectives.`;
-      
-      Logger.log('OPENAI-API', `Found user feedback in the prompt for theme "${themeName}". Adding special instructions to system prompt.`);
-    }
-
-    // Add JSON format requirement
-    systemPrompt += `\n\nCRITICAL: You must respond with valid JSON in exactly this format:
-{
-  "points": [
-    "For [stakeholder]: [theme-specific conflict/pushback]",
-    "For [stakeholder]: [theme-specific conflict/pushback]",
-    "For [stakeholder]: [theme-specific conflict/pushback]"
-  ]
-}`;
-
-    const MAX_RETRIES = 3;
-    
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const result = await this.makeRequest('/api/openaiwrap', {
-          userPrompt,
-          systemPrompt,
-          useGpt4: true,
-          expectsJson: true
-        });
-
-        // Parse JSON response
-        let parsedResponse;
-        try {
-          parsedResponse = JSON.parse(result.response);
-        } catch (parseError) {
-          console.error(`JSON parsing failed on theme analysis attempt ${attempt}:`, result.response);
-          if (attempt === MAX_RETRIES) {
-            throw new Error(`Failed to get valid JSON response after ${MAX_RETRIES} attempts`);
-          }
-          continue;
-        }
-
-        // Validate response structure
-        if (!parsedResponse.points || !Array.isArray(parsedResponse.points)) {
-          if (attempt === MAX_RETRIES) {
-            throw new Error(`Invalid JSON response structure after ${MAX_RETRIES} attempts`);
-          }
-          continue;
-        }
-
-        // Ensure we have exactly 3 points
-        let points = parsedResponse.points.filter((point: string) => point && point.trim().length > 0);
-        
-        if (points.length < 3) {
-          if (attempt === MAX_RETRIES) {
-            throw new Error(`Could not get 3 valid points after ${MAX_RETRIES} attempts`);
-          }
-          continue;
-        }
-
-        // Take exactly 3 points
-        points = points.slice(0, 3);
-
-        return points;
-        
-      } catch (error) {
-        if (attempt === MAX_RETRIES) {
-          throw error;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
-    
-    throw new Error(`Failed to generate theme-specific analysis after ${MAX_RETRIES} attempts`);
-  }
-
-  /**
-   * Generates multiple theme-specific analyses in parallel
-   * @param userPrompt - The combined design decisions to analyze
-   * @param themes - Array of theme objects with name and color
-   * @param designChallenge - The context of the design challenge
-   * @param consensusPoints - Array of consensus points that should not be questioned
-   * @param designPrinciples - Array of design principles to prioritize
-   * @param customSystemPrompt - Custom system prompt to add additional instructions
-   * @param pointTagMappings - Previous point-tag mappings for learning
-   * @param discardedPoints - Points the user found irrelevant or wrong (AVOID these patterns)
-   * @returns Promise resolving to array of themed responses
-   */
-  // public static async generateAllThemeAnalyses(
-  //   userPrompt: string,
-  //   themes: Array<{name: string, color: string}>,
-  //   designChallenge: string,
-  //   consensusPoints: string[] = [],
-  //   designPrinciples?: string,
-  //   customSystemPrompt?: string,
-  //   pointTagMappings?: PointTagMapping[],
-  //   discardedPoints?: string[]
-  // ): Promise<Array<{name: string, color: string, points: string[]}>> {
-  //   // Run all theme analyses in parallel
-  //   const themeAnalysesPromises = themes.map(theme => 
-  //     this.generateThemeSpecificAnalysis(
-  //       userPrompt,
-  //       theme.name,
-  //       designChallenge,
-  //       consensusPoints,
-  //       designPrinciples,
-  //       customSystemPrompt,
-  //       pointTagMappings,
-  //       discardedPoints
-  //     ).then(points => ({
-  //       name: theme.name,
-  //       color: theme.color,
-  //       points
-  //     }))
-  //   );
-    
-  //   // Wait for all analyses to complete
-  //   return Promise.all(themeAnalysesPromises);
-  // }
-
-  /**
-   * Simplifies a single analysis point to make it more concise
-   * @param point - The analysis point to simplify
-   * @returns Promise resolving to simplified point
-   */
-//   public static async simplifyPoint(point: string): Promise<string> {
-//     const systemPrompt = `You are helping to simplify design criticism points to make them more concise and actionable.
-
-// Task: Simplify the given design criticism point to make it more concise while preserving the core critique.
-
-// Guidelines:
-// 1. Reduce the length by 30-50% while preserving the main idea
-// 2. Remove unnecessary explanations but keep the key pushback
-// 3. Maintain the tone of the original point
-// 4. Make it direct and actionable
-// 5. Don't add any new criticism that wasn't in the original`;
-
-//     const result = await this.makeRequest('/api/openaiwrap', {
-//       userPrompt: point,
-//       systemPrompt,
-//       useGpt4: true
-//     });
-
-//     // Remove any bullets or numbering the AI might have added
-//     let simplified = result.response.replace(/^\s*[\d*-]+\s*/, '').trim();
-    
-//     // If somehow we got a completely empty result, return the original
-//     if (!simplified) {
-//       simplified = point;
-//     }
-
-//     return simplified;
-//   }
-
-  /**
-   * Adjusts the tone of a single analysis point
-   * @param point - The analysis point to adjust
-   * @param tone - The target tone (persuasive, aggressive, critical)
-   * @returns Promise resolving to tone-adjusted point
-   */
-//   public static async adjustPointTone(point: string, tone: string): Promise<string> {
-//     // Map the tone to a more descriptive guideline
-//     let toneGuideline = '';
-//     switch (tone) {
-//       case 'persuasive':
-//         toneGuideline = 'This should sound convincing, empathetic, and focused on mutual benefit. Use persuasive language that appeals to shared goals and values.';
-//         break;
-//       case 'aggressive':
-//         toneGuideline = 'This should sound forceful, direct, and uncompromising. Use strong language and be very direct about the issues.';
-//         break;
-//       case 'critical':
-//         toneGuideline = 'This should sound analytical, detailed, and thorough in the criticism. Emphasize specific flaws and why they are problematic.';
-//         break;
-//       default:
-//         // If an unrecognized tone, default to normal
-//         return point;
-//     }
-
-//     const systemPrompt = `You are helping to adjust the tone of design criticism points without changing their core message.
-
-// Task: Rewrite the given design criticism point in a ${tone} tone.
-
-// Tone guidelines: ${toneGuideline}
-
-// IMPORTANT:
-// 1. Do NOT change the core criticism or pushback
-// 2. Do NOT add new criticisms or remove existing ones
-// 3. Only change the tone and wording
-// 4. Keep approximately the same length
-// 5. Maintain the same level of technical detail`;
-
-//     const result = await this.makeRequest('/api/openaiwrap', {
-//       userPrompt: point,
-//       systemPrompt,
-//       useGpt4: true
-//     });
-
-//     // Remove any bullets or numbering the AI might have added
-//     let adjusted = result.response.replace(/^\s*[\d*-]+\s*/, '').trim();
-    
-//     // If somehow we got a completely empty result, return the original
-//     if (!adjusted) {
-//       adjusted = point;
-//     }
-
-//     return adjusted;
-//   }
-
-  /**
    * Generates a detailed illustration for a specific critique point.
    * @param originalPoint - The specific critique point to unpack.
    * @param designProposal - The full text of the design proposal (concatenated sticky notes).
@@ -1032,7 +847,10 @@ All Current Critique Points (for context, do not elaborate on these, only the on
 "${originalPoint}"`;
 
     try {
-      const result = await this.makeRequest('/api/openaiwrap', {
+      // Always use OpenAI for unpack points (faster)
+      const endpoint = '/api/openaiwrap';
+      
+      const result = await this.makeRequest(endpoint, {
         userPrompt: userPromptForUnpack,
         systemPrompt,
         useGpt4: true, // Consider using GPT-4 for better elaboration
@@ -1094,15 +912,18 @@ Do not make direct criticisms of the current proposals - instead, provide contex
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout for synthesis
 
-      const response = await fetch('/api/openaiwrap', {
+      // Always use OpenAI for RAG synthesis (faster)
+      const endpoint = '/api/openaiwrap';
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           userPrompt: userPrompt,
-          systemPrompt,
-          useGpt4: true // Use GPT-4 for synthesis
+          systemPrompt: systemPrompt,
+          useGpt4: true
         }),
         signal: controller.signal
       });
@@ -1148,8 +969,11 @@ Do not make direct criticisms of the current proposals - instead, provide contex
       customSystemPrompt?: string;
       pointTagMappings?: PointTagMapping[];
       discardedPoints?: string[];
+      ragContent?: string;
+      synthesizedRagInsights?: string;
       needsSimplified?: boolean;
       needsStandard?: boolean;
+      provider?: 'openai' | 'gemini';
       variations?: {
         principles?: string;
         prompt?: string;
@@ -1165,6 +989,10 @@ Do not make direct criticisms of the current proposals - instead, provide contex
     };
   }> {
     const results: any = {};
+
+    // Get configured provider if not explicitly provided
+    const aiConfig = ConfigurationService.getAiConfig();
+    const selectedProvider = options.provider || aiConfig.provider;
 
     // Main Analysis Generation - run in parallel
     const mainPromises: Promise<any>[] = [];
@@ -1201,7 +1029,10 @@ Do not make direct criticisms of the current proposals - instead, provide contex
           options.designPrinciples,
           options.customSystemPrompt,
           options.pointTagMappings,
-          options.discardedPoints
+          options.discardedPoints,
+          options.ragContent,
+          options.synthesizedRagInsights,
+          selectedProvider
         ).then(standard => {
           results.standardResponse = standard;
           return standard;
@@ -1220,7 +1051,10 @@ Do not make direct criticisms of the current proposals - instead, provide contex
           options.variations.principles,
           undefined,
           options.pointTagMappings,
-          options.discardedPoints
+          options.discardedPoints,
+          options.ragContent,
+          options.synthesizedRagInsights,
+          selectedProvider
         ).then(principlesResponse => {
           if (!results.variations) results.variations = {};
           results.variations.principles = principlesResponse;
@@ -1239,7 +1073,10 @@ Do not make direct criticisms of the current proposals - instead, provide contex
           undefined,
           options.variations.prompt,
           options.pointTagMappings,
-          options.discardedPoints
+          options.discardedPoints,
+          options.ragContent,
+          options.synthesizedRagInsights,
+          selectedProvider
         ).then(promptResponse => {
           if (!results.variations) results.variations = {};
           results.variations.prompt = promptResponse;
@@ -1261,7 +1098,7 @@ Do not make direct criticisms of the current proposals - instead, provide contex
     //   await simplifiedPromise;
     // }
 
-    Logger.log('OPENAI-API', 'Comprehensive analysis completed', {
+    Logger.log('OPENAI-API', 'Comprehensive pushback generation completed', {
       hasThemed: !!results.themedResponses,
       hasStandard: !!results.standardResponse,
       hasSimplified: !!results.simplifiedResponse,

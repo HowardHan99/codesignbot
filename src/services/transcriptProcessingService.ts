@@ -157,7 +157,7 @@ export class TranscriptProcessingService {
         body: JSON.stringify({
           userPrompt: `Clean up typos and punctuation in this text: ${cleanedTranscript}`,
           systemPrompt,
-          useGpt4: true // GPT-3.5 should be sufficient and faster for this
+          useGpt4: true 
         }),
       });
 

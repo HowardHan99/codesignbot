@@ -103,44 +103,18 @@ export class MiroDesignService {
    */
   public static async getConsensusPoints(): Promise<string[]> {
     try {
-      Logger.log(LOG_CONTEXT, 'Starting to fetch consensus points...');
-      const consensusFrame = await MiroFrameService.findFrameByTitle(frameConfig.names.consensus);
+      Logger.log(LOG_CONTEXT, 'Starting to fetch consensus points from Consensus frame...');
       
-      if (!consensusFrame) {
-        Logger.log(LOG_CONTEXT, `${frameConfig.names.consensus} frame not found`);
-        return [];
-      }
-      Logger.log(LOG_CONTEXT, `Found ${frameConfig.names.consensus} frame:`, consensusFrame);
-
-      // Get all sticky notes on the board
-      const allStickies = await miro.board.get({ type: 'sticky_note' });
-      Logger.log(LOG_CONTEXT, 'All sticky notes on board:', allStickies.map(s => ({ id: s.id, content: s.content, parentId: s.parentId })));
-
-      // Filter stickies by parentId ONLY
-      const consensusStickies = allStickies.filter(sticky => sticky.parentId === consensusFrame.id);
-      Logger.log(LOG_CONTEXT, 'Filtered consensus stickies by parentId ONLY:', consensusStickies.map(s => ({ id: s.id, content: s.content, parentId: s.parentId })));
+      // === FIXED: Use the proper getContentFromFrame function that handles BOTH sticky notes AND text elements ===
+      const points = await MiroFrameService.getContentFromFrame(frameConfig.names.consensus);
       
-      // --- Removed logic for getItemsInFrameBounds and combining --- 
-      // const stickiesByCoordsRaw = await MiroFrameService.getItemsInFrameBounds(consensusFrame); 
-      // const stickiesByCoords = stickiesByCoordsRaw.filter(item => item.type === 'sticky_note' && typeof (item as any).content === 'string') as StickyNote[];
-      // Logger.log(LOG_CONTEXT, 'Stickies found by coordinates:', stickiesByCoords.map(s => ({ id: s.id, content: s.content, parentId: s.parentId })));
-      
-      // const combinedStickiesMap = new Map<string, StickyNote>();
-      // consensusStickies.forEach(sticky => combinedStickiesMap.set(sticky.id, sticky));
-      // stickiesByCoords.forEach(sticky => combinedStickiesMap.set(sticky.id, sticky));
-      // const combinedStickies = Array.from(combinedStickiesMap.values());
-      // Logger.log(LOG_CONTEXT, 'Combined unique stickies:', combinedStickies.map(s => ({ id: s.id, content: s.content, parentId: s.parentId })));
-      
-      if (consensusStickies.length === 0) {
-        Logger.log(LOG_CONTEXT, `No sticky notes found in ${frameConfig.names.consensus} frame (using parentId only)`);
-        return [];
-      }
+      Logger.log(LOG_CONTEXT, 'Retrieved consensus points (sticky notes + text elements):', {
+        totalPoints: points.length,
+        points: points,
+        extractionMethod: 'MiroFrameService.getContentFromFrame (handles sticky notes + text elements + shapes)'
+      });
 
-      // Return array of consensus points from stickies found by parentId
-      const points = consensusStickies.map(sticky => sticky.content || ''); // Ensure content is a string
-      Logger.log(LOG_CONTEXT, 'Extracted consensus points (parentId only):', points);
-
-      // Save to Firebase
+      // Save to Firebase if we have points
       if (points.length > 0) {
         try {
           const boardId = await MiroFrameService.getCurrentBoardId();
@@ -148,9 +122,12 @@ export class MiroDesignService {
           Logger.log(LOG_CONTEXT, `Saved ${points.length} consensus points to Firebase for board ${boardId}`);
         } catch (fbError) {
           Logger.error(LOG_CONTEXT, 'Error saving consensus points to Firebase:', fbError);
-          // Do not re-throw, getting points was successful
+          // Continue execution even if Firebase save fails
         }
+      } else {
+        Logger.log(LOG_CONTEXT, 'No consensus points found in frame');
       }
+
       return points;
 
     } catch (err) {

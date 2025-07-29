@@ -7,7 +7,7 @@ export const firebaseConfig = {
   messagingSenderId: "121164910498",
   appId: "1:121164910498:web:552f246dc0a3f28792ecfb",
   measurementId: "G-YKVCSPS593"
-}; 
+};
 
 // Frame configuration
 export const frameConfig = {
@@ -93,7 +93,7 @@ export const relevanceConfig = {
     defaultThreshold: 2
   },
   delayBetweenCreations: 200, // ms
-}; 
+};
 
 // Inclusive design critique configuration
 export const inclusiveDesignConfig = {
@@ -104,5 +104,20 @@ export const inclusiveDesignConfig = {
     'Consider broader community impact',
     'Avoid assumptions about user capabilities',
     'Prioritize user well-being over business goals'
+  ]
+};
+
+// AI provider configuration
+export const aiConfig = {
+  provider: 'openai' as 'openai' | 'gemini', // Default to OpenAI
+  models: {
+    openai: 'gpt-4.1', // Default to GPT-4.1
+    gemini: 'gemini-2.5-pro'
+  },
+  // Some utility functions always use OpenAI regardless of main provider setting
+  alwaysUseOpenAiFor: [
+    'unpackPointDetail',
+    'synthesizeRagInsights',
+    'analyzeImages'
   ]
 }; 

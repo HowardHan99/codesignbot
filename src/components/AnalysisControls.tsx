@@ -1,6 +1,7 @@
 /**
  * Props interface for the AnalysisControls component
  */
+
 interface VariationsToSend {
   rag: boolean;
   principles: boolean;
@@ -14,11 +15,13 @@ interface AnalysisControlsProps {
   useThemedDisplay?: boolean;        // Whether to use themed display (optional for backward compatibility)
   useThinkingDialogue?: boolean;     // Whether to include thinking dialogue context
   hasThinkingResults?: boolean;      // Whether thinking dialogue results are available
+  selectedProvider?: 'openai' | 'gemini';  // Currently selected AI provider
   onToneChange: (tone: string) => void;          // Handler for tone changes
   onModeToggle: () => void;                      // Handler for mode toggle
   onShowSynthesizedPoints: () => void;           // Handler for showing synthesized points
   onDisplayToggle?: () => void;                  // Handler for display mode toggle (optional for backward compatibility)
   onThinkingDialogueToggle?: () => void;         // Handler for thinking dialogue toggle
+  onProviderChange?: (provider: 'openai' | 'gemini') => void;  // Handler for provider changes
   // New props for variations
   hasRagContent: boolean;
   hasPrinciples: boolean;
@@ -39,11 +42,13 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
   useThemedDisplay = true,
   useThinkingDialogue = false,
   hasThinkingResults = false,
+  selectedProvider = 'openai', // Default to openai to match config
   onToneChange,
   onModeToggle,
   onShowSynthesizedPoints,
   onDisplayToggle = () => {},
   onThinkingDialogueToggle = () => {},
+  onProviderChange = () => {},
   // New props for variations
   hasRagContent,
   hasPrinciples,
@@ -179,6 +184,28 @@ export const AnalysisControls: React.FC<AnalysisControlsProps> = ({
         alignItems: 'center',
         position: 'relative'
       }}>
+        {/* AI Provider Selection */}
+        <div style={{ 
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          minWidth: '120px'
+        }}>
+          <label style={{ fontSize: '14px', fontWeight: '500', whiteSpace: 'nowrap' }}>AI Provider:</label>
+          <select 
+            value={selectedProvider}
+            onChange={(e) => onProviderChange(e.target.value as 'openai' | 'gemini')}
+            className="select"
+            style={{ 
+              flex: 1,
+              opacity: 1 // Always fully visible
+            }}
+          >
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Gemini 2.5</option>
+          </select>
+        </div>
+
         {/* Tone Selection */}
         <div style={{ 
           display: 'flex',

@@ -2,7 +2,8 @@ import {
   frameConfig as defaultFrameConfig,
   stickyConfig as defaultStickyConfig,
   relevanceConfig as defaultRelevanceConfig,
-  firebaseConfig as defaultFirebaseConfig
+  firebaseConfig as defaultFirebaseConfig,
+  aiConfig as defaultAiConfig
 } from '../utils/config';
 
 /**
@@ -13,6 +14,7 @@ export class ConfigurationService {
   private static frameConfigOverrides: Partial<typeof defaultFrameConfig> = {};
   private static stickyConfigOverrides: Partial<typeof defaultStickyConfig> = {};
   private static relevanceConfigOverrides: Partial<typeof defaultRelevanceConfig> = {};
+  private static aiConfigOverrides: Partial<typeof defaultAiConfig> = {};
   private static apiConfigOverrides: Record<string, any> = {};
   
   /**
@@ -80,6 +82,24 @@ export class ConfigurationService {
   }
   
   /**
+   * Get AI configuration with any runtime overrides applied
+   */
+  public static getAiConfig(): typeof defaultAiConfig {
+    return {
+      ...defaultAiConfig,
+      ...this.aiConfigOverrides,
+      // Merge nested properties
+      models: {
+        ...defaultAiConfig.models,
+        ...(this.aiConfigOverrides.models || {})
+      },
+      alwaysUseOpenAiFor: [
+        ...(this.aiConfigOverrides.alwaysUseOpenAiFor || defaultAiConfig.alwaysUseOpenAiFor)
+      ]
+    };
+  }
+  
+  /**
    * Get API configuration for a specific API
    * @param apiName The API name (e.g., 'openai', 'miro')
    */
@@ -121,6 +141,17 @@ export class ConfigurationService {
   }
   
   /**
+   * Override AI configuration at runtime
+   * @param overrides Configuration overrides
+   */
+  public static overrideAiConfig(overrides: Partial<typeof defaultAiConfig>): void {
+    this.aiConfigOverrides = {
+      ...this.aiConfigOverrides,
+      ...overrides
+    };
+  }
+  
+  /**
    * Override API configuration at runtime
    * @param apiName The API name (e.g., 'openai', 'miro')
    * @param overrides Configuration overrides
@@ -139,6 +170,7 @@ export class ConfigurationService {
     this.frameConfigOverrides = {};
     this.stickyConfigOverrides = {};
     this.relevanceConfigOverrides = {};
+    this.aiConfigOverrides = {};
     this.apiConfigOverrides = {};
   }
 } 

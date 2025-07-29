@@ -213,7 +213,7 @@ export async function readPointTagMappings(): Promise<PointTagMapping[]> {
       frameNames: allFrames.map(f => ({ title: f.title, id: f.id }))
     });
     
-    // Use frame name from config for maintainability
+    // Use frame name from config for maintainability - ONLY target Agent-Response frame
     const targetFrameName = frameConfig.names.antagonisticResponse;
     const targetFrames = allFrames.filter(frame => 
       frame.title?.includes(targetFrameName) || 
@@ -222,7 +222,7 @@ export async function readPointTagMappings(): Promise<PointTagMapping[]> {
       frame.title?.includes('Analysis')
     );
     
-    Logger.log('MiroService', 'Filtered target frames for tag reading:', {
+    Logger.log('MiroService', 'Filtered target frames for tag reading (Agent-Response only):', {
       targetFrameName: targetFrameName,
       targetFramesCount: targetFrames.length,
       targetFrames: targetFrames.map(f => ({ title: f.title, id: f.id }))
@@ -235,17 +235,17 @@ export async function readPointTagMappings(): Promise<PointTagMapping[]> {
 
     // Get all sticky notes and tags from the board
     const allStickyNotes = await miro.board.get({ type: 'sticky_note' });
-    const allTags = await miro.board.get({ type: 'tag' });
+    const boardTags = await miro.board.get({ type: 'tag' });
     
     Logger.log('MiroService', 'Board items retrieved:', {
       totalStickyNotes: allStickyNotes.length,
-      totalTags: allTags.length,
-      tagDetails: allTags.map(tag => ({ id: tag.id, title: tag.title }))
+      totalTags: boardTags.length,
+      tagDetails: boardTags.map(tag => ({ id: tag.id, title: tag.title }))
     });
     
     // Create a map of tag IDs to tag titles for quick lookup
     const tagMap = new Map<string, string>();
-    allTags.forEach(tag => {
+    boardTags.forEach(tag => {
       tagMap.set(tag.id, tag.title);
     });
 
