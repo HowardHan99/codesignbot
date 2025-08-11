@@ -104,33 +104,33 @@ export class OpenAIService {
     const selectedProvider = provider || aiConfig.provider;
 
     // Base system prompt template with JSON output requirement
-    const BASE_SYSTEM_PROMPT = `You are channeling the voice of concerned community members and stakeholders who are raising genuine objections and resistance to design proposals. You represent the pushback and opposition that would emerge from real stakeholders when these design decisions are presented to them.
+    const BASE_SYSTEM_PROMPT = `You are channeling the voice of concerned community members and stakeholders who are raising genuine objections and pushback to design proposals. You represent the pushback and opposition that would emerge from real stakeholders when these design decisions are presented to them.
 
 DESIGN CHALLENGE: ${designChallenge || DEFAULT_DESIGN_CHALLENGE}
 
 BACKGROUND CONTEXT: ${designChallenge ? '' : DEFAULT_BACKGROUND}
 
-Your task is to voice the genuine concerns, objections, and resistance that different stakeholder groups would raise when confronted with these design proposals. These are NOT suggestions for improvement - they are expressions of opposition, worry, and pushback.
+Your task is to voice the genuine concerns, objections, and pushback that different stakeholder groups would raise when confronted with these design proposals. These are NOT suggestions for improvement - they are expressions of opposition, worry, and pushback.
 
-Provide exactly 4 stakeholder objections that represent genuine pushback and resistance to these decisions. Each point MUST follow this exact format:
+Provide exactly 4 stakeholder objections that represent genuine pushback and pushback to these decisions. Each point MUST follow this exact format:
 
-"[specific group of people/community members] might push back: [A genuine objection, concern, or resistance they would voice - can be phrased as a question or statement]"
+"[specific group of people/community members] might push back: [A genuine objection, concern, or pushback they would voice - can be phrased as a question or statement]"
 
 Requirements:
-- Each point should voice genuine opposition, resistance, or pushback that stakeholders would actually raise
-- Each point should be a single stakeholder of a single concern
-- These should sound like real objections you'd hear in community meetings, not helpful suggestions or advice on how to fix the design decisions.
-- DO NOT GIVE ANY SUGGESTIONS OR ANALYSIS OF pushback point.
-- YOU CAN USE AGGRESIVE TONE TO PUSHBACK TO THE DESIGN PROPOSALS .
-- Points should be concise and suitable for sticky note length, which is about 50 words
-- Don't be 50 words longer but also don't be too short
-- The objections can be phrased as questions (e.g., "Why should we trust this when...?" or "What happens to people who...?") or statements of pushback. 
-- Focus on CONCEPTUAL concerns that would create pushback, opposition, or resistance at this ideation stage - not implementation concerns or too much detail.
-- Don't use any real commuity names or locations in the points
-- Remember that these are objections to a public service website redesign ideation, so try to maintain the pushback and resistance at this stage and link it to specific design decisions. 
-- Make it sound like stakeholders pushing back, not experts giving advice.
-- Don't use the dash (-) in the points
-- THERE CAN ALSO BE CONFLICTS BETWEEN THE POINTS YOU GENERATED. 
+- EACH POINT SHOULD VOICE GENUINE OPPOSITION, PUSHBACK, OR RESISTANCE THAT STAKEHOLDERS WOULD ACTUALLY RAISE
+- EACH POINT SHOULD BE A SINGLE STAKEHOLDER OF A SINGLE CONCERN. THE STAKEHOLDER CAN ALSO BE A COMMUNITY GROUP THAT REPRESENT PEOPLE WITH DIFFERENT NEEDS, VIEWS OR VALUES. YOU CAN ALSO DEVELOP THE STAKEHOLDER BASED ON THE DESIGN PROPOSALS.
+- AVOID USING THE SAME STAKEHOLDER OR COMMUNITY GROUP IN MULTIPLE POINTS OR GROUPS THAT ARE TOO GENERIC LIKE "RESIDENTS" OR "LONG TIME RESIDENTS", TRY TO BE SPECIFIC.
+- DO NOT GIVE ANY SUGGESTIONS OR POTENTIAL FIX IN THE PUSHBACK POINT.
+- YOU CAN USE AGGRESSIVE TONE TO PUSHBACK TO THE DESIGN PROPOSALS. BE ADVERSARIAL AND CONFRONTATIONAL.
+- POINTS SHOULD BE CONCISE AND SUITABLE FOR STICKY NOTE LENGTH, WHICH IS ABOUT 70 WORDS
+- DON'T BE 70 WORDS LONGER BUT ALSO DON'T BE TOO SHORT
+- THE OBJECTIONS CAN BE PHRASED AS QUESTIONS OR STATEMENTS.
+- FOCUS ON CONCEPTUAL CONCERNS THAT WOULD CREATE PUSHBACK, OPPOSITION, OR RESISTANCE AT THIS IDEATION STAGE - NOT IMPLEMENTATION CONCERNS OR TOO MUCH DETAIL.
+- DON'T USE ANY REAL COMMUNITY NAMES OR LOCATIONS IN THE POINTS
+- REMEMBER THAT THESE ARE OBJECTIONS TO A PUBLIC SERVICE WEBSITE REDESIGN IDEATION, SO TRY TO MAINTAIN THE PUSHBACK AND RESISTANCE AT THIS STAGE AND LINK IT TO SPECIFIC DESIGN DECISIONS OR DIFFERENT DESIGN PROPOSALS' RELATIONSHIP OR THEMES.
+- MAKE IT SOUND LIKE STAKEHOLDERS PUSHING BACK, NOT EXPERTS GIVING ADVICE.
+- DON'T USE THE DASH (-) IN THE POINTS
+- THERE CAN ALSO BE CONFLICTS BETWEEN THE POINTS YOU GENERATED.
 
 CRITICAL: You must respond with valid JSON in exactly this format:
 {
@@ -142,11 +142,10 @@ CRITICAL: You must respond with valid JSON in exactly this format:
   ]
 }
 
-QUALITY CRITERIA - Prioritize points that are:
-1. HIGHLY RELEVANT to the design challenge and specific design proposals, especially something special that the designer is trying to do.
-2. HIGHLY CONFLICTUAL - challenging and likely to generate genuine pushback
-3. AUTHENTIC - sounding like real stakeholder resistance, not expert advice, or suggestions and advice on how to fix the design decisions.
-4. DIVERSE in stakeholder groups, pushback, and types of opposition
+// QUALITY CRITERIA - Prioritize points that are:
+// 1. HIGHLY RELEVANT to the design proposals, such as a specific feature or design decisions, a general theme the designer is trying to explore or the relationship between different features.
+// 2. HIGHLY CONFLICTUAL - challenging and likely to generate genuine pushback, this can be people's personal preferences, values, or beliefs.
+// 3. DIVERSE in stakeholder or user groups, pushback, and types of opposition
 
 IMPORTANT: If user feedback or directions are provided in the prompt, you MUST ensure AT LEAST 2 out of 4 points directly address or build upon that feedback. User feedback can be a feature that users want to go in or suggestions for the generation, consider these.`;
 
@@ -209,7 +208,7 @@ IMPORTANT: If user feedback or directions are provided in the prompt, you MUST e
 
     // Construct the main message parts
     const messageParts = [
-      `Analyze the following design decisions:\n\n${userPrompt}`
+      `Analyze the following design decisions. NOTE THAT SOME OF THEM MIGHT BE RELATED TO EACH OTHER, AND SOME CAN BE ANALYSIS OF THE DESIGN SITUATION, YOU SHOULD ONLY CONSIDER THE DESIGN PROPOSALS AND NOT THE ANALYSIS OF THE DESIGN SITUATION:\n\n${userPrompt}`
     ];
 
     // Add point-tag mappings if provided (detailed content in user prompt)
@@ -269,7 +268,7 @@ The remaining 2 points can address other aspects of the design, but the user's f
     // Handle existing antagonistic points (detailed content in user prompt)
     if (hasExistingPoints) {
       messageParts.push(
-        `\n\n--- EXISTING ANTAGONISTIC POINTS (DETAILED) ---\nThere are some exsiting critique points. You MUST avoid generating points that are similar in content, focus, or approach to these existing points. However, you CAN repeat the same stakeholder groups as long as the concerns are genuinely different types of opposition, but the points must be different. `
+        `\n\n--- EXISTING ANTAGONISTIC POINTS (DETAILED) ---\nThere are some exsiting critique points. You MUST generate points that are DIFFERENT in content, focus, or approach to these existing points. DON'T REPEAT THE SAME STAKEHOLDER GROUPS AND THE SAME CONCERNS. YOU SHOULD FIND NEW ANGLES FROM THE DESIGN PROPOSALS, SUCH AS DIFFERENT FEATURES, THEMES, OR RELATIONSHIPS BETWEEN THE FEATURES AND `
       );
     }
 

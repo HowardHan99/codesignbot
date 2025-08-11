@@ -126,6 +126,7 @@ export async function POST(request: NextRequest) {
           { role: 'system', content: enhancedSystemPrompt },
           { role: 'user', content: userPrompt },
         ],
+        temperature: 0.8,
       });
 
       clearTimeout(timeoutId);

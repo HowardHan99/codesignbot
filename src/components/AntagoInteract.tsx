@@ -1690,11 +1690,43 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
       // Fetch all sticky notes from the board to find the original point stickies
       const allStickyNotes = await miro.board.get({ type: 'sticky_note' });
       
+      // === FIX: Find the Antagonistic Response frame first ===
+      const allFrames = await miro.board.get({ type: 'frame' });
+      const antagonisticResponseFrame = allFrames.find(f => 
+        f.title === frameConfig.names.antagonisticResponse || 
+        f.title === 'Agent Response' ||
+        f.title?.toLowerCase().includes('antagonistic')
+      );
+      
+      // Filter sticky notes to only those in the Antagonistic Response frame
+      let targetStickyNotes = allStickyNotes;
+      if (antagonisticResponseFrame) {
+        targetStickyNotes = allStickyNotes.filter(sticky => sticky.parentId === antagonisticResponseFrame.id);
+        console.log('🎯 UNPACK DEBUG - Searching in Antagonistic Response frame:', {
+          frameId: antagonisticResponseFrame.id,
+          frameTitle: antagonisticResponseFrame.title,
+          totalStickiesInFrame: targetStickyNotes.length,
+          allStickiesOnBoard: allStickyNotes.length
+        });
+      } else {
+        console.log('⚠️ UNPACK DEBUG - No Antagonistic Response frame found, searching all sticky notes');
+      }
+      
       // Process each selected point
       for (const pointToUnpack of selectedPointsForUnpack) {
+        // === ENHANCED DEBUG: Show raw point content ===
+        console.log('🎯 UNPACK DEBUG - Processing Point:', {
+          rawPointContent: pointToUnpack,
+          pointLength: pointToUnpack.length,
+          pointType: typeof pointToUnpack,
+          pointPreview: pointToUnpack.substring(0, 100) + (pointToUnpack.length > 100 ? '...' : ''),
+          normalizedForMatching: pointToUnpack.toLowerCase().replace(/\s+/g, ' ').trim(),
+          searchingInFrame: antagonisticResponseFrame ? antagonisticResponseFrame.title : 'ALL_BOARD'
+        });
+        
         // Find the original sticky note containing this point text
         // We look for sticky notes whose content includes the point text (exact or close match)
-        const originalSticky = allStickyNotes.find(sticky => {
+        const originalSticky = targetStickyNotes.find(sticky => {
           // Skip sticky notes that have no content or are empty/whitespace only
           if (!sticky.content || sticky.content.trim() === '') {
             return false;
@@ -1702,6 +1734,10 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           
           // First try exact match
           if (sticky.content === pointToUnpack) {
+            console.log('✅ EXACT MATCH FOUND:', {
+              stickyId: sticky.id,
+              stickyContent: sticky.content
+            });
             return true;
           }
           
@@ -1709,49 +1745,96 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           const normalizedContent = sticky.content.toLowerCase().replace(/\s+/g, ' ').trim();
           const normalizedPoint = pointToUnpack.toLowerCase().replace(/\s+/g, ' ').trim();
           
+          // === DEBUG: Show normalization results ===
+          console.log('🔍 TESTING MATCH:', {
+            stickyId: sticky.id,
+            originalStickyContent: sticky.content,
+            normalizedStickyContent: normalizedContent,
+            normalizedPoint: normalizedPoint,
+            stickyLength: normalizedContent.length,
+            pointLength: normalizedPoint.length
+          });
+          
           // Only consider it a match if there's substantial overlap
           // Require at least 20 characters of meaningful content to avoid false positives
           if (normalizedContent.length < 20 && normalizedPoint.length < 20) {
             // For shorter content, require exact match or very high similarity
-            return normalizedContent === normalizedPoint || 
+            const shortMatch = normalizedContent === normalizedPoint || 
                    (normalizedContent.includes(normalizedPoint) && normalizedPoint.length > 10) ||
                    (normalizedPoint.includes(normalizedContent) && normalizedContent.length > 10);
+            
+            if (shortMatch) {
+              console.log('✅ SHORT CONTENT MATCH FOUND:', {
+                stickyId: sticky.id,
+                matchType: normalizedContent === normalizedPoint ? 'exact' : 'contains'
+              });
+            }
+            return shortMatch;
           }
           
           // For longer content, use contains logic but ensure meaningful overlap
           const isMatch = (normalizedContent.includes(normalizedPoint) && normalizedPoint.length > 15) || 
                           (normalizedPoint.includes(normalizedContent) && normalizedContent.length > 15);
           
+          if (isMatch) {
+            console.log('✅ LONG CONTENT MATCH FOUND:', {
+              stickyId: sticky.id,
+              matchType: normalizedContent.includes(normalizedPoint) ? 'sticky_contains_point' : 'point_contains_sticky',
+              overlapLength: normalizedContent.includes(normalizedPoint) ? normalizedPoint.length : normalizedContent.length
+            });
+          }
+          
           return isMatch;
         });
 
         if (!originalSticky) {
-          console.warn(`Could not find original sticky for point: "${pointToUnpack.substring(0, 30)}..."`);
+          console.warn(`❌ Could not find original sticky for point: "${pointToUnpack.substring(0, 30)}..."`);
           
           // === ENHANCED DEBUG: Show all sticky notes content for debugging ===
           console.log('🔍 UNPACK DEBUG - Available sticky notes for matching:', {
             pointToMatch: pointToUnpack,
-            availableStickies: allStickyNotes.map((sticky, index) => ({
+            pointLength: pointToUnpack.length,
+            searchingInFrame: antagonisticResponseFrame ? antagonisticResponseFrame.title : 'ALL_BOARD',
+            totalStickiesOnBoard: allStickyNotes.length,
+            totalStickiesInTargetFrame: targetStickyNotes.length,
+            nonBlankStickiesInTarget: targetStickyNotes.filter(s => s.content && s.content.trim()).length,
+            availableStickies: targetStickyNotes.map((sticky, index) => ({
               index: index,
               id: sticky.id,
               content: sticky.content || 'EMPTY/NULL',
               contentLength: sticky.content?.length || 0,
               hasContent: !!(sticky.content && sticky.content.trim()),
-              isBlank: !sticky.content || sticky.content.trim() === ''
-            })).slice(0, 10) // Show first 10 for debugging
+              isBlank: !sticky.content || sticky.content.trim() === '',
+              normalizedContent: sticky.content ? sticky.content.toLowerCase().replace(/\s+/g, ' ').trim() : 'EMPTY'
+            })),
+            // Show potential matches that were close but didn't meet criteria
+            potentialMatches: targetStickyNotes.filter(sticky => {
+              if (!sticky.content || sticky.content.trim() === '') return false;
+              const normalizedContent = sticky.content.toLowerCase().replace(/\s+/g, ' ').trim();
+              const normalizedPoint = pointToUnpack.toLowerCase().replace(/\s+/g, ' ').trim();
+              return normalizedContent.includes(normalizedPoint.substring(0, 20)) || 
+                     normalizedPoint.includes(normalizedContent.substring(0, 20));
+            }).map(sticky => ({
+              id: sticky.id,
+              content: sticky.content?.substring(0, 100) + '...',
+              similarity: 'partial_overlap'
+            }))
           });
           
           continue; // Skip to next point
         }
 
         // === ENHANCED DEBUG: Show which sticky was matched ===
-        console.log('🔍 UNPACK DEBUG - Successfully matched sticky:', {
+        console.log('✅ UNPACK DEBUG - Successfully matched sticky:', {
           pointText: pointToUnpack.substring(0, 50) + '...',
+          fullPointText: pointToUnpack,
           matchedSticky: {
             id: originalSticky.id,
-            content: originalSticky.content?.substring(0, 100) + '...',
+            fullContent: originalSticky.content,
+            contentPreview: originalSticky.content?.substring(0, 100) + '...',
             contentLength: originalSticky.content?.length || 0,
-            isExactMatch: originalSticky.content === pointToUnpack
+            isExactMatch: originalSticky.content === pointToUnpack,
+            matchQuality: originalSticky.content === pointToUnpack ? 'exact' : 'fuzzy'
           }
         });
 
@@ -1836,6 +1919,25 @@ const AntagoInteract: React.FC<AntagoInteractProps> = ({
           designChallenge,
           allCurrentDisplayedPointsForContext // All current points for context
         );
+
+        // === OUTPUT UNPACKED POINTS FOR COPY/PASTE ===
+        console.log('\n📋 === UNPACKED POINTS (COPY/PASTE READY) ===');
+        console.log(`🎯 Original Point: "${pointToUnpack}"`);
+        console.log(`📝 Generated ${explanationPoints.length} detailed explanations:\n`);
+        
+        explanationPoints.forEach((point, index) => {
+          console.log(`${index + 1}. ${point}`);
+          console.log(''); // Empty line for readability
+        });
+        
+        console.log('📋 === END UNPACKED POINTS ===\n');
+        
+        // Also output in a more copy-friendly format
+        console.log('📋 COPY-PASTE FORMAT (one line per point):');
+        explanationPoints.forEach((point, index) => {
+          console.log(`• ${point}`);
+        });
+        console.log('📋 END COPY-PASTE FORMAT\n');
 
         // Calculate position for detail stickies using ABSOLUTE coordinates
         const detailX = absoluteX + 600; // Apply offset to absolute X
